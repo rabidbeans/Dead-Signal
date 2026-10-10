@@ -1,0 +1,31 @@
+rules_version = '2';
+// Rooms are the join-code lobby and the WebRTC handshake. Gameplay itself
+// travels player to player and never touches Firestore. Nothing here is
+// private (a room is a code, a name and two connection offers), so reads are
+// open; writes are shape-checked and size-capped.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /rooms/{code} {
+      allow read: if true;
+      allow create: if code.matches('^[A-Z]{4}$')
+                    && request.resource.data.keys().hasOnly(['host', 'created', 'status', 'level'])
+                    && request.resource.data.created is int;
+      allow update: if request.resource.data.keys().hasOnly(['host', 'created', 'status', 'level']);
+      allow delete: if true;
+      match /peers/{peerId} {
+        allow read: if true;
+        allow create, update: if peerId.size() <= 40
+                              && request.resource.data.keys().hasOnly(['name', 't'])
+                              && request.resource.data.name is string
+                              && request.resource.data.name.size() <= 24;
+        allow delete: if true;
+        match /signals/{sid} {
+          allow read, delete: if true;
+          allow create: if request.resource.data.keys().hasOnly(['from', 'kind', 'data', 't'])
+                        && request.resource.data.data is string
+                        && request.resource.data.data.size() < 20000;
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,111 @@
+"""The cast. Valve's rule from L4D: the dead were people, and you should be
+able to tell who they were — an office worker, a hospital patient, a road
+crew worker. Variety comes from clothing and body, not from monsters."""
+
+ZOMBIE_SKIN = dict(livid='#4d3d52', vein='#26323a', socket='#2a1c22',
+                   eye='#a9a798', iris='#8b897c', pupil='#6d6b62', bloodshot=0.8, rough=0.5, pool=0.65, bruise=0.4,
+                   veins=0.7, sunken=0.9)
+
+VARIANTS = {
+    'z_office': dict(
+        seed=11,
+        macro=dict(gender=1.0, age=0.6, muscle=0.45, weight=0.45),
+        skin=dict(ZOMBIE_SKIN, base='#8c8f7e'),
+        outfit=dict(
+            shirt=dict(color='#a29c88', sleeve=2.05, collar=0.01, hem=0.10, thick=0.006),
+            pants=dict(color='#34363b', length=1.97, thick=0.005),
+            shoes=dict(color='#1b1a19', leather=True),
+            hair=dict(color='#2c241e', bald=0.25, line=0.25),
+        ),
+        wounds=[dict(at='neck_L', r=0.045, depth=0.012), dict(at='forearm_R', r=0.035),
+                dict(at='belly', r=0.04)],
+        gore=0.9, tears=0.3, grime=0.85,
+    ),
+    'z_patient': dict(
+        seed=22,
+        macro=dict(gender=0.0, age=0.7, muscle=0.2, weight=0.15),
+        skin=dict(ZOMBIE_SKIN, base='#979886', sunken=1.0),
+        outfit=dict(
+            gown=dict(color='#7f9196', pattern='stripes', color2='#5d6d74', pitch=0.05, length=0.85),
+            hair=dict(color='#5d554c', bald=0.45, line=0.2, volume=0.012),
+        ),
+        ribs=True,
+        wounds=[dict(at='scalp', r=0.035), dict(at='calf_R', r=0.05, depth=0.01),
+                dict(at='shoulder_L', r=0.04)],
+        gore=0.6, tears=0.15, grime=0.45,
+    ),
+    'z_worker': dict(
+        seed=33,
+        macro=dict(gender=1.0, age=0.55, muscle=0.65, weight=0.78),
+        skin=dict(ZOMBIE_SKIN, base='#868a78'),
+        outfit=dict(
+            shirt=dict(color='#3a3c3d', sleeve=0.55, collar=0.015, hem=0.12),
+            vest=dict(color='#a9a338', pattern='hivis', open=0.05),
+            pants=dict(color='#36445a', pattern='denim', length=1.97),
+            shoes=dict(color='#3d2c1e', leather=True, top=1.75),
+            hair=dict(color='#1d1814', line=0.32, volume=0.003),
+        ),
+        wounds=[dict(at='shoulder_R', r=0.06, depth=0.014), dict(at='thigh_L', r=0.05),
+                dict(at='cheek_L', r=0.025)],
+        gore=0.75, tears=0.25, grime=0.9,
+    ),
+    'z_hoodie': dict(
+        seed=44,
+        macro=dict(gender=0.0, age=0.48, muscle=0.4, weight=0.4),
+        skin=dict(ZOMBIE_SKIN, base='#8e8e80'),
+        outfit=dict(
+            shirt=dict(color='#45262a', sleeve=2.0, collar=-0.02, hem=0.05, thick=0.012),
+            pants=dict(color='#1f2024', pattern='denim', length=1.97),
+            shoes=dict(color='#9c998d'),
+            hair=dict(color='#17120f', line=0.05, volume=0.016),
+        ),
+        wounds=[dict(at='cheek_L', r=0.03), dict(at='flank_R', r=0.055, depth=0.012),
+                dict(at='forearm_L', r=0.03)],
+        gore=0.9, tears=0.35, grime=0.65,
+    ),
+    'z_elder': dict(
+        seed=55,
+        macro=dict(gender=1.0, age=0.98, muscle=0.25, weight=0.22),
+        skin=dict(ZOMBIE_SKIN, base='#958f80', sunken=1.0),
+        outfit=dict(
+            shirt=dict(color='#aba489', sleeve=0.02, collar=0.0, vneck=0.07, hem=0.08, thick=0.003),
+            pants=dict(color='#4d5363', pattern='plaid', color2='#2b2f3a', length=1.92),
+            hair=dict(color='#8d8a83', bald=0.85, line=0.0),
+        ),
+        ribs=True,
+        wounds=[dict(at='chest_L', r=0.045), dict(at='back', r=0.07, depth=0.012),
+                dict(at='neck_R', r=0.035)],
+        gore=0.7, tears=0.4, grime=0.75,
+    ),
+    # ---- the living ---------------------------------------------------------
+    'survivor_a': dict(
+        seed=101,
+        macro=dict(gender=1.0, age=0.52, muscle=0.7, weight=0.5),
+        skin=dict(base='#b48c74', livid='#8a6a5e', vein='#6a5650', socket='#7a5a50',
+                  eye='#d8d4c8', rough=0.5, pool=0.15, bruise=0.08, veins=0.08, sunken=0.25),
+        outfit=dict(
+            shirt=dict(color='#3a3e33', sleeve=2.05, collar=-0.025, hem=0.16, thick=0.012),
+            vest=dict(color='#25282b', open=0.0),
+            pants=dict(color='#4b4b40', pattern='camo', color2='#3a3a2f', length=1.97, thick=0.008),
+            shoes=dict(color='#231d18', leather=True, top=1.72),
+            gloves=dict(color='#1a1a1a'),
+            hair=dict(color='#2a2018', line=0.3, volume=0.006),
+        ),
+        wounds=[], gore=0.0, tears=0.0, grime=0.25,
+    ),
+    'survivor_b': dict(
+        seed=102,
+        macro=dict(gender=0.0, age=0.5, muscle=0.62, weight=0.42),
+        skin=dict(base='#c9a083', livid='#9a7a6e', vein='#7a6660', socket='#8a6a60',
+                  eye='#d8d4c8', rough=0.5, pool=0.12, bruise=0.06, veins=0.06, sunken=0.2),
+        outfit=dict(
+            shirt=dict(color='#2f3640', sleeve=2.05, collar=-0.025, hem=0.15, thick=0.012),
+            vest=dict(color='#2a2b26', open=0.0),
+            pants=dict(color='#2b2d2f', length=1.97, thick=0.008),
+            shoes=dict(color='#1f1a16', leather=True, top=1.72),
+            gloves=dict(color='#1a1a1a'),
+            hair=dict(color='#3a2416', line=0.12, volume=0.014),
+        ),
+        wounds=[], gore=0.0, tears=0.0, grime=0.25,
+    ),
+}
