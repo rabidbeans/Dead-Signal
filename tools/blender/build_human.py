@@ -269,6 +269,93 @@ def wounds_of(F, spec):
     return res
 
 
+def details(F, m, spec):
+    """The small things that make clothes read as clothes: belts and buckles,
+    pockets and flies, buttons and plackets, collars, cuffs and hems, shoe
+    soles and laces, a badge. One set of masks shared by the sculpt (raised
+    or cut) and the paint."""
+    P, o = F.P, spec['outfit']
+    n = len(P)
+    z, front, x = F.z, F.fwd > 0, P[:, 0]
+    out = {k: np.zeros(n) for k in ('belt', 'buckle', 'buttons', 'placket', 'collar', 'cuff', 'hem', 'sole', 'laces', 'pocket', 'fly', 'badge', 'pantcuff', 'zip', 'pouch', 'molle', 'pad', 'flap')}
+    pa, sh = o.get('pants'), o.get('shirt')
+    if pa:
+        top = F.waist + pa.get('rise', 0.0)
+        body = ((F.R['torso'] + F.legw) > 0.4) & (F.armw < 0.5)
+        belt = (m['pants'] > 0.5) & body & (z > top - 0.05) & (z < top - 0.003) & bool(pa.get('belt', True))
+        out['belt'] = belt.astype(float)
+        out['buckle'] = (belt & front & (np.abs(x) < 0.03) & (np.abs(z - (top - 0.026)) < 0.016)).astype(float)
+        pk = np.zeros(n, bool)
+        for sg in (-1, 1):
+            a = np.array([0.085 * sg, top - 0.05]); b = np.array([0.17 * sg, top - 0.21])
+            q = np.stack([x, z], 1) - a
+            ab = b - a
+            t = np.clip((q @ ab) / (ab @ ab), 0, 1)
+            dist = np.linalg.norm(q - t[:, None] * ab, axis=1)
+            pk |= front & (dist < 0.0042) & (m['pants'] > 0.5) & body & (F.legw < 0.9)
+            dx = np.abs(x - 0.075 * sg) / 0.055; dz = np.abs(z - (top - 0.115)) / 0.047
+            e = np.maximum(dx, dz)
+            pk |= (~front) & (e > 0.86) & (e < 1.0) & (m['pants'] > 0.5) & body
+        out['pocket'] = pk.astype(float)
+        out['fly'] = (front & (np.abs(x) < 0.0035) & (z < top - 0.045) & (z > top - 0.15) & (m['pants'] > 0.5)).astype(float)
+        out['pantcuff'] = ((m['pants'] > 0.5) & (F.legw > 0.5) & (F.leg_t > pa.get('length', 1.95) - 0.1) & (F.leg_t < pa.get('length', 1.95))).astype(float)
+    if sh:
+        hem = F.waist - sh.get('hem', 0.07)
+        body = (F.R['torso'] > 0.3) & (F.armw < 0.5)
+        cut = F.neckz - sh.get('collar', 0.02)
+        out['collar'] = ((m['shirt'] > 0.5) & (z > cut - 0.035) & (F.R['head'] < 0.3)).astype(float)
+        out['hem'] = ((m['shirt'] > 0.5) & body & (z > hem) & (z < hem + 0.03)).astype(float)
+        sl = sh.get('sleeve', 0.5)
+        out['cuff'] = ((m['shirt'] > 0.5) & (F.armw > 0.5) & (F.arm_t > sl - 0.1) & (F.arm_t < sl + 0.02)).astype(float)
+        pl = front & (m['shirt'] > 0.5) & body & (z < cut - 0.03) & (z > hem + 0.03)
+        if sh.get('buttons'):
+            out['placket'] = (pl & (np.abs(x) < 0.02)).astype(float)
+            bt = np.zeros(n, bool)
+            zk = cut - 0.08
+            while zk > hem + 0.05:
+                bt |= front & (np.hypot(x, z - zk) < 0.0065) & pl
+                zk -= 0.075
+            out['buttons'] = bt.astype(float)
+        if sh.get('zip'):
+            out['zip'] = (pl & (np.abs(x) < 0.0035)).astype(float)
+    if o.get('gown'):
+        out['collar'] = ((m['shirt'] > 0.5) & (z > F.neckz - 0.06) & (F.R['head'] < 0.3)).astype(float) * 0.0
+    if o.get('shoes'):
+        sm = m['shoes'] > 0.5
+        out['sole'] = (sm & (z < 0.02 + 0.012 * (np.abs(P[:, 1] - F.rig.head('foot_L')[1]) < 0.12))).astype(float)
+        ay = F.rig.head('foot_L')[1]
+        yy = P[:, 1] - ay
+        lace = sm & (F.N[:, 2] > 0.5) & (z > 0.05) & (yy < -0.03) & (yy > -0.11) & (np.abs(np.abs(x) - abs(F.rig.head('foot_L')[0])) < 0.022)
+        out['laces'] = (lace & (np.abs(np.sin(yy * math.pi / 0.021)) < 0.22)).astype(float)
+    vs = o.get('vest')
+    if vs and vs.get('pouches'):
+        v = (m['vest'] > 0.5) & front
+        pch = np.zeros(n, bool)
+        for cx in (-0.105, 0.0, 0.105):
+            pch |= v & (np.abs(x - cx) < 0.036) & (z > F.waist - 0.01) & (z < F.waist + 0.09)
+        out['pouch'] = pch.astype(float)
+        out['molle'] = (v & ~pch & (z > F.waist - 0.02) & (z < F.neckz - 0.09) & (np.sin(z * math.pi / 0.038) > 0.55) & (np.abs(x) > 0.02)).astype(float)
+    if o.get('pads'):
+        pd = np.zeros(n, bool)
+        for s_ in ('L', 'R'):
+            kc = F.rig.head(f'shin_{s_}')
+            pd |= front & (np.linalg.norm((P - kc) * np.array([1.0, 1.0, 1.25]), axis=1) < 0.062) & (P[:, 1] < kc[1] + 0.02) & (m['pants'] > 0.5)
+            ec = F.rig.head(f'forearm_{s_}')
+            pd |= (np.linalg.norm((P - ec) * np.array([1.0, 1.0, 1.2]), axis=1) < 0.05) & (P[:, 1] > ec[1] - 0.01) & (m['shirt'] > 0.5)
+        out['pad'] = pd.astype(float)
+    if o.get('cargo'):
+        fl = np.zeros(n, bool)
+        for s_ in (-1, 1):
+            e = np.maximum(np.abs(x - s_ * 0.2) / 0.05, np.abs(z - 0.68) / 0.075)
+            fl |= (F.legw > 0.5) & (m['pants'] > 0.5) & (s_ * F.N[:, 0] > 0.3) & (e < 1.0)
+        out['flap'] = fl.astype(float)
+    if o.get('badge'):
+        c = F.rig.head('spine01') + np.array([0.09, -0.11, -0.04])
+        r = np.linalg.norm(P - c, axis=1)
+        out['badge'] = (front & (r < 0.024)).astype(float)
+    return out
+
+
 def sculpt(F, m, spec):
     P, N = F.P, F.N
     o = spec['outfit']
@@ -296,6 +383,11 @@ def sculpt(F, m, spec):
     hemline = np.zeros(len(P))
     cl = m['cloth']
     d += cl * (weave + folds + bunch)
+    dt_ = details(F, m, spec)
+    d += (dt_['belt'] * 0.0018 + dt_['buckle'] * 0.0017 + dt_['collar'] * 0.003 + dt_['cuff'] * 0.0022 + dt_['hem'] * 0.002 + dt_['pantcuff'] * 0.002
+          + dt_['placket'] * 0.0012 + dt_['buttons'] * 0.0024 + dt_['badge'] * 0.002 + dt_['sole'] * 0.0045 + dt_['laces'] * 0.0018
+          - dt_['pocket'] * 0.0015 - dt_['fly'] * 0.0013 - dt_['zip'] * 0.001
+          + dt_['pouch'] * 0.008 + dt_['molle'] * 0.0022 + dt_['pad'] * 0.009 + dt_['flap'] * 0.004)
     # seams down the outside of the trouser legs and along shirt sides
     seam_x = np.abs(np.abs(P[:, 0]) - (F.rig.head('thigh_L')[0] + 0.07))
     d -= m['pants'] * (F.legw > 0.5) * smooth(0.004, 0.0, seam_x) * 0.0008
@@ -351,6 +443,13 @@ def paint(F, m, hm, d, cav, spec):
     veinzone = np.clip(F.R['neck'] + F.R['larm'] * 0.8 + F.R['uarm'] * 0.5 + F.R['torso'] * 0.4 + F.R['head'] * 0.3, 0, 1)
     vein = smooth(0.06, 0.0, f2 - f1) * smooth(0.0, 0.35, fbm(P * 5, 2, seed=9)) * veinzone
     col = mix(col, hexc(sk.get('vein', '#2f3a3f')), vein * sk.get('veins', 0.6))
+    ch = sk.get('char', 0.0)
+    if ch > 0:
+        f1c, f2c = worley(P * 24, seed=61)
+        crk = smooth(0.09, 0.0, f2c - f1c)
+        ash = mix(np.tile(hexc('#1b1714'), (n, 1)), np.tile(hexc('#3a322c'), (n, 1)), smooth(-0.3, 0.6, fbm(P * 11, 3, seed=62)))
+        col = mix(col, ash, ch * smooth(-0.35, 0.25, fbm(P * 3.2, 3, seed=63)))
+        col = mix(col, hexc('#d4551a'), crk * ch * smooth(-0.1, 0.5, fbm(P * 5, 2, seed=64)) * 0.85)
     # face: sunken eyes, dark lips
     rig = F.rig
     eyes = rig.eyes
@@ -421,6 +520,19 @@ def paint(F, m, hm, d, cav, spec):
             sc = o['gown']
         k = fabric(sc, m[key], seed=hash(key) % 97)
         clothcol = np.where(m[key][:, None] > 0.5, k, clothcol)
+    dt_ = details(F, m, spec)
+    clothcol = mix(clothcol, hexc('#1f1813'), dt_['belt'] * 0.95)
+    clothcol = mix(clothcol, hexc('#6c6c69'), dt_['buckle'])
+    clothcol = mix(clothcol, hexc('#d9d1be'), dt_['buttons'] * 0.95)
+    clothcol = mix(clothcol, hexc('#c4bea9'), dt_['sole'] * 0.95)
+    clothcol = mix(clothcol, hexc('#bdb8a6'), dt_['laces'] * 0.7)
+    clothcol = mix(clothcol, hexc('#c9a23a'), dt_['badge'] * 0.95)
+    clothcol = mix(clothcol, clothcol * 0.55 + 0.02, dt_['pouch'] * 0.9)
+    clothcol = mix(clothcol, clothcol * 0.7, dt_['molle'] * 0.8)
+    clothcol = mix(clothcol, hexc('#1b1b1a'), dt_['pad'] * 0.95)
+    clothcol = mix(clothcol, clothcol * 0.85 + 0.01, dt_['flap'] * 0.8)
+    clothcol = clothcol * (1 - 0.25 * np.clip(dt_['pocket'] + dt_['fly'] + dt_['zip'], 0, 1))[:, None]
+    clothcol = clothcol * (1 - 0.12 * np.clip(dt_['collar'] + dt_['cuff'] + dt_['hem'] + dt_['pantcuff'], 0, 1))[:, None]
     # grime gets worse toward the ground
     grime = smooth(0.9, 0.1, F.z) * 0.6 + smooth(0.2, 0.8, fbm(P * 5, 3, seed=80)) * 0.35
     grime *= spec.get('grime', 0.7)
@@ -469,6 +581,10 @@ def paint(F, m, hm, d, cav, spec):
     if o.get('shoes', {}).get('leather'):
         rough = np.where(m['shoes'] > 0.5, 0.45, rough)
     rough = np.where(m['hair'] * (1 - cl) > 0.5, 0.6, rough)
+    rough = np.where(dt_['buckle'] > 0.5, 0.3, rough)
+    rough = np.where(dt_['buttons'] > 0.5, 0.35, rough)
+    rough = np.where(dt_['sole'] > 0.5, 0.75, rough)
+    rough = np.where(dt_['badge'] > 0.5, 0.3, rough)
     rough = rough * (1 - fresh * 0.75) + fresh * 0.22
     rough = rough * (1 - soak * 0.25)
     rough = np.where(eye > 0.5, 0.2, rough)
@@ -664,17 +780,17 @@ def drape(base, V, F, spec):
     m = cloth_masks(F, spec, hard=False)
     torso = (F.R['torso'] > 0.55) & (F.armw < 0.2) & (F.R['neck'] < 0.3)
     top = np.nonzero(torso & (m['shirt'] > 0.5) & (F.z > F.waist - 0.12))[0]
-    V = hull_slices(V, top, 2, [0, 1], 0.012, keep=0.15)     # horizontal rings
+    V = hull_slices(V, top, 2, [0, 1], 0.012, keep=0.0)      # horizontal rings
     groin = np.nonzero(((F.R['torso'] + F.legw) > 0.5) & (F.armw < 0.2) & (F.z < F.waist + 0.02) &
                        (F.z > F.rig.head('shin_L')[2] + 0.2) & (np.abs(V[:, 0]) < 0.11) & (m['pants'] + m['shirt'] > 0.5))[0]
     top = np.union1d(top, groin)
     front = top[V[top, 1] < np.median(V[top, 1])]
-    V = hull_slices(V, front, 0, [1, 2], 0.012, keep=0.25)   # sagittal strips, front
+    V = hull_slices(V, front, 0, [1, 2], 0.012, keep=0.1)    # sagittal strips, front
     w = np.zeros(len(V))
     w[top] = 1.0
     hips = (F.legw > 0.3) & (F.leg_t < 0.35) & (m['pants'] + m['shirt'] > 0.5)
     w[hips] = 0.8
-    return relax(base, V, w * 0.7, 4)
+    return relax(base, V, np.clip(w * 0.9, 0, 1), 8)
 
 
 def relax(ob, V, w, iters):
@@ -860,8 +976,8 @@ def build(name, preview=False):
     high.vertex_groups.clear()
     select_only(high)
     sm = high.modifiers.new('sub', 'SUBSURF')
-    sm.levels = 2
-    sm.render_levels = 2
+    sm.levels = int(os.environ.get('SUBDIV', 2))
+    sm.render_levels = int(os.environ.get('SUBDIV', 2))
     bpy.ops.object.modifier_apply(modifier='sub')
     PH = verts_of(high)
     NH = normals_of(high)

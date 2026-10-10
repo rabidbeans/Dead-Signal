@@ -70,3 +70,48 @@ zombie positions match to 0.1 m.
 ## Deploy
 `./deploy.sh` (needs FIREBASE_TOKEN in cloud sessions). *.web.app is blocked
 from the cloud sandbox, so trust Firebase's "release complete".
+
+## Round 2 (2026-10-10, after Sam's first play): brighter, harder, denser
+
+Sam: "make it a bit brighter, I couldn't see"; "extremely detailed ... anywhere you shortcut, spice it up";
+"make level one a bit harder ... I was stuck on wave 1, the zombies were coming too slow".
+
+- **Brightness**: hemisphere 1.7, moon 1.5 (now casts a 1024 shadow map that rides with the player: `World.update`),
+  lamps 85, fires 42, flashlight 560, lantern 16; fog 0.019; post: brightness +0.05, vignette 0.4, saturation -0.06.
+  Mean frame luminance went 8.7 -> ~50 (0-255).
+- **Pace and difficulty** (game.js `WAVES`, zombie.js `TYPES`): waves 12/19/27/36/48 bodies, a body every 0.9 -> 0.4 s;
+  shamblers 1.0-1.5 m/s (110 hp), lurchers 1.2-1.65 + a 3.5 burst, NEW runners 2.4-3.0 (70 hp) from wave 3.
+  ⚠️ Spawns are no longer the far street ends: `pickSpawn()` takes a free, reachable nav cell 15-30 m from the
+  nearest survivor that is OFF SCREEN (projected through the camera), so the dead arrive from the dark at the edge of
+  the picture within seconds. A body that has not moved 0.35 m in 3 s is `relocate`d (the old "stuck on wave 1" risk).
+  A medkit drops after every wave but the last. The main loop now runs the sim in <=1/30 s steps up to 100 ms of
+  real time, so a slow phone no longer plays the dead in slow motion. Bot (circle-strafing autoplay): clears waves 1-3
+  untouched, dies in wave 4 (t=172 s). The camera is closer (13.4 high, 8.5 back).
+- **HUD**: an objective line under the health bar: `KILL THE INFECTED [k/N]`.
+- **New assets** (all generated; rebuild with the bpy venv, see Assets above):
+  - `tools/blender/street_kit.py` -> `props/street.glb`: facade modules (window frame/glass/boarded/AC unit, cornice,
+    awning, shop door, drainpipe, fire escape, water tank, roof vent, chimney), street furniture (bench, bin, mailbox,
+    news box, bollard, meter, traffic light, stop sign, planter, bus shelter, dead street tree, chain-link fence),
+    checkpoint clutter (pallet, crates, military crate, tyres, cinder blocks, plywood barrier, tarp tent, floodlight,
+    shopping cart, suitcase, backpack, cardboard, blue barrel) and nine kinds of debris. Facade modules FACE +Z in game.
+  - `tools/blender/vehicles.py` -> `props/vehicles.glb`: bus, van, ambulance, pickup, SUV.
+  - `tools/texgen2.py`: wood, roller shutter, chain-link, manhole, drain, skid, scorch, oil, long crack, drag trail,
+    graffiti tag, `dirt` (paint grime overlay).
+  - Characters: 10 zombies (NEW cop, nurse, jogger, burned, trucker) at 9.5k tris / 1024 maps; survivors 12k tris /
+    2048 maps and loaded only when picked. `details()` in build_human.py adds belts and buckles, pockets, flies,
+    buttons and plackets, collars, cuffs, hems, soles and laces, a badge, vest pouches and MOLLE webbing, knee/elbow
+    pads, cargo flaps — one set of masks used by both the sculpt and the paint. `build_all_chars.sh` rebuilds all.
+- **Dressing** (`src/game/dress.js`): `populate(world)` places furniture, vehicles, the checkpoint's clutter, trees and
+  fences with colliders BEFORE the nav grid is built; `dressGround(game)` lays manholes, drains, skids, scorches, oil,
+  cracks, debris by the hundred (instanced), 14 lying bodies with pools and drag trails (`Game.makeCorpse`), and
+  a drifting ground fog. `World.dressFacades()` builds windows (instanced), cornices, floor bands, shutters, doors,
+  awnings, downpipes and fire escapes from `faceList`.
+- ⚠️ **`World.groundY(x, z)`**: sidewalks are a 15 cm slab. Characters, props, decals, blood, brass and shells all stand
+  on it; anything new that lands on the ground must use it or it sinks into the walk.
+- ⚠️ **`World.bake()`** merges every static mesh by material into ~80 draw calls (skips instanced, skinned, multi-material,
+  papers, lamp fx). Don't give a mesh a per-object material tweak after build; mark it `userData.noMerge`.
+- **Budget now** (measured, 3 passes incl. both shadow maps): ~350 draw calls, ~770k triangles. Characters use real
+  frustum culling with a widened bounding sphere (animated bodies swing far from the bind pose). Corpses don't cast
+  shadows and hide beyond 24 m. If a phone sits at the lowest resolution and still averages >24 ms the moon shadow is
+  switched off (`engine.onLowTier`).
+- `dirtify(material)` (assets.js) is the world-space grime/mud shader hook for paint and walls.

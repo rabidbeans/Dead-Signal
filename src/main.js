@@ -41,7 +41,7 @@ function show(screen) {
 async function boot() {
   const bar = document.querySelector('.load-bar i');
   let done = 0;
-  const steps = [loadCharacters([...ZOMBIES, ...SURVIVORS]), loadProps(), loadWeapon('pistol')];
+  const steps = [loadCharacters(ZOMBIES), loadProps(), loadWeapon('pistol')];
   steps.forEach((p) => p.then(() => { done++; bar.style.width = (done / steps.length * 100) + '%'; }));
   await Promise.all(steps);
   $('name').value = store.get('name', '');
@@ -76,7 +76,7 @@ function click() { audio.unlock(); audio.play('click', { vol: 0.5, jitter: 0 });
 
 async function attract() {
   if (game) game.dispose();
-  game = new Game(engine, hud, input, null, { attract: true, players: [{ id: 'cam', name: '', model: 'survivor_a', seat: 0 }], localId: 'cam' });
+  game = new Game(engine, hud, input, null, { attract: true, players: [{ id: 'cam', name: '', model: 'z_office', seat: 0 }], localId: 'cam' });
   await game.init();
   game.start();
 }
@@ -88,7 +88,12 @@ function loop(now) {
   const dtMs = Math.min(100, now - last);
   last = now;
   const dt = dtMs / 1000;
-  if (game && !game.paused) game.update(Math.min(dt, FAST ? 1 / 8 : 1 / 20));
+  if (game && !game.paused) {
+    // fixed-ish steps: a slow phone must not run the dead in slow motion
+    const span = Math.min(dt, FAST ? 1 / 8 : 0.1);
+    const n = FAST ? 1 : Math.max(1, Math.ceil(span / (1 / 30)));
+    for (let i = 0; i < n; i++) game.update(span / n);
+  }
   engine.render(dt);
   engine.budget(dtMs, now);
   requestAnimationFrame(loop);
@@ -101,6 +106,7 @@ async function startGame(players, localId) {
   document.querySelector('.load-text').textContent = 'LEVEL 1 — THE CHECKPOINT';
   if (game) game.dispose();
   hud.reset();
+  await loadCharacters([...new Set(players.map((p) => p.model))]);   // survivors load when chosen
   game = new Game(engine, hud, input, net, { players, localId });
   await game.init();
   // replay anything that arrived while we were building the level

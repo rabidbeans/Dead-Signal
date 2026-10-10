@@ -69,7 +69,7 @@ export class Player {
     this.gunTip.position.set(0.15, 0.06, 0);
     this.gun.add(this.gunTip);
     // the flashlight: the one shadow caster for the local player
-    const fl = new THREE.SpotLight(0xfff1dc, local ? 420 : 300, 26, 0.44, 0.5, 1.5);
+    const fl = new THREE.SpotLight(0xfff1dc, local ? 560 : 400, 28, 0.46, 0.5, 1.5);
     fl.map = tex('tex/flashlight.webp');
     fl.castShadow = local;
     if (local) {
@@ -81,7 +81,7 @@ export class Player {
     game.scene.add(fl, fl.target);
     this.light = fl;
     // a faint lantern so anything right next to you is always readable
-    this.lantern = new THREE.PointLight(0x9fb4d0, local ? 7 : 4, 6.5, 1.4);
+    this.lantern = new THREE.PointLight(0xa9bddb, local ? 16 : 9, 9, 1.3);
     game.scene.add(this.lantern);
     // laser sight: a thin red line that only shows while aiming
     const lg = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, -1)]);
@@ -318,7 +318,8 @@ export class Player {
   update(dt) {
     const root = this.char.root;
     // remote players are smoothed toward the latest network position
-    root.position.set(this.x, 0, this.z);
+    this.gy = this.game.world.groundY(this.x, this.z);
+    root.position.set(this.x, this.gy, this.z);
     root.rotation.y = this.face;
     const c = Math.cos(this.face), s = Math.sin(this.face);
     const vx = this.vx, vz = this.vz;
@@ -342,8 +343,8 @@ export class Player {
     const tip = this.gunTip.getWorldPosition(new THREE.Vector3());
     this.light.position.set(tip.x + fx * 0.08, Math.max(1.0, tip.y), tip.z + fz * 0.08);
     this.light.target.position.set(this.x + fx * 9, 0, this.z + fz * 9);
-    this.light.intensity = this.dead ? 0 : (this.local ? 420 : 300) * (this.flick ? 0.2 : 1);
-    this.lantern.position.set(this.x, 2.2, this.z);
+    this.light.intensity = this.dead ? 0 : (this.local ? 560 : 400) * (this.flick ? 0.2 : 1);
+    this.lantern.position.set(this.x, 2.2 + this.gy, this.z);
     // laser
     const showLaser = this.aiming && !this.dead && this.reloadT <= 0;
     this.laser.material.opacity += ((showLaser ? 0.55 : 0) - this.laser.material.opacity) * Math.min(1, dt * 12);

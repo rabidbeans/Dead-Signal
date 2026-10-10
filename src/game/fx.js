@@ -164,7 +164,8 @@ class Streaks {
 
 // ---------------------------------------------------------------- decals --
 class Decals {
-  constructor(scene, map, max, { y = 0.02, normal = false, opacity = 1, size = 1, rough = 0.25 } = {}) {
+  constructor(scene, map, max, { y = 0.02, normal = false, opacity = 1, size = 1, rough = 0.25, gy = null } = {}) {
+    this.gy = gy;
     const g = new THREE.PlaneGeometry(1, 1);
     g.rotateX(-Math.PI / 2);
     const m = new THREE.MeshStandardMaterial({
@@ -182,11 +183,11 @@ class Decals {
     this.y = y;
   }
 
-  add(x, z, size, rot = Math.random() * 6.28, grow = 0, y = null, nx = 0, nz = 0) {
+  add(x, z, size, rot = Math.random() * 6.28, grow = 0, y = null, nx = 0, nz = 0, aspect = 1) {
     const i = this.cursor;
     this.cursor = (this.cursor + 1) % this.max;
     this.mesh.count = Math.min(this.max, Math.max(this.mesh.count, i + 1));
-    const it = { x, z, size, rot, grow, t: 0, y: y ?? this.y + (i % 7) * 0.0006, nx, nz };
+    const it = { x, z, size, rot, grow, t: 0, y: y ?? ((this.gy ? this.gy(x, z) : 0) + this.y + (i % 7) * 0.0006), nx, nz, aspect };
     this.items[i] = it;
     this.write(i, grow ? 0.05 : 1);
   }
@@ -202,7 +203,7 @@ class Decals {
     } else {
       _q.setFromAxisAngle(UP, it.rot);
     }
-    _s.set(it.size * k, 1, it.size * k);
+    _s.set(it.size * k * (it.aspect || 1), 1, it.size * k);
     _m.compose(_v, _q, _s);
     this.mesh.setMatrixAt(i, _m);
     this.mesh.instanceMatrix.needsUpdate = true;
@@ -234,8 +235,9 @@ export class FX {
     this.rain = new Streaks(scene, 520, { additive: false, color: 0xa9b8cc });
     this.sparkList = [];
     this.tracerList = [];
-    this.blood = [0, 1, 2, 3].map((i) => new Decals(scene, tex(`tex/blood${i}.webp`), 40, { y: 0.025, rough: 0.2 }));
-    this.pools = new Decals(scene, tex('tex/pool.webp'), 40, { y: 0.022, rough: 0.12 });
+    const gy = (x, z) => world.groundY(x, z);
+    this.blood = [0, 1, 2, 3].map((i) => new Decals(scene, tex(`tex/blood${i}.webp`), 60, { y: 0.025, rough: 0.28, gy }));
+    this.pools = new Decals(scene, tex('tex/pool.webp'), 60, { y: 0.022, rough: 0.2, gy });
     this.holes = new Decals(scene, tex('tex/hole.webp'), 80, { y: 0.03, rough: 0.9 });
     // ground ripples from rain
     const rg = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
@@ -270,6 +272,10 @@ export class FX {
     this.muzzleLights = [0, 1].map(() => { const l = new THREE.PointLight(0xffb070, 0, 9, 1.6); scene.add(l); return l; });
     this.mlCursor = 0;
     this.time = 0;
+  }
+
+  makeDecals(file, max, o = {}) {
+    return new Decals(this.scene, tex(`tex/${file}.webp`), max, { y: 0.01, gy: null, ...o });
   }
 
   // ---- shots --------------------------------------------------------
@@ -322,7 +328,7 @@ export class FX {
       this.drops.emit({
         x, y, z, vx: Math.cos(a) * sp, vy: 0.5 + Math.random() * 2.5, vz: Math.sin(a) * sp,
         life: 1.2, s0: 0.035 + Math.random() * 0.04, s1: 0.02, r: dark * 1.6, g: dark * 0.12, b: dark * 0.1, a0: 1, a1: 0.9,
-        grav: 14, floor: 0.03,
+        grav: 14, floor: this.world.groundY(x, z) + 0.03,
         onLand: Math.random() < 0.18 ? (p) => this.splat(p.x, p.z, 0.18 + Math.random() * 0.2) : null,
       });
     }
@@ -400,8 +406,9 @@ export class FX {
         s.vy -= 12 * dt;
         s.x += s.vx * dt; s.y += s.vy * dt; s.z += s.vz * dt;
         s.rx += s.spin * dt;
-        if (s.y < 0.01) {
-          s.y = 0.01;
+        const gyv = this.world.groundY(s.x, s.z);
+        if (s.y < gyv + 0.01) {
+          s.y = gyv + 0.01;
           if (s.bounces < 2 && Math.abs(s.vy) > 0.6) {
             s.vy = -s.vy * 0.3; s.vx *= 0.5; s.vz *= 0.5; s.spin *= 0.5;
             s.bounces++;

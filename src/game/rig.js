@@ -110,8 +110,9 @@ function legCycle(rig, side, ph, o) {
 
 // ---------------------------------------------------------------- zombie --
 export class ZombieAnim {
-  constructor(rig, seed) {
+  constructor(rig, seed, kind = 'shambler') {
     this.rig = rig;
+    this.kind = kind;
     const r = mulberry(seed);
     this.r = r;
     this.p = {
@@ -127,6 +128,10 @@ export class ZombieAnim {
       sway: 0.08 + r() * 0.08,
       jaw: 0.1 + r() * 0.2,
     };
+    if (kind === 'runner') {            // head down, arms pumping, a long ragged stride
+      this.p.lean = 0.55 + r() * 0.15; this.p.stride = 0.5; this.p.reach = 'none';
+      this.p.timeScale = 1.25 + r() * 0.2; this.p.limp = null; this.p.sway = 0.04;
+    } else if (kind === 'lurcher') { this.p.lean += 0.1; }
     this.phase = r();
     this.t = r() * 10;
     this.twitchT = 1 + r() * 4;
@@ -210,7 +215,7 @@ export class ZombieAnim {
     rig.rot('head', Z, p.headTilt + loll + S.headZ.x * 0.04);
     rig.rot('jaw', X, -(p.jaw + Math.max(0, Math.sin(this.t * 2.1)) * 0.12 + this.attack * 0.45));
     // arms
-    const armSwing = (side) => Math.sin((side === 'L' ? phR : phL) * TAU) * 0.25 * walk;
+    const armSwing = (side) => Math.sin((side === 'L' ? phR : phL) * TAU) * (this.kind === 'runner' ? 0.9 : 0.25) * walk;
     for (const side of ['L', 'R']) {
       const sg = side === 'L' ? 1 : -1;
       const reaching = p.reach === 'both' || p.reach === side;

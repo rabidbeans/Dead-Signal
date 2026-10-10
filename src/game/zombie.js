@@ -7,8 +7,9 @@ import { audio } from './audio.js';
 
 export const TYPES = {
   // research: shamblers 0.6-1.0 m/s turning 90-150°/s; lurchers burst to ~3 m/s for 0.4-0.8 s every 3-6 s
-  shambler: { hp: 100, speed: [0.65, 1.0], turn: 2.3, dmg: 14 },
-  lurcher: { hp: 90, speed: [0.85, 1.15], turn: 3.2, dmg: 16, burst: 3.1 },
+  shambler: { hp: 110, speed: [1.0, 1.5], turn: 2.6, dmg: 16 },
+  lurcher: { hp: 100, speed: [1.2, 1.65], turn: 3.4, dmg: 18, burst: 3.5 },
+  runner: { hp: 70, speed: [2.4, 3.0], turn: 4.6, dmg: 12 },
 };
 
 const ATTACK_RANGE = 1.15;
@@ -27,7 +28,7 @@ export class Zombie {
     const scale = 0.92 + r() * 0.16;
     this.char.root.scale.setScalar(scale);
     this.rig = new Rig(this.char);
-    this.anim = new ZombieAnim(this.rig, seed);
+    this.anim = new ZombieAnim(this.rig, seed, type);
     // a little colour drift per body so a horde of the same model isn't clones
     const tint = 0.9 + r() * 0.16;
     this.char.material.userData.uniforms.uTint.value.setRGB(tint, tint * (0.97 + r() * 0.05), tint * (0.95 + r() * 0.06));
@@ -73,6 +74,13 @@ export class Zombie {
     }
     this.target = best;
     const dist = Math.sqrt(bd);
+    // rescue: a body that has not got anywhere for 3 s is put back on the road
+    this.stuckT = (this.stuckT || 0) + dt;
+    if (this.stuckT > 3) {
+      const moved = Math.hypot(this.x - (this.sx ?? this.x), this.z - (this.sz ?? this.z));
+      this.sx = this.x; this.sz = this.z; this.stuckT = 0;
+      if (moved < 0.35 && dist > 4 && this.state === 'walk' && !this.wander) this.game.relocate(this);
+    }
     let want = 0, dirx = 0, dirz = 0;
     if (best) {
       const tx = best.x - this.x, tz = best.z - this.z;
@@ -213,11 +221,11 @@ export class Zombie {
       const bounce = this.fall >= 1 ? 0 : Math.sin(Math.max(0, this.fall - 0.8) / 0.2 * Math.PI) * 0.04;
       const d = this.anim.deathDir;
       root.rotation.set(d * (k * 1.45 - bounce), this.face, 0, 'YXZ');
-      root.position.set(this.x, 0.02 + k * 0.08, this.z);
+      root.position.set(this.x, this.game.world.groundY(this.x, this.z) + 0.02 + k * 0.08, this.z);
       if (this.deadT > 30) { this.sunk += dt * 0.05; root.position.y -= this.sunk; }
       return;
     }
-    root.position.set(this.x, 0, this.z);
+    root.position.set(this.x, this.game.world.groundY(this.x, this.z), this.z);
     root.rotation.set(0, this.face, 0);
   }
 

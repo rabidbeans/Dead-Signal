@@ -2,7 +2,9 @@
 //
 // World frame: x east, y up, z south (toward the camera). Metres.
 import * as THREE from 'three';
-import { prop, surface, tex, propMaterial } from './assets.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { prop, surface, tex, propMaterial, instanced, awningMaterial, dirtify } from './assets.js';
+import { populate } from './dress.js';
 
 // ---------------------------------------------------------------- shapes --
 // Colliders are 2D in the ground plane: oriented boxes and circles.
@@ -251,8 +253,10 @@ export class World {
     this.checkpoint();
     this.wrecks();
     this.edges();
+    populate(this);
     this.lights();
     this.nav = new NavField(this.bounds.minX - 6, this.bounds.minZ - 8, this.bounds.maxX + 6, this.bounds.maxZ + 8, 0.5, this.col);
+    this.bake();
   }
 
   // ------------------------------------------------------------ ground --
@@ -347,24 +351,26 @@ normal = normalize( tbn * mapN );`)
 { vec4 o = texture2D( roughnessMap, vRoughnessMapUv ); float w = smoothstep(0.25, 0.7, o.b) * ${amount.toFixed(2)};
   diffuseColor.rgb *= mix(0.8, 0.6, w); }`);
     };
-    m.envMapIntensity = 0.55;
+    m.envMapIntensity = 0.4;
     return m;
   }
 
   // ---------------------------------------------------------- buildings --
   buildings() {
-    const brick = withCutaway(surface('brick'));
+    const brick = withCutaway(dirtify(surface('brick'), 0.9));
     brick.name = 'brick';
-    const brick2 = withCutaway(surface('brick', 1, 0x8a8f96));   // painted brick, grey
+    const brick2 = withCutaway(dirtify(surface('brick', 1, 0x8a8f96), 0.9));   // painted brick, grey
     brick2.name = 'brick2';
-    const concrete = withCutaway(surface('concrete', 1, 0x9a968c));
+    const concrete = withCutaway(dirtify(surface('concrete', 1, 0x9a968c), 0.9));
     concrete.name = 'concrete_b';
     const roof = withCutaway(surface('roof'));
     roof.name = 'roof';
     this.wetMaterial(roof, 0.5);
-    const shutter = withCutaway(surface('metal', 1, 0x5a5a58));
+    this.stoneMat = withCutaway(dirtify(surface('concrete', 1, 0xa9a69c), 0.9));
+    const shutter = withCutaway(surface('shutter', 1, 0xc8c8c8));
     shutter.name = 'shutter';
     shutter.metalness = 0.5;
+    this.shutterMat = shutter;
     this.roofMat = roof;
     // [x0, x1, z0, z1, height, material]
     const B = [
@@ -377,35 +383,45 @@ normal = normalize( tbn * mapN );`)
       // south-east block: a gas station forecourt, then shops
       [21, 36, 9, 34, 7, brick], [9, 21, 24, 34, 6, concrete],
     ];
-    const winGeo = new THREE.PlaneGeometry(1.1, 1.5);
-    const winMat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: true });
-    const wins = [];
+    this.faceList = [];
+    this.wins = [];
     for (const [x0, x1, z0, z1, h, mat] of B) {
       const w = x1 - x0, d = z1 - z0;
+      const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
       const geo = worldBox(w, h, d, 2.2);
       const m = new THREE.Mesh(geo, [mat, mat, roof, mat, mat, mat]);
-      m.position.set((x0 + x1) / 2, h / 2, (z0 + z1) / 2);
+      m.position.set(cx, h / 2, cz);
       m.castShadow = true;
       m.receiveShadow = true;
       this.add(m);
-      this.col.box((x0 + x1) / 2, (z0 + z1) / 2, w / 2, d / 2, 0, h);
-      // parapet
-      const pm = concrete;
-      for (const [px, pz, pw, pd] of [[(x0 + x1) / 2, z0 + 0.15, w, 0.3], [(x0 + x1) / 2, z1 - 0.15, w, 0.3], [x0 + 0.15, (z0 + z1) / 2, 0.3, d], [x1 - 0.15, (z0 + z1) / 2, 0.3, d]]) {
-        const p = new THREE.Mesh(worldBox(pw, 0.7, pd, 1.5), pm);
+      this.col.box(cx, cz, w / 2, d / 2, 0, h);
+      // a concrete plinth round the foot, parapets round the roof
+      const plinth = new THREE.Mesh(worldBox(w + 0.3, 1.0, d + 0.3, 1.5), concrete);
+      plinth.position.set(cx, 0.5, cz);
+      plinth.receiveShadow = true;
+      this.add(plinth);
+      for (const [px, pz, pw, pd] of [[cx, z0 + 0.15, w, 0.3], [cx, z1 - 0.15, w, 0.3], [x0 + 0.15, cz, 0.3, d], [x1 - 0.15, cz, 0.3, d]]) {
+        const p = new THREE.Mesh(worldBox(pw, 0.7, pd, 1.5), concrete);
         p.position.set(px, h + 0.35, pz);
         p.castShadow = true;
         this.add(p);
       }
-      // rooftop clutter
+      // the roof: air-conditioning, vents, a chimney, sometimes a water tower
       const rng = mulberry(Math.floor(x0 * 13 + z0 * 7));
       for (let i = 0; i < Math.floor(w * d / 90) + 1; i++) {
-        const ac = prop('ac_unit');
-        ac.position.set(x0 + 2 + rng() * (w - 4), h, z0 + 2 + rng() * (d - 4));
-        ac.rotation.y = Math.floor(rng() * 4) * Math.PI / 2;
-        this.add(ac);
+        const kind = rng();
+        const o = prop(kind < 0.55 ? 'ac_unit' : kind < 0.8 ? 'roof_vent' : 'chimney');
+        o.position.set(x0 + 2 + rng() * (w - 4), h, z0 + 2 + rng() * (d - 4));
+        o.rotation.y = Math.floor(rng() * 4) * Math.PI / 2;
+        this.add(o);
       }
-      // windows on every face that looks at a street
+      if (h >= 9 && rng() < 0.7) {
+        const t = prop('water_tank');
+        t.position.set(x0 + 3 + rng() * (w - 6), h, z0 + 3 + rng() * (d - 6));
+        t.rotation.y = rng() * 6;
+        this.add(t);
+      }
+      // which faces look at a street or the alley
       const faces = [];
       if (z1 <= -8) faces.push(['s', z1 + 0.02]);
       if (z0 >= 8) faces.push(['n', z0 - 0.02]);
@@ -415,49 +431,9 @@ normal = normalize( tbn * mapN );`)
       if (x0 === 22) faces.push(['w', x0 - 0.02]);
       for (const [f, p] of faces) {
         const len = f === 's' || f === 'n' ? w : d;
-        const n = Math.floor(len / 2.6);
-        for (let fl = 1; fl * 3.2 + 1.5 < h; fl++) {
-          for (let i = 0; i < n; i++) {
-            const t = (i + 0.5) / n;
-            const y = fl * 3.2 + 1.2;
-            let x, z, ry;
-            if (f === 's') { x = x0 + t * w; z = p; ry = 0; }
-            if (f === 'n') { x = x0 + t * w; z = p; ry = Math.PI; }
-            if (f === 'e') { x = p; z = z0 + t * d; ry = Math.PI / 2; }
-            if (f === 'w') { x = p; z = z0 + t * d; ry = -Math.PI / 2; }
-            const r = rng();
-            const lit = r < 0.07 ? 'warm' : r < 0.1 ? 'tv' : 'dark';
-            wins.push({ x, y, z, ry, lit, flick: rng() });
-          }
-        }
-        // ground floor: shuttered storefronts and a few signs
-        const shopN = Math.max(1, Math.floor(len / 7));
-        for (let i = 0; i < shopN; i++) {
-          const t = (i + 0.5) / shopN;
-          const sh = new THREE.Mesh(tiled(new THREE.PlaneGeometry(4.6, 2.8), 2, 1), shutter);
-          sh.position.y = 1.55;
-          if (f === 's') sh.position.set(x0 + t * w, 1.55, p + 0.01);
-          if (f === 'n') { sh.position.set(x0 + t * w, 1.55, p - 0.01); sh.rotation.y = Math.PI; }
-          if (f === 'e') { sh.position.set(p + 0.01, 1.55, z0 + t * d); sh.rotation.y = Math.PI / 2; }
-          if (f === 'w') { sh.position.set(p - 0.01, 1.55, z0 + t * d); sh.rotation.y = -Math.PI / 2; }
-          sh.receiveShadow = true;
-          this.add(sh);
-        }
+        this.faceList.push({ f, p, x0, x1, z0, z1, w, d, h, len, rng, alley: (f === 'e' && x1 === 19) || (f === 'w' && x0 === 22) });
       }
     }
-    // the windows: one instanced draw; colours are animated (flicker / TV)
-    const im = new THREE.InstancedMesh(winGeo, winMat, wins.length);
-    const dummy = new THREE.Object3D();
-    wins.forEach((wn, i) => {
-      dummy.position.set(wn.x, wn.y, wn.z);
-      dummy.rotation.set(0, wn.ry, 0);
-      dummy.updateMatrix();
-      im.setMatrixAt(i, dummy.matrix);
-      im.setColorAt(i, this.windowColor(wn, 0));
-    });
-    im.instanceColor.needsUpdate = true;
-    this.add(im);
-    this.windows = { mesh: im, list: wins };
     // signs that still have power
     const signs = [
       ['PHARMACY', '#3dff8a', -9.05, 4.6, -15, Math.PI / 2, 5.5],
@@ -488,11 +464,150 @@ normal = normalize( tbn * mapN );`)
     return c.setRGB(0.018, 0.022, 0.028);
   }
 
+  // Static batching: every plain mesh that never moves is baked into world
+  // space and merged per material (and shadow flags), so a street of a few
+  // hundred props is a few dozen draw calls instead.
+  bake() {
+    this.group.updateMatrixWorld(true);
+    const skip = new Set();
+    this.papers.forEach((p) => skip.add(p.m));
+    this.lampFx.forEach(({ cone, pool }) => { skip.add(cone); skip.add(pool); });
+    const buckets = new Map();
+    const victims = [];
+    this.group.traverse((o) => {
+      if (!o.isMesh || o.isInstancedMesh || o.isSkinnedMesh || skip.has(o) || Array.isArray(o.material) || o.userData.noMerge) return;
+      const key = `${o.material.uuid}|${o.castShadow ? 1 : 0}${o.receiveShadow ? 1 : 0}`;
+      let g = o.geometry;
+      g = g.index ? g.toNonIndexed() : g.clone();
+      g.applyMatrix4(o.matrixWorld);
+      for (const name of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(name)) g.deleteAttribute(name);
+      if (!g.attributes.uv) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
+      if (!g.attributes.normal) g.computeVertexNormals();
+      if (!buckets.has(key)) buckets.set(key, { mat: o.material, cast: o.castShadow, recv: o.receiveShadow, geos: [] });
+      buckets.get(key).geos.push(g);
+      victims.push(o);
+    });
+    for (const o of victims) o.parent.remove(o);
+    let tris = 0;
+    for (const b of buckets.values()) {
+      const merged = mergeGeometries(b.geos, false);
+      if (!merged) continue;
+      const m = new THREE.Mesh(merged, b.mat);
+      m.castShadow = b.cast;
+      m.receiveShadow = b.recv;
+      m.matrixAutoUpdate = false;
+      this.group.add(m);
+      tris += merged.attributes.position.count / 3;
+    }
+    this.baked = { meshes: victims.length, draws: buckets.size, tris };
+  }
+
+  // height of the walking surface: the sidewalks are a 15 cm slab with a
+  // 40 cm ramp worth of curb, so feet never sink into it
+  groundY(x, z) {
+    let y = 0;
+    for (const [x0, x1, z0, z1] of this.blocks) {
+      const d = Math.min(x - x0, x1 - x, z - z0, z1 - z);
+      if (d > 0) {
+        const k = Math.min(1, d / 0.4);
+        y = Math.max(y, 0.15 * k * k * (3 - 2 * k));
+      }
+    }
+    return y;
+  }
+
+  // windows, cornices, string courses, shutters, doors, awnings, drainpipes
+  // and fire escapes: real modules, instanced
+  dressFacades() {
+    const rotOf = { s: 0, n: Math.PI, e: Math.PI / 2, w: -Math.PI / 2 };
+    const Q = new THREE.Quaternion();
+    const Y = new THREE.Vector3(0, 1, 0);
+    const mk = (x, y, z, ry, sx = 1, sy = 1, sz = 1) => new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), Q.clone().setFromAxisAngle(Y, ry), new THREE.Vector3(sx, sy, sz));
+    const cut = new Map();
+    const cutMat = (m) => {
+      if (!cut.has(m.uuid)) { const c = m.clone(); c.name = m.name; cut.set(m.uuid, withCutaway(c)); }
+      return cut.get(m.uuid);
+    };
+    const frames = [], boards = [], units = [], glass = [], corn = [], pipes = [], doors = [];
+    const awnCols = ['#8c2a24', '#27496b', '#2f5a3a', '#7b5a24', '#5a2a5a'];
+    for (const F of this.faceList) {
+      const { f, p, x0, z0, w, d, h, len, rng } = F;
+      const ry = rotOf[f];
+      const at = (t, off = 0) => (f === 's' || f === 'n' ? [x0 + t * w + (f === 's' ? off : -off), p] : [p, z0 + t * d + (f === 'e' ? -off : off)]);
+      const n = Math.floor(len / 2.6);
+      for (let fl = 1; fl * 3.2 + 1.5 < h; fl++) {
+        for (let i = 0; i < n; i++) {
+          const [x, z] = at((i + 0.5) / n);
+          const y = fl * 3.2 + 1.2;
+          const r = rng(), r2 = rng();
+          if (r2 < 0.12) { boards.push(mk(x, y, z, ry)); continue; }
+          const ac = r2 < 0.19;
+          (ac ? units : frames).push(mk(x, y, z, ry));
+          glass.push(mk(x, y, z, ry));
+          this.wins.push({ x, y, z, ry, lit: r < 0.07 ? 'warm' : r < 0.1 ? 'tv' : 'dark', flick: rng() });
+        }
+      }
+      // the roof line is a dentilled cornice; each floor is marked by a stone band
+      for (let k = 0; k < len; k++) {
+        const [x, z] = at((k + 0.5) / len);
+        corn.push(mk(x, h - 0.28, z, ry));
+      }
+      for (let fl = 1; fl * 3.2 < h - 0.6; fl++) {
+        const [bx, bz] = at(0.5);
+        const band = new THREE.Mesh(f === 's' || f === 'n' ? new THREE.BoxGeometry(len, 0.2, 0.22) : new THREE.BoxGeometry(0.22, 0.2, len), this.stoneMat);
+        band.position.set(bx + Math.sin(ry) * 0.09, fl * 3.2 - 0.1, bz + Math.cos(ry) * 0.09);
+        band.castShadow = false; band.receiveShadow = true;
+        this.add(band);
+      }
+      // ground floor: a shuttered shop, a door, maybe an awning, a downpipe or two
+      const shopN = Math.max(1, Math.floor(len / 7));
+      for (let i = 0; i < shopN; i++) {
+        const t = (i + 0.5) / shopN;
+        const [x, z] = at(t);
+        const sh = new THREE.Mesh(tiled(new THREE.PlaneGeometry(4.6, 2.8), 2, 1), this.shutterMat);
+        sh.position.set(x + Math.sin(ry) * 0.03, 1.65, z + Math.cos(ry) * 0.03);
+        sh.rotation.y = ry;
+        sh.receiveShadow = true;
+        this.add(sh);
+        const [dx, dz] = at(t, 3.3);
+        if (t + 3.3 / len < 0.97) doors.push(mk(dx, 0.15, dz, ry));
+        if (!F.alley && rng() < 0.7) {
+          const a = prop('awning');
+          a.position.set(x, 0.15, z);
+          a.rotation.y = ry;
+          const am = awningMaterial(awnCols[(rng() * awnCols.length) | 0]);
+          a.traverse((c) => { if (c.isMesh) { c.material = am; c.castShadow = true; } });
+          this.add(a);
+        }
+      }
+      for (const t of [0.5 / len + 0.01, 1 - 0.5 / len - 0.01]) {
+        if (rng() < 0.45 && h >= 7) { const [x, z] = at(t); pipes.push(mk(x, 0.15, z, ry, 1, h / 7, 1)); }
+      }
+      if (h > 9 && (F.alley || rng() < 0.3)) {
+        for (const t of F.alley ? [0.3, 0.7] : [0.5]) {
+          const [x, z] = at(t);
+          const g = prop('fire_escape');
+          g.position.set(x, 0.15, z);
+          g.rotation.y = ry;
+          this.add(g);
+        }
+      }
+    }
+    const add = (name, m, shadow = false) => this.add(instanced(name, m, { shadow, map: cutMat }));
+    add('win_frame', frames); add('win_boarded', boards); add('win_ac', units); add('cornice', corn, false); add('door_shop', doors); add('drainpipe', pipes);
+    const gl = instanced('win_glass', glass, { map: cutMat });
+    const im = gl.children[0];
+    this.wins.forEach((wn, i) => im.setColorAt(i, this.windowColor(wn, 0)));
+    im.instanceColor.needsUpdate = true;
+    this.add(gl);
+    this.windows = { mesh: im, list: this.wins };
+  }
+
   // --------------------------------------------------- street furniture --
   streetFurniture() {
     const place = (name, x, z, ry = 0, colR = null, colBox = null, h = 1.2) => {
       const o = prop(name);
-      o.position.set(x, 0, z);
+      o.position.set(x, this.groundY(x, z), z);
       o.rotation.y = ry;
       this.add(o);
       if (colR) this.col.circle(x, z, colR, h);
@@ -611,9 +726,17 @@ normal = normalize( tbn * mapN );`)
   // ----------------------------------------------------------- lighting --
   lights() {
     const s = this.scene;
-    const hemi = new THREE.HemisphereLight(0x4a5c7c, 0x0d0d10, 0.9);
+    const hemi = new THREE.HemisphereLight(0x5f759b, 0x1a1a1f, 1.7);
     s.add(hemi);
-    const moon = new THREE.DirectionalLight(0x8aa2c8, 0.55);
+    const moon = new THREE.DirectionalLight(0x9db6dc, 1.5);
+    this.moonBase = 1.5;
+    moon.castShadow = true;
+    moon.shadow.mapSize.set(1024, 1024);
+    const msc = moon.shadow.camera;
+    msc.left = -17; msc.right = 17; msc.top = 17; msc.bottom = -17; msc.near = 1; msc.far = 90;
+    moon.shadow.bias = -0.0006;
+    moon.shadow.normalBias = 0.05;
+    s.add(moon.target);
     moon.position.set(-20, 40, -10);
     s.add(moon);
     this.moon = moon;
@@ -621,13 +744,13 @@ normal = normalize( tbn * mapN );`)
     // (never add or remove lights at runtime: that recompiles shaders)
     this.lampPool = [];
     for (let i = 0; i < 3; i++) {
-      const l = new THREE.PointLight(0xffa860, 0, 16, 1.6);
+      const l = new THREE.PointLight(0xffa860, 0, 20, 1.5);
       s.add(l);
       this.lampPool.push(l);
     }
     this.firePool = [];
     for (let i = 0; i < 2; i++) {
-      const l = new THREE.PointLight(0xff7a2a, 0, 11, 1.7);
+      const l = new THREE.PointLight(0xff7a2a, 0, 15, 1.5);
       s.add(l);
       this.firePool.push(l);
     }
@@ -638,6 +761,7 @@ normal = normalize( tbn * mapN );`)
     const poolMat = new THREE.MeshBasicMaterial({ map: tex('tex/soft.webp'), color: 0xffa050, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false });
     this.lampFx = [];
     for (const L of this.lampSpots) {
+      if (L.nofx) continue;
       const cone = new THREE.Mesh(new THREE.ConeGeometry(2.6, 5.9, 20, 1, true), coneMat.clone());
       cone.position.set(L.x, L.y - 2.95, L.z);
       this.add(cone);
@@ -651,13 +775,16 @@ normal = normalize( tbn * mapN );`)
 
   // ------------------------------------------------------------- update --
   update(t, dt, focus, wind) {
+    // the moon's shadow map rides with the survivors
+    this.moon.position.set(focus.x - 22, 30, focus.z - 12);
+    this.moon.target.position.set(focus.x, 0, focus.z);
     // street lamps: the nearest three get real light; broken ones stutter
     const near = this.lampSpots.map((L, i) => ({ L, i, d: (L.x - focus.x) ** 2 + (L.z - focus.z) ** 2 })).sort((a, b) => a.d - b.d);
     this.lampPool.forEach((l, k) => {
       const n = near[k];
       if (!n) { l.intensity = 0; return; }
       l.position.set(n.L.x, n.L.y - 0.3, n.L.z);
-      l.intensity = 38 * this.lampLevel(n.L, t);
+      l.intensity = 85 * this.lampLevel(n.L, t);
     });
     this.lampFx.forEach(({ cone, pool, L }) => {
       const k = this.lampLevel(L, t);
@@ -673,7 +800,7 @@ normal = normalize( tbn * mapN );`)
       if (!f) { l.intensity = 0; return; }
       const fl = 0.75 + 0.15 * Math.sin(t * 17 + f.phase) + 0.1 * Math.sin(t * 31.7 + f.phase * 2) + 0.08 * Math.sin(t * 5.3);
       l.position.set(f.x + Math.sin(t * 9) * 0.08, f.y + 0.6, f.z + Math.cos(t * 7) * 0.08);
-      l.intensity = 22 * fl * f.size;
+      l.intensity = 42 * fl * f.size;
     });
     // police lightbar: alternating red / blue, the light moves with it
     const ph = (t * 2.2) % 1;

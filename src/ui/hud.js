@@ -13,6 +13,7 @@ export class HUD {
           <div class="hp-name"></div>
           <div class="hp-bar"><div class="hp-fill"></div><div class="hp-ticks"></div></div>
           <div class="team"></div>
+          <div class="objective"><i></i><span></span></div>
         </div>
         <div class="wave"><span class="wave-label"></span><span class="wave-left"></span></div>
         <button class="pause" aria-label="Pause"><span></span><span></span></button>
@@ -43,7 +44,7 @@ export class HUD {
     `;
     this.el = {
       name: $('.hp-name', root), fill: $('.hp-fill', root), team: $('.team', root),
-      waveLabel: $('.wave-label', root), waveLeft: $('.wave-left', root),
+      waveLabel: $('.wave-label', root), waveLeft: $('.wave-left', root), obj: $('.objective span', root), objBox: $('.objective', root),
       ammoN: $('.ammo-n', root), weapon: $('.weapon', root),
       move: $('.stick.move', root), aim: $('.stick.aim', root),
       ring: $('.reload-ring', root), ringC: $('.reload-ring circle', root),
@@ -103,7 +104,10 @@ export class HUD {
       <div class="mate" data-id="${p.id}"><span>${escapeHtml(p.name)}</span><div class="mate-bar"><i></i></div></div>`).join('');
   }
 
-  wave(phase, wave, waves, left) {
+  wave(phase, wave, waves, left, total = 0) {
+    this.el.objBox.classList.toggle('on', phase === 'wave' || phase === 'break');
+    if (phase === 'wave') this.el.obj.textContent = `KILL THE INFECTED  [${Math.max(0, total - left)}/${total}]`;
+    else if (phase === 'break') this.el.obj.textContent = 'REGROUP · GRAB THE MEDKIT';
     if (phase === 'intro') { this.el.waveLabel.textContent = 'STAND BY'; this.el.waveLeft.textContent = ''; return; }
     this.el.waveLabel.textContent = `WAVE ${wave + 1} / ${waves}`;
     this.el.waveLeft.textContent = phase === 'wave' ? `${left} LEFT` : phase === 'break' ? 'BREATHE' : '';

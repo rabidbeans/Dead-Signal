@@ -9,6 +9,7 @@ import { audio, buzz } from './audio.js';
 import { loadWeapon } from './assets.js';
 import { nightEnvironment, isTouch } from './engine.js';
 import { perlin1 } from './noise.js';
+import { dressGround, tickFog } from './dress.js';
 
 // ------------------------------------------------------------- camera --
 class CameraRig {
@@ -22,8 +23,8 @@ class CameraRig {
     this.t = 0;
     const q = new URLSearchParams(location.search);
     const zoom = parseFloat(q.get('zoom') || '1');
-    this.height = 15.5 * zoom;
-    this.back = 9.8 * zoom;
+    this.height = 13.4 * zoom;
+    this.back = 8.5 * zoom;
   }
   kick(x, z) { this.kickV.x += x * 22; this.kickV.z += z * 22; }
   trauma(a) { this.tr = Math.min(1, this.tr + a); }
@@ -57,12 +58,15 @@ class CameraRig {
 }
 
 // -------------------------------------------------------------- waves --
+// Dead Signal level 1. `n` bodies per wave (per player: +60%), `every` seconds
+// between arrivals. Waves open fast: the first of the dead is on screen
+// within seconds, they come out of the dark at the edge of the picture.
 const WAVES = [
-  { n: 7, lurch: 0.0, every: 1.6 },
-  { n: 11, lurch: 0.1, every: 1.3 },
-  { n: 15, lurch: 0.2, every: 1.1 },
-  { n: 20, lurch: 0.25, every: 0.95 },
-  { n: 28, lurch: 0.3, every: 0.7 },
+  { n: 12, lurch: 0.0, runner: 0.0, every: 0.9 },
+  { n: 19, lurch: 0.12, runner: 0.0, every: 0.75 },
+  { n: 27, lurch: 0.18, runner: 0.12, every: 0.6 },
+  { n: 36, lurch: 0.22, runner: 0.2, every: 0.5 },
+  { n: 48, lurch: 0.25, runner: 0.28, every: 0.4 },
 ];
 
 export class Game {
@@ -102,14 +106,17 @@ export class Game {
 
   async init() {
     const s = this.scene;
-    s.background = new THREE.Color(0x05070a);
-    s.fog = new THREE.FogExp2(0x070a0e, 0.034);
+    s.background = new THREE.Color(0x0a0f16);
+    s.fog = new THREE.FogExp2(0x101822, 0.019);
     s.environment = nightEnvironment(this.engine.renderer);
-    s.environmentIntensity = 0.55;
+    s.environmentIntensity = 1.0;
     this.world = new World(s);
     this.fx = new FX(s, this.world);
+    this.corpses = [];
     this.pistolModel = await loadWeapon('pistol');
     this.cam = new CameraRig(this.camera);
+    dressGround(this);
+    this.engine.onLowTier = () => { this.world.moon.castShadow = false; this.hud.toast?.('Performance mode'); };
     const spawn = [[0, 1.2], [1.4, 1.6], [-1.4, 1.6], [0, 2.6]];
     for (const p of this.opts.players) {
       const pl = new Player(this, p.id, { name: p.name, model: p.model, local: p.id === this.opts.localId, seat: p.seat });
@@ -174,6 +181,7 @@ export class Game {
     audio.setListener(me.x, me.z);
     const scale = this.engine.h * this.engine.renderer.getPixelRatio() / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)));
     this.fx.update(dt, this.camera, me, scale, this.wind);
+    tickFog(this, dt, this.wind);
   }
 
   // ---------------------------------------------------------- phases --
@@ -183,7 +191,7 @@ export class Game {
     if (p === 'intro') this.hud.banner('LEVEL 1', 'The Checkpoint', 3.2, 'Hold the intersection. The evac signal is coming.');
     if (p === 'wave') {
       this.spawned = 0;
-      this.spawnT = 1;
+      this.spawnT = 0.3;
       const w = WAVES[this.wave];
       this.waveTotal = Math.round(w.n * (1 + 0.6 * (this.players.size - 1)));
       this.hud.banner(`WAVE ${this.wave + 1}`, this.wave === WAVES.length - 1 ? 'They heard the signal' : '', 2.2);
@@ -193,18 +201,19 @@ export class Game {
     }
     if (p === 'break') {
       this.hud.banner(`WAVE ${this.wave + 1} CLEARED`, '', 2.4);
-      if (this.wave === 1 || this.wave === 3) this.spawnMedkit();
+      if (this.wave < WAVES.length - 1) this.spawnMedkit();
     }
     if (p === 'win') {
       this.hud.banner('SIGNAL ACQUIRED', 'Evac is inbound', 3);
       this.endAt = this.time + 3.5;
     }
     if (this.isHost && this.role === 'host') this.net.broadcast({ t: 'phase', p, wave: this.wave, total: this.waveTotal || 0 });
-    this.hud.wave(this.phase, this.wave, WAVES.length, this.remaining());
+    this.hud.wave(this.phase, this.wave, WAVES.length, this.remaining(), this.waveTotal || 0);
   }
 
   remaining() {
     if (this.phase !== 'wave') return 0;
+    if (!this.isHost && this.leftNet !== undefined) return this.leftNet;
     let alive = 0;
     for (const z of this.zombies.values()) if (z.alive) alive++;
     return (this.waveTotal - this.spawned) + alive;
@@ -212,22 +221,23 @@ export class Game {
 
   director(dt) {
     this.phaseT += dt;
-    if (this.phase === 'intro' && this.phaseT > 3.5) this.setPhase('wave');
+    if (this.phase === 'intro' && this.phaseT > 3.0) this.setPhase('wave');
     else if (this.phase === 'wave') {
       const w = WAVES[this.wave];
-      const cap = 16 + 4 * (this.players.size - 1);
+      const cap = 24 + 8 * (this.players.size - 1) + this.wave * 4;
       let alive = 0;
       for (const z of this.zombies.values()) if (z.alive) alive++;
       this.spawnT -= dt;
       if (this.spawnT <= 0 && this.spawned < this.waveTotal && alive < cap) {
         this.spawnT = w.every * (0.6 + Math.random() * 0.8);
-        this.spawnZombie(Math.random() < w.lurch ? 'lurcher' : 'shambler');
+        const roll = Math.random();
+        this.spawnZombie(roll < w.runner ? 'runner' : roll < w.runner + w.lurch ? 'lurcher' : 'shambler');
       }
       if (this.spawned >= this.waveTotal && alive === 0) {
         if (this.wave >= WAVES.length - 1) this.setPhase('win');
         else this.setPhase('break');
       }
-    } else if (this.phase === 'break' && this.phaseT > 7) {
+    } else if (this.phase === 'break' && this.phaseT > 6) {
       this.wave++;
       this.setPhase('wave');
     } else if (this.phase === 'win' && this.time > this.endAt && !this.over) {
@@ -239,15 +249,43 @@ export class Game {
     }
   }
 
-  spawnZombie(type) {
+  // Out of sight, but not far: a free, reachable bit of street 15-30 m from the
+  // nearest survivor that is off the edge of the screen. Falls back to the
+  // far street ends.
+  pickSpawn() {
     const pls = [...this.players.values()];
-    // out of sight: far from every player and not on screen
-    const cands = this.world.spawns.map((s) => ({ s, d: Math.min(...pls.map((p) => Math.hypot(p.x - s.x, p.z - s.z))) }))
-      .filter((c) => c.d > 14).sort(() => Math.random() - 0.5);
-    const c = cands[0] || { s: this.world.spawns[(Math.random() * this.world.spawns.length) | 0] };
+    const nav = this.world.nav, b = this.world.bounds, v = new THREE.Vector3();
+    for (let i = 0; i < 90; i++) {
+      const x = b.minX + Math.random() * (b.maxX - b.minX), z = b.minZ + Math.random() * (b.maxZ - b.minZ);
+      const k = nav.idx(x, z);
+      if (k < 0 || nav.block[k] || nav.dist[k] > 1e8) continue;
+      const d = Math.min(...pls.map((p) => Math.hypot(p.x - x, p.z - z)));
+      if (d < 15 || d > 30) continue;
+      let seen = false;
+      for (const p of pls) {
+        if (!p.local) continue;
+        v.set(x, 1, z).project(this.camera);
+        if (Math.abs(v.x) < 1.12 && Math.abs(v.y) < 1.12) seen = true;
+      }
+      if (seen) continue;
+      return { x, z };
+    }
+    const far = this.world.spawns.map((s) => ({ s, d: Math.min(...pls.map((p) => Math.hypot(p.x - s.x, p.z - s.z))) }))
+      .filter((c) => c.d > 12).sort(() => Math.random() - 0.5)[0];
+    return far ? far.s : this.world.spawns[(Math.random() * this.world.spawns.length) | 0];
+  }
+
+  // host: a body stuck behind something is put somewhere else on the road
+  relocate(z) {
+    const s = this.pickSpawn();
+    z.x = s.x; z.z = s.z; z.px = s.x; z.pz = s.z;
+  }
+
+  spawnZombie(type) {
+    const c = this.pickSpawn();
     const id = this.nextZid++;
     const seed = (Math.random() * 1e6) | 0;
-    const x = c.s.x + (Math.random() - 0.5) * 2, z = c.s.z + (Math.random() - 0.5) * 2;
+    const x = c.x + (Math.random() - 0.5) * 1.2, z = c.z + (Math.random() - 0.5) * 1.2;
     this.addZombie(id, { type, seed, x, z });
     this.spawned++;
     this.netEvent({ k: 'zspawn', id, type, seed, x: +x.toFixed(2), z: +z.toFixed(2), model: this.zombies.get(id).model });
@@ -319,7 +357,7 @@ export class Game {
       for (const q of this.zombies.values()) if (q.alive) alive++;
       if (alive === 0 && this.spawned >= this.waveTotal) this.hitstop = 0.14;   // the last one of a wave
     }
-    this.hud.wave(this.phase, this.wave, WAVES.length, this.remaining());
+    this.hud.wave(this.phase, this.wave, WAVES.length, this.remaining(), this.waveTotal || 0);
   }
 
   // host: a zombie's bite connects
@@ -408,6 +446,10 @@ export class Game {
 
   applySnap(m) {
     const now = performance.now();
+    if (m.l !== undefined && m.l !== this.leftNet) {
+      this.leftNet = m.l;
+      this.hud.wave(this.phase, this.wave, WAVES.length, m.l, this.waveTotal || 0);
+    }
     for (const r of m.p) {
       const [id, x, z, f, ax, az, hp, fl] = r;
       if (id === this.me.id) continue;
@@ -459,7 +501,7 @@ export class Game {
           if (!z.alive) continue;
           Z.push([z.id, +z.x.toFixed(2), +z.z.toFixed(2), +z.face.toFixed(2), { walk: 0, windup: 1, stagger: 2, recover: 3 }[z.state] || 0]);
         }
-        this.net.broadcast({ t: 'snap', p: P, z: Z }, false);
+        this.net.broadcast({ t: 'snap', p: P, z: Z, l: this.remaining() }, false);
       }
     }
   }
@@ -494,6 +536,22 @@ export class Game {
     if (this.role === 'host') this.net.broadcast({ t: 'end', win });
     const acc = this.stats.shots ? Math.round(100 * this.stats.hits / this.stats.shots) : 0;
     this.hud.end(win, { ...this.stats, acc, wave: this.wave + 1, waves: WAVES.length }, why);
+  }
+
+  // a body that has been lying here for days: a zombie put straight into its
+  // last pose (never simulated, never in the horde)
+  makeCorpse(model, x, z, face) {
+    const c = new Zombie(this, -1, { type: 'shambler', model, seed: (x * 37 + z * 11) | 0, x, z });
+    c.face = face;
+    c.state = 'dead';
+    c.anim.deathDir = Math.sin(x * 3 + z) > 0 ? 1 : -1;
+    c.anim.dead = 0.001;
+    c.fall = 1;
+    c.anim.update(1.0, 0, 0);
+    c.update(0.016, null);
+    c.groanT = 1e9;
+    c.char.root.traverse((o) => { if (o.isMesh) o.castShadow = false; });
+    return c;
   }
 
   // ---------------------------------------------------------- helpers --
@@ -560,10 +618,12 @@ export class Game {
     audio.setListener(me.x, me.z);
     const scale = this.engine.h * this.engine.renderer.getPixelRatio() / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)));
     this.fx.update(dt, this.camera, me, scale, this.wind);
+    tickFog(this, dt, this.wind);
+    for (const c of this.corpses) c.char.root.visible = Math.hypot(c.x - me.x, c.z - me.z) < 24;
     this.updateCutaway();
     // low health: heartbeat and a draining picture
     const low = me.alive ? Math.max(0, (40 - me.hp) / 40) : 0.8;
-    this.engine.grade.saturation = -0.18 - low * 0.5;
+    this.engine.grade.saturation = -0.06 - low * 0.5;
     this.heartT = (this.heartT || 0) - dtReal;
     if (low > 0 && this.heartT <= 0) { this.heartT = 1.1 - low * 0.4; audio.play('heart', { vol: 0.35 + low * 0.5, jitter: 0 }); }
     this.hud.frame(this, dtReal);
@@ -597,8 +657,8 @@ export class Game {
     if (this.flashT > 0) {
       this.flashT -= dt;
       const k = this.flashT > 0.25 || (this.flashT > 0.1 && this.flashT < 0.16) ? 1 : 0;
-      this.world.moon.intensity = 0.55 + k * 3.5;
-    } else this.world.moon.intensity = 0.55;
+      this.world.moon.intensity = this.world.moonBase + k * 4;
+    } else this.world.moon.intensity = this.world.moonBase;
     this.sirenT -= dt;
     if (this.sirenT < 0) { this.sirenT = 70 + Math.random() * 60; audio.play('siren', { vol: 0.12, bus: 'amb', jitter: 0.05 }); }
   }

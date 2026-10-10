@@ -122,9 +122,9 @@ def asphalt(n=1024):
     One tile = 4 m."""
     agg = fbm(n, 128, 3, seed=1)
     stones = smooth(0.25, 0.6, agg)
-    f1, f2, _ = worley(n, 9, seed=2)
-    cracks = smooth(0.035, 0.0, f2 - f1) * smooth(0.0, 0.3, fbm(n, 6, 3, seed=3))
-    hair = smooth(0.02, 0.0, np.abs(fbm(n, 16, 4, seed=4))) * smooth(0.1, 0.5, fbm(n, 4, 2, seed=5))
+    f1, f2, _ = worley(n, 5, seed=2)
+    cracks = smooth(0.016, 0.0, f2 - f1) * smooth(0.12, 0.42, fbm(n, 6, 3, seed=3))
+    hair = smooth(0.012, 0.0, np.abs(fbm(n, 16, 4, seed=4))) * smooth(0.2, 0.55, fbm(n, 4, 2, seed=5))
     patch = smooth(0.15, 0.2, fbm(n, 3, 3, seed=6))          # repair patches, darker & smoother
     oil = smooth(0.35, 0.65, fbm(n, 5, 4, seed=7))
     wear = fbm(n, 8, 4, seed=8)
@@ -132,13 +132,13 @@ def asphalt(n=1024):
     base = lerp(base, hexc('#58585a'), stones * 0.45)
     base = lerp(base, hexc('#2a2b2d'), patch * 0.55)
     base = lerp(base, hexc('#1e1e1f'), oil * 0.4)
-    base = lerp(base, hexc('#121212'), np.clip(cracks + hair, 0, 1) * 0.85)
+    base = lerp(base, hexc('#151515'), np.clip(cracks + hair, 0, 1) * 0.7)
     base *= (0.9 + 0.2 * fbm(n, 256, 2, seed=9))[..., None]
     h = (stones * 0.6 + agg * 0.3) * (1 - patch * 0.75) - (cracks + hair) * 1.8
     puddle = smooth(0.12, 0.3, fbm(n, 3, 4, seed=10) - patch * 0.2)
     rough = np.clip(0.9 - stones * 0.06 - oil * 0.12 + patch * 0.04, 0.5, 1)
     ao = np.clip(1 - (cracks + hair) * 0.7 - (1 - stones) * 0.08, 0, 1)
-    save_set('asphalt', base, h, rough, ao, wet=puddle, strength=9)
+    save_set('asphalt', base, h, rough, ao, wet=puddle, strength=6)
 
 
 def concrete_slabs(n=1024):
