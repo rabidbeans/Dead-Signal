@@ -162,22 +162,46 @@ def build_pistol():
     # slide stop + takedown lever
     box('slide_stop', (0.016, 0.031, 0.003), (0.010, 0, 0.088), steel_m, bevel=0.0005)
     box('takedown', (0.006, 0.031, 0.004), (0.028, 0, 0.088), steel_m, bevel=0.0005)
-    # one object, origin at the web of the hand (top-rear of the grip)
-    obs = [o for o in bpy.context.scene.objects if o.type == 'MESH']
-    for o in obs:
+    # magazine: a body that rides up inside the grip and a base plate below it
+    mag_m = mat('mag', (0.05, 0.05, 0.054), metal=0.7, rough=0.45)
+    box('mag_body', (0.034, 0.0215, 0.072), (-0.054, 0, 0.018), mag_m, bevel=0.0012)
+    # three objects, origin at the web of the hand: the slide group (slides back
+    # on every shot), the magazine (drops out on a reload), the frame (the rest)
+    def group(names, keep):
+        ob_list = [o for o in bpy.context.scene.objects if o.type == 'MESH' and (o.name.split('.')[0] in names)]
+        for o in ob_list:
+            apply_all(o)
+        bpy.ops.object.select_all(action='DESELECT')
+        for o in ob_list:
+            o.select_set(True)
+        bpy.context.view_layer.objects.active = ob_list[0]
+        bpy.ops.object.join()
+        j = bpy.context.active_object
+        j.name = keep
+        return j
+    g_slide = group({'slide', 'barrel', 'front_sight', 'rear_sight'}, 'gun_slide')
+    g_mag = group({'mag_base', 'mag_body'}, 'gun_mag')
+    rest = [o for o in bpy.context.scene.objects if o.type == 'MESH' and o.name not in ('gun_slide', 'gun_mag')]
+    for o in rest:
         apply_all(o)
     bpy.ops.object.select_all(action='DESELECT')
-    for o in obs:
+    for o in rest:
         o.select_set(True)
-    bpy.context.view_layer.objects.active = sl
+    bpy.context.view_layer.objects.active = rest[0]
     bpy.ops.object.join()
-    gun = bpy.context.active_object
-    gun.name = 'pistol'
-    # grip centre ~(-0.055, 0, 0.03): place origin there
+    g_frame = bpy.context.active_object
+    g_frame.name = 'gun_frame'
     bpy.context.scene.cursor.location = (-0.052, 0, 0.045)
-    bpy.ops.object.origin_set(type='ORIGIN_CURSOR')
-    gun.location = (0, 0, 0)
-    tris = sum(len(p.vertices) - 2 for p in gun.data.polygons)
+    for o in (g_slide, g_mag, g_frame):
+        bpy.ops.object.select_all(action='DESELECT')
+        o.select_set(True)
+        bpy.context.view_layer.objects.active = o
+        bpy.ops.object.origin_set(type='ORIGIN_CURSOR')
+        o.location = (0, 0, 0)
+    gun = g_frame
+    for o in (g_slide, g_mag, g_frame):
+        o.select_set(True)
+    tris = sum(len(p.vertices) - 2 for o in (g_slide, g_mag, g_frame) for p in o.data.polygons)
     print('[pistol] tris', tris)
     os.makedirs(OUT, exist_ok=True)
     bpy.ops.export_scene.gltf(filepath=os.path.join(OUT, 'pistol.glb'), export_format='GLB',

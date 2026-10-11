@@ -5,6 +5,8 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { prop, surface, tex, propMaterial, instanced, awningMaterial, dirtify } from './assets.js';
 import { populate } from './dress.js';
+import { L, blockRanges, buildLots, lampSites } from './level.js';
+import { mulberry } from './rng.js';
 
 // ---------------------------------------------------------------- shapes --
 // Colliders are 2D in the ground plane: oriented boxes and circles.
@@ -12,9 +14,29 @@ export class Colliders {
   constructor() { this.boxes = []; this.circles = []; }
   box(cx, cz, hw, hd, rot = 0, h = 3, tag = 'solid') {
     const c = Math.cos(rot), s = Math.sin(rot);
-    this.boxes.push({ cx, cz, hw, hd, c, s, h, tag });
+    const rec = { cx, cz, hw, hd, c, s, h, tag };
+    this.boxes.push(rec);
+    return rec;
   }
-  circle(x, z, r, h = 1, tag = 'solid') { this.circles.push({ x, z, r, h, tag }); }
+  circle(x, z, r, h = 1, tag = 'solid') { const rec = { x, z, r, h, tag }; this.circles.push(rec); return rec; }
+  remove(rec) {
+    let i = this.boxes.indexOf(rec);
+    if (i >= 0) { this.boxes.splice(i, 1); return; }
+    i = this.circles.indexOf(rec);
+    if (i >= 0) this.circles.splice(i, 1);
+  }
+
+  // does collider `c` (a box or a circle record) overlap the disc (x, z, r)?
+  static overlaps(c, x, z, r) {
+    if (c.hw !== undefined) {
+      const dx = x - c.cx, dz = z - c.cz;
+      const lx = dx * c.c + dz * c.s, lz = -dx * c.s + dz * c.c;
+      const qx = Math.max(-c.hw, Math.min(c.hw, lx)), qz = Math.max(-c.hd, Math.min(c.hd, lz));
+      return (lx - qx) ** 2 + (lz - qz) ** 2 < r * r;
+    }
+    const dx = x - c.x, dz = z - c.z;
+    return dx * dx + dz * dz < (r + c.r) ** 2;
+  }
 
   // push a circle (x, z, r) out of everything; returns corrected {x, z}
   resolve(x, z, r) {
@@ -93,14 +115,49 @@ export class NavField {
     this.w = Math.ceil((maxX - minX) / cell); this.h = Math.ceil((maxZ - minZ) / cell);
     this.block = new Uint8Array(this.w * this.h);
     this.dist = new Float32Array(this.w * this.h).fill(1e9);
-    for (let j = 0; j < this.h; j++) {
-      for (let i = 0; i < this.w; i++) {
-        const x = minX + (i + 0.5) * cell, z = minZ + (j + 0.5) * cell;
-        const p = colliders.resolve(x, z, 0.32);
-        if (Math.abs(p.x - x) + Math.abs(p.z - z) > 1e-4) this.block[j * this.w + i] = 1;
+    this.colliders = colliders;
+    this.markAll();
+    this.queue = new Int32Array(this.w * this.h * 4);
+  }
+
+  // mark the cells a collider covers (a cell is blocked if a 0.32 m body centred in it would overlap)
+  mark(c, val = 1) {
+    const r = 0.32, cell = this.cell;
+    let x0, x1, z0, z1;
+    if (c.hw !== undefined) {
+      const ext = Math.abs(c.c) * c.hw + Math.abs(c.s) * c.hd + r, extz = Math.abs(c.s) * c.hw + Math.abs(c.c) * c.hd + r;
+      x0 = c.cx - ext; x1 = c.cx + ext; z0 = c.cz - extz; z1 = c.cz + extz;
+    } else { x0 = c.x - c.r - r; x1 = c.x + c.r + r; z0 = c.z - c.r - r; z1 = c.z + c.r + r; }
+    const i0 = Math.max(0, Math.floor((x0 - this.minX) / cell)), i1 = Math.min(this.w - 1, Math.floor((x1 - this.minX) / cell));
+    const j0 = Math.max(0, Math.floor((z0 - this.minZ) / cell)), j1 = Math.min(this.h - 1, Math.floor((z1 - this.minZ) / cell));
+    for (let j = j0; j <= j1; j++) {
+      for (let i = i0; i <= i1; i++) {
+        if (val === 0) continue;
+        if (Colliders.overlaps(c, this.minX + (i + 0.5) * cell, this.minZ + (j + 0.5) * cell, r)) this.block[j * this.w + i] = 1;
       }
     }
-    this.queue = new Int32Array(this.w * this.h * 4);
+  }
+
+  markAll() {
+    for (const b of this.colliders.boxes) this.mark(b);
+    for (const c of this.colliders.circles) this.mark(c);
+  }
+
+  // a collider was removed (a gate opened): rebuild the cells it covered
+  rebuildAround(c) {
+    const r = 0.32;
+    let x0, x1, z0, z1;
+    if (c.hw !== undefined) {
+      const ext = Math.abs(c.c) * c.hw + Math.abs(c.s) * c.hd + r + 0.6, extz = Math.abs(c.s) * c.hw + Math.abs(c.c) * c.hd + r + 0.6;
+      x0 = c.cx - ext; x1 = c.cx + ext; z0 = c.cz - extz; z1 = c.cz + extz;
+    } else { x0 = c.x - c.r - 1; x1 = c.x + c.r + 1; z0 = c.z - c.r - 1; z1 = c.z + c.r + 1; }
+    const i0 = Math.max(0, Math.floor((x0 - this.minX) / this.cell)), i1 = Math.min(this.w - 1, Math.floor((x1 - this.minX) / this.cell));
+    const j0 = Math.max(0, Math.floor((z0 - this.minZ) / this.cell)), j1 = Math.min(this.h - 1, Math.floor((z1 - this.minZ) / this.cell));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+      const x = this.minX + (i + 0.5) * this.cell, z = this.minZ + (j + 0.5) * this.cell;
+      const p = this.colliders.resolve(x, z, r);
+      this.block[j * this.w + i] = Math.abs(p.x - x) + Math.abs(p.z - z) > 1e-4 ? 1 : 0;
+    }
   }
 
   idx(x, z) {
@@ -110,7 +167,7 @@ export class NavField {
   }
 
   // Dijkstra-lite (two-pass BFS with diagonals approximated by a deque)
-  build(targets) {
+  build(targets, maxD = 120) {
     const D = this.dist, W = this.w, H = this.h, B = this.block, Q = this.queue;
     D.fill(1e9);
     let head = 0, tail = 0;
@@ -131,6 +188,7 @@ export class NavField {
         if (B[nk]) continue;
         if (di && dj && (B[j * W + ni] || B[nj * W + i])) continue;   // no corner cutting
         const nd = d0 + c;
+        if (nd > maxD) continue;
         if (nd < D[nk] - 1e-3) { D[nk] = nd; if (tail < Q.length) Q[tail++] = nk; }
       }
     }
@@ -212,7 +270,7 @@ float bayer4(vec2 p){ ivec2 q = ivec2(mod(p, 4.0)); int i = q.x + q.y * 4;
   return m;
 }
 
-function signTexture(text, color, bg = '#060606', w = 512, h = 128) {
+export function signTexture(text, color, bg = '#060606', w = 512, h = 128) {
   const c = document.createElement('canvas');
   c.width = w; c.height = h;
   const g = c.getContext('2d');
@@ -228,6 +286,10 @@ function signTexture(text, color, bg = '#060606', w = 512, h = 128) {
 }
 
 // ---------------------------------------------------------------- level --
+const CH = 36;                                   // batching / culling chunk (m of street)
+export const chunkOf = (z) => Math.floor(z / CH);
+const faceTo = (nx, nz) => Math.atan2(nx, nz);
+
 export class World {
   constructor(scene) {
     this.scene = scene;
@@ -235,11 +297,13 @@ export class World {
     this.group = new THREE.Group();
     scene.add(this.group);
     this.flicker = [];          // lights and emissives that misbehave
-    this.lampSpots = [];        // positions of street lamps (for the light pool)
+    this.lampSpots = [];        // positions of lamps (for the light pool)
     this.fires = [];
     this.police = [];
-    this.windows = null;
-    this.bounds = { minX: -34, maxX: 34, minZ: -42, maxZ: 34 };
+    this.gates = [];            // the checkpoint gates (dress.js builds them)
+    this.windows = [];          // per-chunk window colour state
+    this.papers = [];
+    this.bounds = { minX: -L.xWall, maxX: L.xWall, minZ: L.zMin, maxZ: L.zMax };
     this.spawns = [];
     this.build();
   }
@@ -250,12 +314,11 @@ export class World {
     this.ground();
     this.buildings();
     this.streetFurniture();
-    this.checkpoint();
-    this.wrecks();
     this.edges();
     populate(this);
     this.lights();
-    this.nav = new NavField(this.bounds.minX - 6, this.bounds.minZ - 8, this.bounds.maxX + 6, this.bounds.maxZ + 8, 0.5, this.col);
+    const b = this.bounds;
+    this.nav = new NavField(b.minX - 6, b.minZ - 8, b.maxX + 6, b.maxZ + 8, 0.5, this.col);
     this.bake();
   }
 
@@ -263,36 +326,34 @@ export class World {
   ground() {
     const asphalt = withCutaway(surface('asphalt'));
     asphalt.name = 'asphalt';
-    this.wetMaterial(asphalt, 0.9);
-    const size = 200;
-    const g = new THREE.PlaneGeometry(size, size);
-    tiled(g, size / 4, size / 4);
+    this.wetMaterial(asphalt, 0.75);
+    const len = L.zMax - L.zMin + 60;
+    const g = new THREE.PlaneGeometry(90, len);
+    tiled(g, 90 / 4, len / 4);
     const road = new THREE.Mesh(g, asphalt);
     road.rotation.x = -Math.PI / 2;
+    road.position.z = (L.zMax + L.zMin) / 2;
     road.receiveShadow = true;
+    road.userData.noMerge = true;
     this.add(road);
 
-    // sidewalks: raised slabs with concrete curbs, around each block
+    // sidewalks: raised slabs with concrete curbs, along each side of each block
     const walk = surface('sidewalk');
     walk.name = 'sidewalk';
     this.wetMaterial(walk, 0.6);
     const curbMat = surface('concrete');
-    const blocks = this.blocks = [
-      // [minX, maxX, minZ, maxZ] of the land between the streets (incl. sidewalk)
-      [-80, -7, -80, -6], [7, 80, -80, -6], [-80, -7, 6, 80], [7, 80, 6, 80],
-    ];
+    const blocks = this.blocks = [];
+    for (const [zN, zS] of blockRanges()) for (const side of [-1, 1]) blocks.push(side < 0 ? [-80, -7, zN, zS] : [7, 80, zN, zS]);
     for (const [x0, x1, z0, z1] of blocks) {
       const w = x1 - x0, d = z1 - z0;
       const slab = new THREE.Mesh(worldBox(w, 0.15, d, 3), [walk, walk, walk, walk, walk, walk]);
       slab.position.set((x0 + x1) / 2, 0.075, (z0 + z1) / 2);
       slab.receiveShadow = true;
       this.add(slab);
-      // curb edge strip (a lip of cast concrete along the street sides)
       const edges = [];
-      if (x0 > -79) edges.push([x0 + 0.12, (z0 + z1) / 2, 0.24, d]);
-      if (x1 < 79) edges.push([x1 - 0.12, (z0 + z1) / 2, 0.24, d]);
-      if (z0 > -79) edges.push([(x0 + x1) / 2, z0 + 0.12, w, 0.24]);
-      if (z1 < 79) edges.push([(x0 + x1) / 2, z1 - 0.12, w, 0.24]);
+      edges.push(x0 > -79 ? [x0 + 0.12, (z0 + z1) / 2, 0.24, d] : [x1 - 0.12, (z0 + z1) / 2, 0.24, d]);
+      if (z0 > L.zMin + 0.5) edges.push([(x0 + x1) / 2, z0 + 0.12, w, 0.24]);
+      if (z1 < L.zMax - 0.5) edges.push([(x0 + x1) / 2, z1 - 0.12, w, 0.24]);
       for (const [cx, cz, ew, ed] of edges) {
         const c = new THREE.Mesh(worldBox(ew, 0.17, ed, 1.5), curbMat);
         c.position.set(cx, 0.085, cz);
@@ -300,7 +361,7 @@ export class World {
         this.add(c);
       }
     }
-    // road markings: dashed centre lines, stop lines, crosswalks
+    // road markings: dashed centre lines, lane edges, crosswalks
     const paint = new THREE.MeshStandardMaterial({
       color: 0x77746a, roughness: 0.75, transparent: true, opacity: 0.5, envMapIntensity: 0.1,
       alphaMap: tex('tex/concrete_albedo.webp', { srgb: false, repeat: true }),
@@ -308,25 +369,27 @@ export class World {
     });
     const yellow = paint.clone();
     yellow.color.set(0xa88a2a);
-    const marks = [];
     const strip = (x, z, w, d, m) => {
       const p = new THREE.Mesh(new THREE.PlaneGeometry(w, d), m);
       p.rotation.x = -Math.PI / 2;
       p.position.set(x, 0.012, z);
       p.receiveShadow = true;
-      marks.push(p);
+      this.add(p);
     };
-    for (let z = -80; z < 80; z += 6) if (Math.abs(z) > 9) { strip(-0.12, z, 0.12, 3, yellow); strip(0.12, z, 0.12, 3, yellow); }
-    for (let x = -80; x < 80; x += 6) if (Math.abs(x) > 10) strip(x, 0, 3, 0.14, yellow);
-    for (let z = -80; z < 80; z += 4.5) if (Math.abs(z) > 10) { strip(-3.5, z, 0.12, 2, paint); strip(3.5, z, 0.12, 2, paint); }
-    // crosswalks at the four mouths of the intersection
-    for (const [cx, cz, along] of [[0, -8.2, 'x'], [0, 8.2, 'x'], [-8.6, 0, 'z'], [8.6, 0, 'z']]) {
-      for (let k = -5; k <= 5; k++) {
-        if (along === 'x') strip(cx + k * 1.2, cz, 0.55, 2.6, paint);
-        else strip(cx, cz + k * 1.05, 2.6, 0.5, paint);
-      }
+    const nearCross = (z, pad) => L.cross.some((c) => Math.abs(z - c) < pad);
+    for (let z = L.zMax - 3; z > L.zMin; z -= 6) {
+      if (nearCross(z, 8.5)) continue;
+      strip(-0.12, z, 0.12, 3, yellow); strip(0.12, z, 0.12, 3, yellow);
     }
-    marks.forEach((m) => this.add(m));
+    for (let z = L.zMax - 3; z > L.zMin; z -= 4.5) {
+      if (nearCross(z, 9)) continue;
+      strip(-3.5, z, 0.12, 2, paint); strip(3.5, z, 0.12, 2, paint);
+    }
+    for (const zc of L.cross) {
+      for (let k = -4; k <= 4; k++) { strip(k * 1.2, zc - 7.2, 0.55, 2.6, paint); strip(k * 1.2, zc + 7.2, 0.55, 2.6, paint); }
+      for (let k = -4; k <= 4; k++) { strip(-8.6, zc + k * 1.0, 2.6, 0.5, paint); strip(8.6, zc + k * 1.0, 2.6, 0.5, paint); }
+      for (let x = -L.xWall + 2; x < L.xWall; x += 6) if (Math.abs(x) > 12) strip(x, zc, 3, 0.14, yellow);
+    }
     this.asphalt = asphalt;
   }
 
@@ -337,10 +400,17 @@ export class World {
     m.onBeforeCompile = (sh, r) => {
       prev?.(sh, r);
       sh.fragmentShader = sh.fragmentShader
+        .replace('#include <roughnessmap_pars_fragment>', `#include <roughnessmap_pars_fragment>
+// puddles from two scales of the same map, so the pattern never visibly repeats
+float wetMask(vec2 uv) {
+  float a = texture2D(roughnessMap, uv).b;
+  float b = texture2D(roughnessMap, uv * 0.37 + vec2(0.31, 0.17)).b;
+  return min(a, b * 1.3);
+}`)
         .replace('#include <roughnessmap_fragment>', `
 float roughnessFactor = roughness;
 vec4 ormS = texture2D( roughnessMap, vRoughnessMapUv );
-float wetP = smoothstep(0.25, 0.7, ormS.b) * ${amount.toFixed(2)};
+float wetP = smoothstep(0.25, 0.7, wetMask(vRoughnessMapUv)) * ${amount.toFixed(2)};
 roughnessFactor = max(0.3, roughnessFactor * mix(ormS.g * 0.92, 0.3, wetP));
 `)
         .replace('#include <normal_fragment_maps>', `
@@ -348,8 +418,8 @@ vec3 mapN = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;
 mapN.xy *= normalScale * (1.0 - min(1.0, wetP * 1.4));
 normal = normalize( tbn * mapN );`)
         .replace('#include <map_fragment>', `#include <map_fragment>
-{ vec4 o = texture2D( roughnessMap, vRoughnessMapUv ); float w = smoothstep(0.25, 0.7, o.b) * ${amount.toFixed(2)};
-  diffuseColor.rgb *= mix(0.8, 0.6, w); }`);
+{ float w = smoothstep(0.25, 0.7, wetMask(vRoughnessMapUv)) * ${amount.toFixed(2)};
+  diffuseColor.rgb *= mix(0.88, 0.72, w); }`);
     };
     m.envMapIntensity = 0.4;
     return m;
@@ -372,20 +442,13 @@ normal = normalize( tbn * mapN );`)
     shutter.metalness = 0.5;
     this.shutterMat = shutter;
     this.roofMat = roof;
-    // [x0, x1, z0, z1, height, material]
-    const B = [
-      // north-west block
-      [-34, -20, -40, -9, 13, brick], [-20, -9, -24, -9, 10, concrete], [-20, -9, -40, -26.5, 15, brick2],
-      // north-east block (the alley runs between the two at x = 19..22)
-      [9, 19, -40, -9, 12, brick2], [22, 36, -22, -9, 9, brick], [22, 36, -40, -24, 14, concrete],
-      // south-west block (kept low: it sits between the camera and the street)
-      [-34, -21, 9, 34, 7, brick], [-21, -9, 9, 20, 6, brick2], [-21, -9, 22, 34, 8, concrete],
-      // south-east block: a gas station forecourt, then shops
-      [21, 36, 9, 34, 7, brick], [9, 21, 24, 34, 6, concrete],
-    ];
+    const mats = [brick, brick2, concrete];
     this.faceList = [];
     this.wins = [];
-    for (const [x0, x1, z0, z1, h, mat] of B) {
+    const lots = this.lots = buildLots();
+    for (const lot of lots) {
+      const { x0, x1, z0, z1, h } = lot;
+      const mat = mats[lot.mat];
       const w = x1 - x0, d = z1 - z0;
       const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
       const geo = worldBox(w, h, d, 2.2);
@@ -407,7 +470,7 @@ normal = normalize( tbn * mapN );`)
         this.add(p);
       }
       // the roof: air-conditioning, vents, a chimney, sometimes a water tower
-      const rng = mulberry(Math.floor(x0 * 13 + z0 * 7));
+      const rng = mulberry(Math.floor(Math.abs(x0) * 13 + Math.abs(z0) * 7 + 5));
       for (let i = 0; i < Math.floor(w * d / 90) + 1; i++) {
         const kind = rng();
         const o = prop(kind < 0.55 ? 'ac_unit' : kind < 0.8 ? 'roof_vent' : 'chimney');
@@ -421,33 +484,26 @@ normal = normalize( tbn * mapN );`)
         t.rotation.y = rng() * 6;
         this.add(t);
       }
-      // which faces look at a street or the alley
+      // which faces look at a street
       const faces = [];
-      if (z1 <= -8) faces.push(['s', z1 + 0.02]);
-      if (z0 >= 8) faces.push(['n', z0 - 0.02]);
-      if (x1 <= -8) faces.push(['e', x1 + 0.02]);
-      if (x0 >= 8) faces.push(['w', x0 - 0.02]);
-      if (x1 === 19) faces.push(['e', x1 + 0.02]);
-      if (x0 === 22) faces.push(['w', x0 - 0.02]);
+      if (lot.side < 0) faces.push(['e', x1 + 0.02]); else faces.push(['w', x0 - 0.02]);
+      if (lot.southCross) faces.push(['s', z1 + 0.02]);
+      if (lot.northCross) faces.push(['n', z0 - 0.02]);
       for (const [f, p] of faces) {
         const len = f === 's' || f === 'n' ? w : d;
-        this.faceList.push({ f, p, x0, x1, z0, z1, w, d, h, len, rng, alley: (f === 'e' && x1 === 19) || (f === 'w' && x0 === 22) });
+        this.faceList.push({ f, p, x0, x1, z0, z1, w, d, h, len, rng, alley: false });
       }
-    }
-    // signs that still have power
-    const signs = [
-      ['PHARMACY', '#3dff8a', -9.05, 4.6, -15, Math.PI / 2, 5.5],
-      ['LIQUOR', '#ff4040', 8.95, 4.4, -16, -Math.PI / 2, 4.5],
-      ['MOTEL', '#ff8a3a', 21.95, 5.5, -16, -Math.PI / 2, 4.5],
-      ['24 HR', '#6aa8ff', 15, 4.2, 23.95, Math.PI, 3.5],
-    ];
-    for (const [txt, col, x, y, z, ry, w] of signs) {
-      const m = new THREE.MeshBasicMaterial({ map: signTexture(txt, col), toneMapped: false, color: 0xffffff });
-      const s = new THREE.Mesh(new THREE.PlaneGeometry(w, w / 4), m);
-      s.position.set(x, y, z);
-      s.rotation.y = ry;
-      this.add(s);
-      this.flicker.push({ kind: 'sign', mat: m, base: 1.6, phase: Math.random() * 10 });
+      // a neon sign on some of the fronts
+      if (lot.r < 0.32 && h >= 8) {
+        const words = [['PHARMACY', '#3dff8a', 5.5], ['LIQUOR', '#ff4040', 4.5], ['MOTEL', '#ff8a3a', 4.5], ['24 HR', '#6aa8ff', 3.5], ['DINER', '#ff5fb0', 4], ['CLINIC', '#7affd6', 4.5], ['PAWN', '#ffd34a', 3.5], ['HOTEL', '#ff7a4a', 4.5], ['BAR', '#8aa0ff', 3]];
+        const [txt, col, sw] = words[Math.floor(lot.r * 1000) % words.length];
+        const mm = new THREE.MeshBasicMaterial({ map: signTexture(txt, col), toneMapped: false, color: 0xffffff });
+        const sgn = new THREE.Mesh(new THREE.PlaneGeometry(sw, sw / 4), mm);
+        sgn.position.set(lot.side < 0 ? x1 + 0.05 : x0 - 0.05, 4.2 + (lot.r * 40 % 1.2), (z0 + z1) / 2);
+        sgn.rotation.y = lot.side < 0 ? Math.PI / 2 : -Math.PI / 2;
+        this.add(sgn);
+        this.flicker.push({ kind: 'sign', mat: mm, base: 1.6, phase: lot.r * 100 });
+      }
     }
   }
 
@@ -465,18 +521,21 @@ normal = normalize( tbn * mapN );`)
   }
 
   // Static batching: every plain mesh that never moves is baked into world
-  // space and merged per material (and shadow flags), so a street of a few
-  // hundred props is a few dozen draw calls instead.
+  // space and merged per material, shadow flags and street chunk (so culling
+  // still works along a long avenue).
   bake() {
     this.group.updateMatrixWorld(true);
     const skip = new Set();
-    this.papers.forEach((p) => skip.add(p.m));
     this.lampFx.forEach(({ cone, pool }) => { skip.add(cone); skip.add(pool); });
     const buckets = new Map();
     const victims = [];
     this.group.traverse((o) => {
       if (!o.isMesh || o.isInstancedMesh || o.isSkinnedMesh || skip.has(o) || Array.isArray(o.material) || o.userData.noMerge) return;
-      const key = `${o.material.uuid}|${o.castShadow ? 1 : 0}${o.receiveShadow ? 1 : 0}`;
+      let noMerge = false;
+      for (let p = o.parent; p && p !== this.group; p = p.parent) if (p.userData.noMerge) { noMerge = true; break; }
+      if (noMerge) return;
+      const ch = chunkOf(o.matrixWorld.elements[14]);
+      const key = `${o.material.uuid}|${o.castShadow ? 1 : 0}${o.receiveShadow ? 1 : 0}|${ch}`;
       let g = o.geometry;
       g = g.index ? g.toNonIndexed() : g.clone();
       g.applyMatrix4(o.matrixWorld);
@@ -517,7 +576,7 @@ normal = normalize( tbn * mapN );`)
   }
 
   // windows, cornices, string courses, shutters, doors, awnings, drainpipes
-  // and fire escapes: real modules, instanced
+  // and fire escapes: real modules, instanced (per street chunk, so they cull)
   dressFacades() {
     const rotOf = { s: 0, n: Math.PI, e: Math.PI / 2, w: -Math.PI / 2 };
     const Q = new THREE.Quaternion();
@@ -571,7 +630,7 @@ normal = normalize( tbn * mapN );`)
         this.add(sh);
         const [dx, dz] = at(t, 3.3);
         if (t + 3.3 / len < 0.97) doors.push(mk(dx, 0.15, dz, ry));
-        if (!F.alley && rng() < 0.7) {
+        if (rng() < 0.7) {
           const a = prop('awning');
           a.position.set(x, 0.15, z);
           a.rotation.y = ry;
@@ -583,27 +642,40 @@ normal = normalize( tbn * mapN );`)
       for (const t of [0.5 / len + 0.01, 1 - 0.5 / len - 0.01]) {
         if (rng() < 0.45 && h >= 7) { const [x, z] = at(t); pipes.push(mk(x, 0.15, z, ry, 1, h / 7, 1)); }
       }
-      if (h > 9 && (F.alley || rng() < 0.3)) {
-        for (const t of F.alley ? [0.3, 0.7] : [0.5]) {
-          const [x, z] = at(t);
-          const g = prop('fire_escape');
-          g.position.set(x, 0.15, z);
-          g.rotation.y = ry;
-          this.add(g);
-        }
+      if (h > 9 && rng() < 0.3) {
+        const [x, z] = at(0.5);
+        const g = prop('fire_escape');
+        g.position.set(x, 0.15, z);
+        g.rotation.y = ry;
+        this.add(g);
       }
     }
-    const add = (name, m, shadow = false) => this.add(instanced(name, m, { shadow, map: cutMat }));
-    add('win_frame', frames); add('win_boarded', boards); add('win_ac', units); add('cornice', corn, false); add('door_shop', doors); add('drainpipe', pipes);
-    const gl = instanced('win_glass', glass, { map: cutMat });
-    const im = gl.children[0];
-    this.wins.forEach((wn, i) => im.setColorAt(i, this.windowColor(wn, 0)));
-    im.instanceColor.needsUpdate = true;
-    this.add(gl);
-    this.windows = { mesh: im, list: this.wins };
+    // chunked instancing: each street chunk is its own InstancedMesh so it can be culled
+    const split = (mats) => {
+      const m = new Map();
+      mats.forEach((mt, i) => { const c = chunkOf(mt.elements[14]); if (!m.has(c)) m.set(c, []); m.get(c).push(i); });
+      return m;
+    };
+    const add = (name, mats, shadow = false) => {
+      for (const idx of split(mats).values()) this.add(instanced(name, idx.map((i) => mats[i]), { shadow, map: cutMat, cull: true }));
+    };
+    add('win_frame', frames); add('win_boarded', boards); add('win_ac', units); add('cornice', corn); add('door_shop', doors); add('drainpipe', pipes);
+    this.windows = [];
+    for (const idx of split(glass).values()) {
+      const gl = instanced('win_glass', idx.map((i) => glass[i]), { map: cutMat, cull: true });
+      const im = gl.children[0];
+      const list = idx.map((i) => this.wins[i]);
+      list.forEach((wn, k) => im.setColorAt(k, this.windowColor(wn, 0)));
+      im.instanceColor.needsUpdate = true;
+      this.add(gl);
+      const lit = []; list.forEach((wn, k) => { if (wn.lit !== 'dark') lit.push(k); });
+      this.windows.push({ mesh: im, list, lit, z: list[0].z });
+    }
   }
 
   // --------------------------------------------------- street furniture --
+  // Lamps, trees, benches, bins and the rest, on the sidewalks only. The road
+  // stays clear: it is the level.
   streetFurniture() {
     const place = (name, x, z, ry = 0, colR = null, colBox = null, h = 1.2) => {
       const o = prop(name);
@@ -614,113 +686,55 @@ normal = normalize( tbn * mapN );`)
       if (colBox) this.col.box(x, z, colBox[0], colBox[1], -ry, h);
       return o;
     };
-    // street lamps along both streets
-    const lamps = [[-7.6, -16, 0], [7.6, -28, Math.PI], [-7.6, 18, 0], [7.6, 26, Math.PI], [-18, -6.6, -Math.PI / 2], [20, 6.6, Math.PI / 2], [-28, 6.6, Math.PI / 2], [30, -6.6, -Math.PI / 2]];
-    for (const [x, z, ry] of lamps) {
+    this.place = place;
+    const lamps = lampSites();
+    for (const { x, z, ry } of lamps) {
       place('streetlight', x, z, ry, 0.18, null, 6);
-      // the lamp head sits 1.9 m along the arm (local +x in Blender = +x here)
       const hx = x + Math.cos(ry) * 1.9, hz = z - Math.sin(ry) * 1.9;
-      this.lampSpots.push({ x: hx, y: 5.95, z: hz, broken: Math.random() < 0.25, phase: Math.random() * 10 });
+      this.lampSpots.push({ x: hx, y: 5.95, z: hz, broken: mulberry(Math.floor(z * 7) + 3)() < 0.22, phase: (z * 1.7) % 10 });
     }
-    // hydrants, dumpsters, trash
-    place('hydrant', -8.2, -9.5, 0, 0.2, null, 0.8);
-    place('hydrant', 8.4, 12, 0, 0.2, null, 0.8);
-    place('dumpster', 20.5, -18, Math.PI / 2, null, [0.95, 0.8], 1.3);
-    place('dumpster', 20.5, -30, Math.PI / 2 + 0.2, null, [0.95, 0.8], 1.3);
-    const trash = [[19.6, -15.5], [21.3, -16], [20.2, -21], [-9.4, -12], [-9.8, -12.8], [9.6, 16.5], [10.2, 17.2], [-12, 9.8], [21.5, -26]];
-    trash.forEach(([x, z], i) => place(i % 2 ? 'trash_a' : 'trash_b', x, z, i * 1.7, 0.3, null, 0.5));
-    place('rubble', -12.5, -9.3, 0.3);
-    place('rubble', 26, 8.5, 1.3);
-    place('cone', -3, 11, 0, null, null);
-    place('cone', -1.6, 12.2, 0.4, null, null);
-    place('cone', 4.5, -12.5, 0.4, null, null);
-    // paper litter (wind will push some of it around)
-    const pm = new THREE.MeshStandardMaterial({ map: tex('tex/paper.webp'), transparent: true, alphaTest: 0.3, roughness: 0.9, side: THREE.DoubleSide });
-    this.papers = [];
-    for (let i = 0; i < 26; i++) {
-      const p = new THREE.Mesh(new THREE.PlaneGeometry(0.28, 0.36), pm);
-      p.rotation.x = -Math.PI / 2;
-      p.rotation.z = Math.random() * 6.28;
-      p.position.set((Math.random() - 0.5) * 50, 0.02, (Math.random() - 0.5) * 50);
-      p.receiveShadow = true;
-      this.add(p);
-      this.papers.push({ m: p, vx: 0, vz: 0, vy: 0, spin: 0 });
+    const rng = mulberry(909);
+    const nearLamp = (z) => lamps.some((l) => Math.abs(l.z - z) < 2.5);
+    for (const [zN, zS] of blockRanges()) {
+      for (let z = zS - 3; z > zN + 2; z -= 5 + rng() * 5) {
+        if (nearLamp(z) || L.gate.some((g) => Math.abs(g - z) < 6)) continue;
+        for (const side of [-1, 1]) {
+          const r = rng();
+          if (r > 0.55) continue;
+          const x = side * (7.7 + rng() * 0.8);
+          const face = side < 0 ? faceTo(1, 0) : faceTo(-1, 0);
+          if (r < 0.14) place('street_tree', x, z, rng() * 6, 0.28, null, 4).scale.setScalar(0.95 + rng() * 0.3);
+          else if (r < 0.26) place('trash_bin', x, z, rng() * 6, 0.32, null, 1.1);
+          else if (r < 0.34) place('bench', x, z, face, null, [0.9, 0.28], 0.6);
+          else if (r < 0.40) place('hydrant', x, z, 0, 0.2, null, 0.8);
+          else if (r < 0.46) place('mailbox', x, z, face, null, [0.25, 0.25], 1.2);
+          else if (r < 0.50) place('news_box', x, z, face, null, [0.22, 0.2], 0.9);
+          else place('parking_meter', x, z, face, 0.08, null, 1.4);
+        }
+      }
     }
   }
 
-  // ---------------------------------------------------------- checkpoint --
-  checkpoint() {
-    // police roadblock across the north mouth, sandbags at the centre
-    const put = (name, x, z, ry) => { const o = prop(name); o.position.set(x, 0, z); o.rotation.y = ry; this.add(o); return o; };
-    const pol = put('car_police', -2.5, -10.5, 0.35);
-    this.col.box(-2.5, -10.5, 2.45, 0.95, -0.35, 1.5);
-    this.police.push({ obj: pol, x: -2.5, z: -10.5 });
-    for (const [x, z, ry] of [[3.8, -11.5, 0.1], [-6, -14, 1.5], [12, 4.2, 0], [15.2, 4.2, 0], [-12, -4.4, 0.05]]) {
-      put('barrier', x, z, ry);
-      this.col.box(x, z, 0.3, 1.5, -ry, 0.81, 'low');
-    }
-    const sb = put('sandbags', 0, 3.4, 0);
-    // sandbag wall: an arc of radius 3.2 m, chest high -> a row of circles
-    for (let a = -28; a <= 28; a += 7) {
-      const r = a * Math.PI / 180;
-      this.col.circle(Math.sin(r) * 3.2, 3.4 + Math.cos(r) * 3.2 - 3.2, 0.4, 0.62, 'low');
-    }
-    put('sawhorse', -9, 9.2, 0.0);
-    this.col.box(-9, 9.2, 1.0, 0.18, 0, 1, 'low');
-    put('sawhorse', 6.5, -18, 0.3);
-    this.col.box(6.5, -18, 1.0, 0.18, -0.3, 1, 'low');
-    // fire barrels: the warm light at the centre of the cold scene
-    for (const [x, z] of [[-4.2, 1.2], [5.6, -6.5]]) {
-      put('barrel', x, z, 0);
-      this.col.circle(x, z, 0.32, 0.9);
-      this.fires.push({ x, y: 0.95, z, phase: Math.random() * 10, size: 1 });
-    }
-  }
-
-  wrecks() {
-    const cars = [
-      ['car_wreck', 5.2, -25, 2.6], ['car_sedan', -4.4, -33, -0.1], ['car_sedan', 4.0, 21, Math.PI + 0.05],
-      ['car_wreck', -4.5, 25.5, 0.4], ['car_sedan', 17, -2.6, Math.PI / 2 + 0.05], ['car_wreck', -19, 2.5, -Math.PI / 2 + 0.5],
-      ['car_sedan', 27.5, 2.9, Math.PI / 2], ['car_sedan', -27, -2.8, -Math.PI / 2 - 0.08],
-    ];
-    const colors = [0x5b1f1c, 0x29323d, 0x6b6a62, 0x1e2a22, 0x3c3c3e, 0x44331f, 0x2c3540, 0x6e6f6a];
-    cars.forEach(([name, x, z, ry], i) => {
-      const o = prop(name);
-      o.position.set(x, 0, z);
-      o.rotation.y = ry;
-      // each car gets its own paint
-      o.traverse((c) => {
-        if (!c.isMesh) return;
-        const mats = Array.isArray(c.material) ? c.material : [c.material];
-        const next = mats.map((m) => {
-          if (m.name !== 'paint') return m;
-          const p = m.clone();
-          p.color.set(colors[i % colors.length]);
-          if (name === 'car_wreck') { p.roughness = 0.75; p.clearcoat = 0.1; p.color.multiplyScalar(0.55); }
-          return p;
-        });
-        c.material = Array.isArray(c.material) ? next : next[0];
-      });
-      this.add(o);
-      this.col.box(x, z, 2.42, 0.93, -ry, 1.45);
-      if (name === 'car_wreck' && i === 0) this.fires.push({ x: x + Math.cos(ry) * 1.8, y: 1.0, z: z - Math.sin(ry) * 1.8, phase: 2, size: 1.8 });
-    });
-  }
-
-  // street ends are barricaded; the dead climb over them (spawn points)
+  // street ends are sealed; the dead come in from them (fallback spawn points)
   edges() {
-    const b = this.bounds;
-    // invisible walls
+    const b = this.bounds, midZ = (b.minZ + b.maxZ) / 2, len = (b.maxZ - b.minZ) / 2 + 4;
     this.col.box(0, b.minZ - 1, 80, 1, 0, 3);
     this.col.box(0, b.maxZ + 1, 80, 1, 0, 3);
-    this.col.box(b.minX - 1, 0, 1, 80, 0, 3);
-    this.col.box(b.maxX + 1, 0, 1, 80, 0, 3);
-    // spawn points just beyond the edges of each street and the alley
-    this.spawns = [
-      { x: -4, z: b.minZ + 1 }, { x: 3, z: b.minZ + 1 }, { x: 0, z: b.maxZ - 1 }, { x: -3.5, z: b.maxZ - 1 },
-      { x: b.minX + 1, z: -2 }, { x: b.minX + 1, z: 3 }, { x: b.maxX - 1, z: -3 }, { x: b.maxX - 1, z: 2 },
-      { x: 20.5, z: b.minZ + 1 }, { x: 20.5, z: -36 },
-    ];
+    this.col.box(b.minX - 1, midZ, 1, len, 0, 3);
+    this.col.box(b.maxX + 1, midZ, 1, len, 0, 3);
+    this.spawns = [{ x: -3, z: b.maxZ - 2 }, { x: 3, z: b.maxZ - 2 }];
+    for (const zc of L.cross) this.spawns.push({ x: b.minX + 1.5, z: zc - 1.5 }, { x: b.minX + 1.5, z: zc + 1.5 }, { x: b.maxX - 1.5, z: zc - 1.5 }, { x: b.maxX - 1.5, z: zc + 1.5 });
+  }
+
+  // ------------------------------------------------------------ gates --
+  openGate(k, instant = false) {
+    const g = this.gates[k];
+    if (!g || g.open) return;
+    g.open = true;
+    for (const c of g.cols) { this.col.remove(c); this.nav?.rebuildAround(c); }
+    g.t = instant ? 1 : 0;
+    g.instant = instant;
+    this.onGate?.(k, instant);
   }
 
   // ----------------------------------------------------------- lighting --
@@ -760,16 +774,16 @@ normal = normalize( tbn * mapN );`)
     const coneMat = new THREE.MeshBasicMaterial({ map: tex('tex/cone.webp'), color: 0xffb070, transparent: true, opacity: 0.09, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
     const poolMat = new THREE.MeshBasicMaterial({ map: tex('tex/soft.webp'), color: 0xffa050, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false });
     this.lampFx = [];
-    for (const L of this.lampSpots) {
-      if (L.nofx) continue;
+    for (const Lm of this.lampSpots) {
+      if (Lm.nofx) continue;
       const cone = new THREE.Mesh(new THREE.ConeGeometry(2.6, 5.9, 20, 1, true), coneMat.clone());
-      cone.position.set(L.x, L.y - 2.95, L.z);
+      cone.position.set(Lm.x, Lm.y - 2.95, Lm.z);
       this.add(cone);
       const pool = new THREE.Mesh(new THREE.PlaneGeometry(7, 7), poolMat.clone());
       pool.rotation.x = -Math.PI / 2;
-      pool.position.set(L.x, 0.03, L.z);
+      pool.position.set(Lm.x, 0.03, Lm.z);
       this.add(pool);
-      this.lampFx.push({ cone, pool, L });
+      this.lampFx.push({ cone, pool, L: Lm });
     }
   }
 
@@ -779,65 +793,71 @@ normal = normalize( tbn * mapN );`)
     this.moon.position.set(focus.x - 22, 30, focus.z - 12);
     this.moon.target.position.set(focus.x, 0, focus.z);
     // street lamps: the nearest three get real light; broken ones stutter
-    const near = this.lampSpots.map((L, i) => ({ L, i, d: (L.x - focus.x) ** 2 + (L.z - focus.z) ** 2 })).sort((a, b) => a.d - b.d);
+    const near = this.lampSpots.map((Lm, i) => ({ L: Lm, i, d: (Lm.x - focus.x) ** 2 + (Lm.z - focus.z) ** 2 })).sort((a, b) => a.d - b.d);
     this.lampPool.forEach((l, k) => {
       const n = near[k];
       if (!n) { l.intensity = 0; return; }
       l.position.set(n.L.x, n.L.y - 0.3, n.L.z);
-      l.intensity = 85 * this.lampLevel(n.L, t);
+      l.intensity = 85 * (n.L.power ?? 1) * this.lampLevel(n.L, t);
     });
-    this.lampFx.forEach(({ cone, pool, L }) => {
-      const k = this.lampLevel(L, t);
+    for (const { cone, pool, L: Lm } of this.lampFx) {
+      const far = Math.abs(Lm.z - focus.z) > 48;
+      cone.visible = pool.visible = !far;
+      if (far) continue;
+      const k = this.lampLevel(Lm, t);
       cone.material.opacity = 0.075 * k;
       pool.material.opacity = 0.2 * k;
-    });
+    }
     const lampMat = propMaterial('lamp');
     if (lampMat) lampMat.emissiveIntensity = 5;
-    // fires
+    // fires (and flares): the two nearest light the street
     const fn = this.fires.map((f) => ({ f, d: (f.x - focus.x) ** 2 + (f.z - focus.z) ** 2 })).sort((a, b) => a.d - b.d);
     this.firePool.forEach((l, k) => {
       const f = fn[k]?.f;
       if (!f) { l.intensity = 0; return; }
       const fl = 0.75 + 0.15 * Math.sin(t * 17 + f.phase) + 0.1 * Math.sin(t * 31.7 + f.phase * 2) + 0.08 * Math.sin(t * 5.3);
       l.position.set(f.x + Math.sin(t * 9) * 0.08, f.y + 0.6, f.z + Math.cos(t * 7) * 0.08);
+      l.color.set(f.color ?? 0xff7a2a);
       l.intensity = 42 * fl * f.size;
     });
-    // police lightbar: alternating red / blue, the light moves with it
+    // police lightbar: alternating red / blue, the light follows the nearest car
     const ph = (t * 2.2) % 1;
     const red = ph < 0.5;
     const flash = (ph % 0.5) < 0.12 || ((ph % 0.5) > 0.2 && (ph % 0.5) < 0.3) ? 1 : 0.15;
-    const p = this.police[0];
-    if (p) {
+    let p = null, pd = 1e9;
+    for (const q of this.police) { const d = (q.x - focus.x) ** 2 + (q.z - focus.z) ** 2; if (d < pd) { pd = d; p = q; } }
+    if (p && pd < 26 * 26) {
       this.policeLight.position.set(p.x, 2.2, p.z);
       this.policeLight.color.set(red ? 0xff1a14 : 0x1f4dff);
       this.policeLight.intensity = 30 * flash;
-      const r = propMaterial('lightbar_red'), b = propMaterial('lightbar_blue');
-      if (r) r.emissiveIntensity = red ? 8 * flash : 0.2;
-      if (b) b.emissiveIntensity = red ? 0.2 : 8 * flash;
-    }
-    // signs and windows
+    } else this.policeLight.intensity = 0;
+    const r = propMaterial('lightbar_red'), b = propMaterial('lightbar_blue');
+    if (r) r.emissiveIntensity = red ? 8 * flash : 0.2;
+    if (b) b.emissiveIntensity = red ? 0.2 : 8 * flash;
+    // signs
     for (const f of this.flicker) {
       const glitch = Math.sin(t * 23 + f.phase * 7) > 0.96 || (Math.sin(t * 0.7 + f.phase) > 0.9 && Math.sin(t * 40) > 0);
       f.mat.color.setScalar(glitch ? 0.15 : f.base);
     }
-    if (this.windows && Math.floor(t * 10) !== this._wt) {
+    // windows: only the chunks near the survivors are re-coloured
+    if (Math.floor(t * 10) !== this._wt) {
       this._wt = Math.floor(t * 10);
-      const { mesh, list } = this.windows;
-      list.forEach((wn, i) => { if (wn.lit !== 'dark') mesh.setColorAt(i, this.windowColor(wn, t)); });
-      mesh.instanceColor.needsUpdate = true;
+      for (const w of this.windows) {
+        if (Math.abs(w.z - focus.z) > CH * 2.2 || !w.lit.length) continue;
+        for (const k of w.lit) w.mesh.setColorAt(k, this.windowColor(w.list[k], t));
+        w.mesh.instanceColor.needsUpdate = true;
+      }
     }
-    // paper in the wind
-    for (const p of this.papers) {
-      const gust = wind.gust;
-      if (gust > 0.4 && Math.random() < dt * gust * 0.6) { p.vx += wind.x * gust * 2.5; p.vz += wind.z * gust * 2.5; p.vy += 1.2 * gust; p.spin = (Math.random() - 0.5) * 8; }
-      p.m.position.x += p.vx * dt; p.m.position.z += p.vz * dt; p.m.position.y = Math.max(0.02, p.m.position.y + p.vy * dt);
-      p.vy -= 4 * dt;
-      p.vx *= 1 - dt * 1.5; p.vz *= 1 - dt * 1.5;
-      p.m.rotation.z += p.spin * dt;
-      p.spin *= 1 - dt * 2;
-      if (p.m.position.y <= 0.02) { p.vy = 0; p.spin *= 0.5; }
-      if (Math.abs(p.m.position.x) > 34) p.m.position.x *= -0.95;
-      if (Math.abs(p.m.position.z) > 34) p.m.position.z *= -0.95;
+    // gates: the leaves slide into the walls
+    for (const g of this.gates) {
+      if (g.open && g.t < 1) {
+        g.t = Math.min(1, g.t + dt / 2.2);
+        const k = g.t * g.t * (3 - 2 * g.t);
+        g.leaves.forEach((lf, i) => { lf.position.x = lf.userData.x0 + (i ? 1 : -1) * 9.4 * k; });
+        if (g.t >= 1) g.onDone?.();
+      }
+      g.beacon?.material.color.set(g.open ? 0x20ff60 : 0xff2a1a);
+      if (g.beacon) g.beacon.material.opacity = g.open ? 1 : 0.55 + 0.45 * (Math.sin(t * 5 + g.z) > 0 ? 1 : 0.2);
     }
   }
 
@@ -849,12 +869,4 @@ normal = normalize( tbn * mapN );`)
   }
 }
 
-export function mulberry(seed) {
-  let a = (seed * 2654435761) >>> 0;
-  return () => {
-    a |= 0; a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+export { mulberry };

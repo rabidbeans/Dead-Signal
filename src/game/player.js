@@ -15,7 +15,7 @@ export const PISTOL = {
   mag: 12,
   tapInterval: 0.2,      // up to 5 shots/s when you tap
   autoInterval: 0.29,    // the stick's deliberate cadence
-  reload: 1.4,
+  reload: 1.55,
   spreadBase: 1.2 * Math.PI / 180,
   spreadAdd: 1.2 * Math.PI / 180,
   spreadMax: 5 * Math.PI / 180,
@@ -29,6 +29,8 @@ export const PISTOL = {
   magnet: 0.4,
 };
 
+const GUN_TURN = new THREE.Quaternion();     // the gun's own frame already has x forward
+const sm01 = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
 const SPEED = 3.6;        // a jog; zombies shamble at 0.6-1.0, lurchers burst to 3.1
 
 export class Player {
@@ -66,8 +68,21 @@ export class Player {
     this.gun.traverse((o) => { if (o.isMesh) o.castShadow = false; });
     game.scene.add(this.gun);
     this.gunTip = new THREE.Object3D();
-    this.gunTip.position.set(0.15, 0.06, 0);
+    this.gunTip.position.set(0.145, 0.061, 0);
     this.gun.add(this.gunTip);
+    this.slideNode = this.gun.getObjectByName('gun_slide');
+    this.magNode = this.gun.getObjectByName('gun_mag');
+    // a spare magazine: rides the support hand during a reload, and the old one falls
+    this.magProp = new THREE.Group();
+    if (this.magNode) {
+      const m = this.magNode.clone(true);
+      m.position.set(0.002, 0.027, 0);
+      this.magProp.add(m);
+    }
+    this.magProp.visible = false;
+    game.scene.add(this.magProp);
+    this.magFall = null;
+    this.anim.onEvent = (n) => this.reloadEvent(n);
     // the flashlight: the one shadow caster for the local player
     const fl = new THREE.SpotLight(0xfff1dc, local ? 560 : 400, 28, 0.46, 0.5, 1.5);
     fl.map = tex('tex/flashlight.webp');
@@ -149,11 +164,7 @@ export class Player {
     this.cool -= dt;
     this.spread = Math.max(PISTOL.spreadBase, this.spread - PISTOL.spreadRecover * dt);
     if (this.reloadT > 0) {
-      const before = this.reloadT;
       this.reloadT -= dt;
-      const t0 = PISTOL.reload - before, t1 = PISTOL.reload - this.reloadT;
-      if (t0 < 0.7 && t1 >= 0.7) audio.play('mag_in', { x: this.x, z: this.z, vol: 0.8 });
-      if (t0 < 1.2 && t1 >= 1.2) { audio.play('slide', { x: this.x, z: this.z, vol: 0.9 }); g.cam.kick(-this.aimx * 0.05, -this.aimz * 0.05); }
       this.anim.reload = 1 - this.reloadT / PISTOL.reload;
       if (this.reloadT <= 0) { this.ammo = PISTOL.mag; this.reloadT = 0; this.anim.reload = 0; buzz([8]); g.hud.ammo(this); }
     }
@@ -181,7 +192,6 @@ export class Player {
   startReload() {
     if (this.reloadT > 0) return;
     this.reloadT = PISTOL.reload;
-    audio.play('mag_out', { x: this.x, z: this.z, vol: 0.8 });
     this.game.hud.reload(PISTOL.reload);
     this.game.netEvent({ k: 'reload', pid: this.id });
   }
@@ -240,12 +250,13 @@ export class Player {
     // feel: kick, shake, flash, smoke, brass, sound, haptics
     g.cam.kick(-dx * 0.2, -dz * 0.2);
     g.cam.trauma(0.12);
-    this.anim.fire();
+    this.anim.fire(this.ammo === 0);
     g.fx.muzzle(mz.x, mz.y, mz.z, dx, dz);
     g.fx.tracer(mz.x + dx * 0.4, mz.y, mz.z + dz * 0.4, hx, hz);
     const sh = g.fx.shell(mz.x - dx * 0.12, mz.y + 0.05, mz.z - dz * 0.12, dx, dz);
     sh.cb = (s) => audio.play('shell', { x: s.x, z: s.z, vol: 0.25 });
     audio.play('pistol', { vol: 1, jitter: 0.035 });
+    g.noise = { x: this.x, z: this.z, t: g.time };
     audio.duck(0.45, 150);
     buzz([12]);
     g.hud.ammo(this);
@@ -327,17 +338,11 @@ export class Player {
     const local = new THREE.Vector3(vx * c - vz * s, 0, vx * s + vz * c);
     this.anim.down += ((this.down ? 1 : 0) - this.anim.down) * Math.min(1, dt * 6);
     this.anim.update(dt, local, this.aiming || this.down);
-    // the gun lives in the right hand, pointing where the body points
-    const hand = this.char.bones.hand_R;
-    if (hand) {
-      hand.getWorldPosition(this.gun.position);
-      // grip sits in the palm; nudge toward the centre line and forward
-      this.gun.position.x += Math.sin(this.face) * 0.06 - Math.cos(this.face) * 0.03;
-      this.gun.position.z += Math.cos(this.face) * 0.06 + Math.sin(this.face) * 0.03;
-      const rec = this.anim.recoil.x * 0.02;
-      this.gun.rotation.set(0, this.face - Math.PI / 2, rec, 'YXZ');
-    }
+    // the gun is held in BOTH hands: the animation decides where it is
+    this.gun.position.copy(this.anim.gunPos);
+    this.gun.quaternion.copy(this.anim.gunQuat).multiply(GUN_TURN);
     this.gun.visible = !this.dead;
+    this.updateGunParts(dt);
     // a weapon light: it rides the muzzle, so the arms never shadow it
     const fx = Math.sin(this.face), fz = Math.cos(this.face);
     const tip = this.gunTip.getWorldPosition(new THREE.Vector3());
@@ -360,8 +365,77 @@ export class Player {
     this.char.material.userData.uniforms.uFlash.value = Math.max(0, this.char.material.userData.uniforms.uFlash.value - dt * 10);
   }
 
+  // the slide cycles, the magazine drops and is replaced
+  updateGunParts(dt) {
+    const an = this.anim;
+    an.slide = Math.max(0, an.slide - dt * 0.35);
+    let back = an.slide;
+    if (an.slideLock && !(an.reload > 0)) back = Math.max(back, 0.026);
+    const rackU = an.reload > 0 ? Math.min(1, an.reload) : 0;
+    if (an.reload > 0 && rackU > 0.7 && rackU < 0.84) {
+      const k = rackU < 0.8 ? sm01((rackU - 0.71) / 0.07) : 1 - sm01((rackU - 0.80) / 0.03);
+      back = Math.max(back, 0.034 * k);
+    }
+    if (this.slideNode) this.slideNode.position.x = -back;
+    // the magazine in the gun
+    const u = rackU;
+    let off = 0, shown = true;
+    if (u > 0.10 && u < 0.20) off = -0.12 * sm01((u - 0.10) / 0.10);
+    else if (u >= 0.20 && u < 0.50) shown = false;
+    else if (u >= 0.50 && u < 0.58) off = -0.12 * (1 - sm01((u - 0.5) / 0.08));
+    if (this.magNode) { this.magNode.visible = shown; this.magNode.position.y = off; }
+    // the spare in the support hand
+    this.magProp.visible = !this.dead && u >= 0.2 && u < 0.5;
+    if (this.magProp.visible) {
+      this.magProp.position.copy(an.handL);
+      this.magProp.quaternion.copy(an.gunQuat).multiply(GUN_TURN);
+      this.magProp.translateY(-0.02);
+    }
+    // the old one, falling
+    const f = this.magFall;
+    if (f) {
+      f.vy -= 9.8 * dt;
+      f.m.position.x += f.vx * dt; f.m.position.z += f.vz * dt; f.m.position.y += f.vy * dt;
+      f.m.rotation.x += f.sx * dt; f.m.rotation.z += f.sz * dt;
+      const gy = this.game.world.groundY(f.m.position.x, f.m.position.z) + 0.02;
+      if (f.m.position.y < gy) {
+        f.m.position.y = gy;
+        if (!f.hit) { f.hit = true; audio.play('mag_drop', { x: f.m.position.x, z: f.m.position.z, vol: 0.55 }); }
+        f.vy = Math.abs(f.vy) * 0.25; f.vx *= 0.5; f.vz *= 0.5; f.sx *= 0.4; f.sz *= 0.4;
+        if (f.vy < 0.4) f.vy = 0;
+      }
+      f.life -= dt;
+      if (f.life < 0) { this.game.scene.remove(f.m); this.magFall = null; }
+    }
+  }
+
+  reloadEvent(name) {
+    const at = { x: this.x, z: this.z };
+    if (name === 'release') audio.play('mag_release', { ...at, vol: 0.7 });
+    else if (name === 'magout') {
+      audio.play('mag_out', { ...at, vol: 0.6 });
+      if (this.magNode) {
+        if (this.magFall) this.game.scene.remove(this.magFall.m);
+        const m = this.magNode.clone(true);
+        const hp = this.anim.handL;
+        m.position.set(hp.x, hp.y - 0.05, hp.z);
+        m.quaternion.copy(this.anim.gunQuat).multiply(GUN_TURN);
+        this.game.scene.add(m);
+        const a = this.face + 1.2 + Math.random() * 0.5;
+        this.magFall = { m, vx: Math.sin(a) * 0.5, vz: Math.cos(a) * 0.5, vy: -0.5, sx: 4 + Math.random() * 4, sz: 3 + Math.random() * 3, hit: false, life: 3.5 };
+      }
+    } else if (name === 'magin') audio.play('mag_in', { ...at, vol: 0.8 });
+    else if (name === 'rack') {
+      audio.play('slide', { ...at, vol: 0.85 });
+      this.anim.slideLock = false;
+      if (this.local) this.game.cam.kick(-this.aimx * 0.04, -this.aimz * 0.04);
+    }
+  }
+
   dispose() {
     const s = this.game.scene;
+    if (this.magFall) s.remove(this.magFall.m);
+    s.remove(this.magProp);
     s.remove(this.char.root, this.gun, this.light, this.light.target, this.lantern, this.laser);
     this.light.dispose?.();
   }

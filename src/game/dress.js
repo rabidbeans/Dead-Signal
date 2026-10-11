@@ -1,20 +1,19 @@
-// Dressing the level: street furniture, vehicles, the checkpoint's clutter,
-// shop awnings, fire escapes, trees (populate, before the nav grid is built),
-// then the ground itself — manholes, drains, skid marks, scorching, oil,
-// cracks, debris by the hundred, the fallen, blood, a low fog (dressGround).
+// Dressing the level: the four checkpoint gates, the junction arenas, the
+// landing zone, wrecks along the avenue and the traffic furniture (populate,
+// before the nav grid is built); then the ground itself — manholes, drains,
+// scorching, a few cracks, the fallen, blood, a low fog (dressGround).
+//
+// Rule from Sam: keep the ground clear. Things lie where something happened
+// (a wreck, a fire, a body) and nowhere else.
 import * as THREE from 'three';
-import { prop, instanced, awningMaterial, tex } from './assets.js';
-import { mulberry } from './world.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { prop, instanced, tex, surface } from './assets.js';
+import { mulberry } from './rng.js';
+import { L } from './level.js';
+import { signTexture } from './world.js';
 
-const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _e = new THREE.Euler();
-const UP = new THREE.Vector3(0, 1, 0);
-
-function mat4(x, y, z, ry = 0, s = 1, sy = null) {
-  _q.setFromAxisAngle(UP, ry);
-  return new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), _q.clone(), new THREE.Vector3(s, sy ?? s, s));
-}
 
 // ------------------------------------------------------------ populate ----
 // Everything with a collider has to exist before the nav field is built.
@@ -33,33 +32,6 @@ export function populate(world) {
     if (o.circle) col.circle(x, z, o.circle, o.h ?? 1.0, o.tag || 'solid');
     return g;
   };
-  const faceTo = (nx, nz) => Math.atan2(nx, nz);
-
-  // ---- sidewalk furniture (the walk is 2 m wide on the avenue, 3 m on the street)
-  const W = faceTo(1, 0), E = faceTo(-1, 0), N = faceTo(0, 1), S = faceTo(0, -1);
-  [[-7.9, -16, W], [7.9, 20, E], [-14, 7.5, S], [14, -7.5, N]].forEach(([x, z, r]) => put('bench', x, z, r, { box: [0.9, 0.28], h: 0.6, tag: 'low' }));
-  [[7.8, -12, 0], [-7.8, 11, 0], [-7.7, -28, 0], [7.8, 14, 0], [16, -7.4, 0], [-10, 7.3, 0], [-7.8, -33, 0]].forEach(([x, z]) => put('trash_bin', x, z, rng() * 6, { circle: 0.32, h: 1.1 }));
-  put('mailbox', -7.8, -10.5, W, { box: [0.25, 0.25], h: 1.2 });
-  put('mailbox', 7.8, 16.5, E, { box: [0.25, 0.25], h: 1.2 });
-  put('news_box', -7.8, -12.6, W, { box: [0.22, 0.2], h: 0.9 });
-  put('news_box', 9.2, 7.4, N, { box: [0.22, 0.2], h: 0.9 });
-  for (const x of [-24, -20, -16, -12]) put('parking_meter', x, 6.7, S, { circle: 0.08, h: 1.4 });
-  for (const x of [12, 16, 20, 24]) put('parking_meter', x, -6.7, N, { circle: 0.08, h: 1.4 });
-  for (const [x, z] of [[7.6, 6.5], [8.5, 6.5], [-7.6, 6.5], [-8.5, 6.5], [7.6, -6.5], [8.5, -6.5], [-7.6, -6.5], [-8.5, -6.5]]) put('bollard', x, z, 0, { circle: 0.15, h: 1.0 });
-  put('traffic_light', 7.7, 7.1, Math.PI, { circle: 0.14, h: 6 });
-  put('traffic_light', -7.7, -7.1, 0, { circle: 0.14, h: 6 });
-  put('stop_sign', 7.9, -6.9, 0, { circle: 0.06, h: 2.3 });
-  put('stop_sign', -7.9, 6.9, Math.PI, { circle: 0.06, h: 2.3 });
-  [[10.5, 7.5, 0], [-10.5, -7.5, Math.PI], [-12.5, 7.5, 0], [12.5, -7.5, Math.PI]].forEach(([x, z, r]) => put('planter', x, z, r, { box: [0.7, 0.3], h: 0.6, tag: 'low' }));
-  put('bus_shelter', -17.5, 7.7, S, { box: [1.5, 0.7], h: 2.4 });
-  [[-7.7, -20], [7.7, -26], [7.7, 24], [-7.7, 18], [-13, 7.9], [13, -8]].forEach(([x, z]) => put('street_tree', x, z, rng() * 6, { circle: 0.28, h: 4, s: 0.95 + rng() * 0.3 }));
-  // chain-link sections close the alley mouth and fence the checkpoint's flank
-  put('fence_chain', 20.5, -9.4, 0, { box: [1.5, 0.08], h: 2 });
-  put('fence_chain', 17.5, -9.6, 0.1, { box: [1.5, 0.08], h: 2 });
-  put('fence_chain', 14, 8.3, 0, { box: [1.5, 0.08], h: 2 });
-
-  // ---- vehicles: the bus across the north road is the chokepoint
-  const tints = [0x6d1d1a, 0x23303b, 0x7a7b72, 0x1d2a22, 0x3e3d3f, 0x5b4a2d, 0x2b3946, 0x8b8c87];
   const tint = (g, hex, wreck) => g.traverse((c) => {
     if (!c.isMesh) return;
     const mats = Array.isArray(c.material) ? c.material : [c.material];
@@ -80,54 +52,243 @@ export function populate(world) {
     col.box(x, z, hw, hd, -ry, h);
     return g;
   };
-  veh('bus', 0.4, -19.5, 0.1, 5.85, 1.3, 0xc9a23a, true, 3.1);
-  veh('ambulance', -13.5, 2.2, 0.06, 2.95, 1.05, 0xffffff, false, 2.6);
-  veh('van', 11.5, 3.2, -0.5, 2.95, 1.05, 0x2d4560, true, 2.5);
-  veh('pickup', -9, 15.5, 2.8, 2.7, 1.0, 0x4d1f1b, true, 1.8);
-  veh('suv', 3.5, -31, 0.35, 2.5, 1.0, 0x1c2128, false, 1.8);
-  veh('suv', 2.5, 12, 0.18, 2.5, 1.0, 0x5c5f58, true, 1.8);
-  world.fires.push({ x: 0.4, y: 1.8, z: -19.5, phase: 1, size: 2.4 });                 // the bus burns
-  world.fires.push({ x: 11.5 - 1.2, y: 1.2, z: 3.2 + 0.4, phase: 4, size: 1.2 });        // the van smoulders
+  const sandbags = (x, z, ry = 0) => {
+    put('sandbags', x, z, ry);
+    for (let a = -28; a <= 28; a += 7) {
+      const r = a * Math.PI / 180, lx = Math.sin(r) * 3.2, lz = Math.cos(r) * 3.2 - 3.2;
+      col.circle(x + lx * Math.cos(ry) + lz * Math.sin(ry), z - lx * Math.sin(ry) + lz * Math.cos(ry), 0.4, 0.62, 'low');
+    }
+  };
+  const fire = (x, z, o = {}) => world.fires.push({ x, y: o.y ?? 0.95, z, phase: rng() * 10, size: o.size ?? 1, rgb: o.rgb, color: o.color });
+  const floodlight = (x, z, ry) => {
+    put('floodlight', x, z, ry, { circle: 0.4, h: 2.5 });
+    world.lampSpots.push({ x, y: 2.8, z, broken: false, phase: 0, nofx: true, power: 0.8 });
+  };
+  const tints = [0x5b1f1c, 0x29323d, 0x6b6a62, 0x1e2a22, 0x3c3c3e, 0x44331f, 0x2c3540, 0x6e6f6a];
+  const police = (x, z, ry) => {
+    const o = put('car_police', x, z, ry, { y: 0 });
+    col.box(x, z, 2.45, 0.95, -ry, 1.5);
+    world.police.push({ obj: o, x, z });
+  };
+  const wreck = (kind, x, z, ry, i, burn = false) => {
+    const g = put(kind, x, z, ry, { y: 0 });
+    tint(g, tints[i % tints.length], kind === 'car_wreck');
+    col.box(x, z, 2.42, 0.93, -ry, 1.45);
+    if (burn) fire(x + Math.cos(ry) * 1.6, z - Math.sin(ry) * 1.6, { y: 1.0, size: 1.4 });
+  };
 
-  // ---- the checkpoint, dressed
-  const cp = (name, x, z, r, o) => put(name, x, z, r, o);
-  cp('crate_wood', -5.2, -7.6, 0.2, { box: [0.45, 0.45], h: 0.85 });
-  cp('crate_wood', -5.9, -7.0, 0.5, { box: [0.45, 0.45], h: 0.85 });
-  cp('crate_wood', -5.4, -7.3, 0.9, { y: 0.9, s: 0.9 });
-  cp('crate_mil', 4.6, -9.8, 0.25, { box: [0.5, 0.25], h: 0.42, tag: 'low' });
-  cp('crate_mil', 5.4, -9.4, -0.1, { box: [0.5, 0.25], h: 0.42, tag: 'low' });
-  cp('crate_mil', 5.0, -9.6, 0.2, { y: 0.42 });
-  cp('pallet', -1.0, -8.2, 0.3, {});
-  cp('pallet', 8.5, 9.0, 1.1, {});
-  cp('barrel_blue', -3.4, 2.0, 0, { circle: 0.3, h: 0.88 });
-  cp('barrel_blue', -3.9, 2.6, 0, { circle: 0.3, h: 0.88 });
-  cp('barrel_blue', 6.4, -7.2, 0, { circle: 0.3, h: 0.88 });
-  cp('barrel', 5.9, -7.8, 0, { circle: 0.3, h: 0.88 });
-  cp('tires_stack', -6.3, -4.3, 0.4, { circle: 0.4, h: 0.6, tag: 'low' });
-  cp('tires_stack', 7.8, 10.5, 1.0, { circle: 0.4, h: 0.6, tag: 'low' });
-  cp('cinder_blocks', 2.4, -6.0, 0.3, { box: [0.85, 0.2], h: 0.4, tag: 'low' });
-  cp('plywood_barrier', -9.4, -3.0, 1.5, { box: [1.2, 0.1], h: 1.2 });
-  cp('plywood_barrier', 9.0, -3.0, 1.45, { box: [1.2, 0.1], h: 1.2 });
-  cp('cardboard_stack', 8.2, 3.3, 0.6, { box: [0.55, 0.35], h: 0.5, tag: 'low' });
-  cp('cardboard_stack', -8.4, 4.4, 0.0, { box: [0.55, 0.35], h: 0.5, tag: 'low' });
-  cp('shopping_cart', -2.2, -12.5, 2.3, { box: [0.3, 0.45], h: 0.7, tag: 'low' });
-  cp('shopping_cart', 13.5, 5.5, 0.9, { box: [0.3, 0.45], h: 0.7, tag: 'low' });
-  cp('suitcase', 1.2, -4.0, 0.7, { tilt: 1.45, y: 0.2 });
-  cp('backpack', -1.6, 6.8, 0.2, {});
-  cp('suitcase', 10.5, -1.0, 2.1, {});
-  const tent = cp('tarp_tent', 5.8, 5.8, 3.14 - 0.3, { box: [1.5, 1.2], h: 1.5, tag: 'solid' });
-  cp('tarp_tent', -10.8, -2.4, 0.2, { box: [1.5, 1.2], h: 1.5, tag: 'solid' });
-  cp('floodlight', -7.0, -3.2, 0.4, { circle: 0.4, h: 2.5 });
-  world.lampSpots.push({ x: -7.0, y: 2.8, z: -3.2, broken: false, phase: 0, nofx: true, power: 0.8 });
-  // second sandbag arc covers the police car
-  const sb = put('sandbags', -3, -7.8, 0.2, {});
-  for (let a = -28; a <= 28; a += 7) {
-    const r = a * Math.PI / 180;
-    col.circle(-3 + Math.cos(0.2) * Math.sin(r) * 3.2 + Math.sin(0.2) * (Math.cos(r) * 3.2 - 3.2), -7.8 - Math.sin(0.2) * Math.sin(r) * 3.2 + Math.cos(0.2) * (Math.cos(r) * 3.2 - 3.2), 0.4, 0.62, 'low');
+  // ---- the gates
+  L.gate.forEach((gz, k) => buildGate(world, k, gz, put, floodlight, sandbags, fire));
+
+  // ---- the start: a roadblock that has already fallen behind you
+  police(-2.2, 33.5, 3.0);
+  sandbags(-3.6, 19.5, Math.PI);
+  sandbags(3.8, 20.5, Math.PI + 0.12);
+  floodlight(6.9, 22, 3.4);
+  fire(5.2, 29, { size: 1 }); put('barrel', 5.2, 29, 0, { circle: 0.32, h: 0.9 });
+  put('crate_mil', -5.2, 28.5, 0.3, { box: [0.5, 0.25], h: 0.42, tag: 'low' });
+  put('crate_mil', -5.6, 27.6, -0.2, { box: [0.5, 0.25], h: 0.42, tag: 'low' });
+  put('crate_mil', -5.4, 28.1, 0.1, { y: 0.42 });
+
+  // ---- the junction arenas: cover to fight from, in four different arrangements
+  const zc = L.cross;
+  // JUNCTION 1: the old police roadblock
+  police(-3.4, zc[0] - 5.2, 0.35);
+  sandbags(3.4, zc[0] + 4.6, 0.12);
+  sandbags(-3.2, zc[0] + 5.4, -0.1);
+  put('barrel', 5.4, zc[0] - 3.2, 0, { circle: 0.32, h: 0.9 }); fire(5.4, zc[0] - 3.2);
+  put('barrel', -5.4, zc[0] + 1.2, 0, { circle: 0.32, h: 0.9 }); fire(-5.4, zc[0] + 1.2);
+  floodlight(6.9, zc[0] + 1, 3.0);
+  put('crate_wood', 5.0, zc[0] - 6.4, 0.2, { box: [0.45, 0.45], h: 0.85 });
+  put('crate_wood', 5.7, zc[0] - 5.8, 0.5, { box: [0.45, 0.45], h: 0.85 });
+  put('crate_wood', 5.3, zc[0] - 6.1, 0.9, { y: 0.9, s: 0.9 });
+  // JUNCTION 2: an overturned ambulance and a van
+  veh('ambulance', 3.6, zc[1] - 4.6, -0.28, 2.95, 1.05, 0xffffff, false, 2.6);
+  veh('van', -4.6, zc[1] + 6.2, 2.78, 2.95, 1.05, 0x2d4560, true, 2.5);
+  fire(-4.6 - Math.cos(2.78) * 1.2, zc[1] + 6.2 + Math.sin(2.78) * 1.2, { y: 1.2, size: 1.2 });
+  sandbags(0.2, zc[1] + 3.6, 0.05);
+  put('barrel', -5.3, zc[1] - 2.4, 0, { circle: 0.32, h: 0.9 }); fire(-5.3, zc[1] - 2.4);
+  put('crate_mil', 5.4, zc[1] + 2.4, 0.25, { box: [0.5, 0.25], h: 0.42, tag: 'low' });
+  put('crate_mil', 5.9, zc[1] + 1.8, -0.1, { box: [0.5, 0.25], h: 0.42, tag: 'low' });
+  floodlight(-6.9, zc[1] - 1.5, 0.2);
+  // JUNCTION 3: a pickup and an SUV crash, a barricade of plywood
+  veh('pickup', -3.4, zc[2] - 5.2, 0.5, 2.7, 1.0, 0x4d1f1b, true, 1.8);
+  veh('suv', 4.2, zc[2] + 5.6, 2.5, 2.5, 1.0, 0x1c2128, false, 1.8);
+  sandbags(-0.6, zc[2] - 0.5, 0.0);
+  put('plywood_barrier', 7.0, zc[2] - 2.5, 1.5, { box: [1.2, 0.1], h: 1.2 });
+  put('plywood_barrier', -7.0, zc[2] + 2.5, 1.55, { box: [1.2, 0.1], h: 1.2 });
+  put('barrel', 5.2, zc[2] - 1.5, 0, { circle: 0.32, h: 0.9 }); fire(5.2, zc[2] - 1.5);
+  put('cinder_blocks', 2.0, zc[2] - 5.8, 0.3, { box: [0.85, 0.2], h: 0.4, tag: 'low' });
+  floodlight(6.9, zc[2] + 2.4, 3.3);
+  // JUNCTION 4: the military cordon — two police cars in a V, crates, light
+  police(-3.8, zc[3] - 5.4, 0.55);
+  police(3.8, zc[3] - 5.4, -0.55);
+  sandbags(-5.0, zc[3] + 2.0, 0.5);
+  sandbags(5.0, zc[3] + 2.0, -0.5);
+  put('crate_mil', 0.6, zc[3] + 5.6, 0.2, { box: [0.5, 0.25], h: 0.42, tag: 'low' });
+  put('crate_mil', 1.3, zc[3] + 5.2, -0.15, { box: [0.5, 0.25], h: 0.42, tag: 'low' });
+  put('crate_mil', 0.9, zc[3] + 5.4, 0.1, { y: 0.42 });
+  put('barrel', -5.4, zc[3] - 1.6, 0, { circle: 0.32, h: 0.9 }); fire(-5.4, zc[3] - 1.6);
+  floodlight(-6.9, zc[3] + 0.6, 0.0);
+  floodlight(6.9, zc[3] - 2.6, 3.14);
+
+  // ---- the landing zone
+  buildPad(world, put, sandbags, floodlight, fire, police);
+
+  // ---- junction furniture: signals and stop signs at the four corners
+  for (const c of zc) {
+    put('traffic_light', 7.7, c + 7.1, Math.PI, { circle: 0.14, h: 6 });
+    put('traffic_light', -7.7, c - 7.1, 0, { circle: 0.14, h: 6 });
+    put('stop_sign', 7.9, c - 6.9, 0, { circle: 0.06, h: 2.3 });
+    put('stop_sign', -7.9, c + 6.9, Math.PI, { circle: 0.06, h: 2.3 });
+    for (const [x, z] of [[7.6, c + 6.5], [-7.6, c - 6.5]]) put('bollard', x, z, 0, { circle: 0.15, h: 1.0 });
   }
+
+  // ---- wrecks along the avenue: one lane stays open, always
+  let i = 0;
+  const clear = (z) => L.cross.some((c) => Math.abs(z - c) < 11) || L.gate.some((g) => Math.abs(g - z) < 11) || Math.abs(z - L.start.z) < 8 || z < L.lz.z + 20 + 6 && z > L.lz.z - 14;
+  for (let z = 12; z > L.zMin + 14; z -= 14 + rng() * 9) {
+    if (clear(z)) continue;
+    const side = i % 2 ? 1 : -1;
+    const x = side * (2.0 + rng() * 1.8);
+    const ry = Math.PI / 2 + (rng() - 0.5) * 0.9 + (rng() < 0.5 ? Math.PI : 0);
+    wreck(rng() < 0.55 ? 'car_wreck' : 'car_sedan', x, z, ry, i, rng() < 0.18);
+    i++;
+  }
+  // one burning bus in the left lane of each stretch between junctions
+  [[-4.0, -58], [4.0, -112], [-4.0, -166]].forEach(([x, z], k) => {
+    veh('bus', x, z, Math.PI / 2 + (k % 2 ? -0.12 : 0.1), 5.85, 1.3, [0xc9a23a, 0x8b8c87, 0x3e5f7a][k], true, 3.1);
+    fire(x, z, { y: 1.8, size: 2.2 });
+  });
 
   // ---- shop awnings, boarded windows and doors along the ground floor
   world.dressFacades?.();
+}
+
+// ------------------------------------------------------------ the gates ----
+function hazardTexture() {
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 32;
+  const g = c.getContext('2d');
+  g.fillStyle = '#c9a21a'; g.fillRect(0, 0, 128, 32);
+  g.fillStyle = '#16140f';
+  for (let i = -2; i < 10; i++) { g.beginPath(); g.moveTo(i * 16, 32); g.lineTo(i * 16 + 8, 32); g.lineTo(i * 16 + 40, 0); g.lineTo(i * 16 + 32, 0); g.fill(); }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+}
+
+function box(w, h, d, x, y, z) { const g = new THREE.BoxGeometry(w, h, d); g.translate(x, y, z); return g; }
+
+function buildGate(world, k, gz, put, floodlight, sandbags, fire) {
+  const col = world.col;
+  const steel = surface('metal', 1, 0x4a5258); steel.metalness = 0.65; steel.roughness = 0.6;
+  const concrete = surface('concrete', 1, 0x8f8b82);
+  const hazard = new THREE.MeshStandardMaterial({ map: hazardTexture(), roughness: 0.55, metalness: 0.2 });
+  const grp = new THREE.Group();
+  grp.position.set(0, 0, gz);
+  grp.userData.noMerge = true;
+  world.add(grp);
+  // the two leaves: bars between rails, a hazard band across the top
+  const leaves = [];
+  for (const side of [-1, 1]) {
+    const bars = [];
+    for (let i = 0; i < 14; i++) bars.push(box(0.09, 3.2, 0.09, -2.98 + i * 0.46, 1.9, 0));
+    for (const y of [0.4, 1.7, 3.3]) bars.push(box(6.3, 0.16, 0.2, 0, y, 0));
+    for (const x of [-3.1, 3.1]) bars.push(box(0.2, 3.7, 0.24, x, 1.85, 0));
+    const lf = new THREE.Group();
+    lf.add(new THREE.Mesh(mergeGeometries(bars), steel));
+    const hz = new THREE.Mesh(box(6.3, 0.55, 0.12, 0, 2.7, 0), hazard);
+    lf.add(hz);
+    lf.traverse((m) => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
+    lf.position.set(side * 3.2, 0, 0);
+    lf.userData.x0 = side * 3.2;
+    grp.add(lf);
+    leaves.push(lf);
+  }
+  // posts, the walls out to the buildings, the header and its sign
+  const fixed = [];
+  for (const side of [-1, 1]) {
+    fixed.push(box(1.1, 4.6, 1.1, side * 6.9, 2.3, 0));
+    fixed.push(box(1.7, 2.7, 0.9, side * 8.25, 1.35, 0));
+  }
+  const m = new THREE.Mesh(mergeGeometries(fixed), concrete);
+  m.castShadow = true; m.receiveShadow = true;
+  grp.add(m);
+  const header = new THREE.Mesh(box(15.4, 0.5, 0.7, 0, 4.6, 0), steel);
+  header.castShadow = true;
+  grp.add(header);
+  const hz2 = new THREE.Mesh(box(15.4, 0.22, 0.72, 0, 4.2, 0), hazard);
+  grp.add(hz2);
+  const sg = new THREE.MeshBasicMaterial({ map: signTexture(`CHECKPOINT ${k + 1}`, '#ff5a38', '#120a08', 512, 96), toneMapped: false });
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(5.6, 1.05), sg);
+  sign.position.set(0, 5.35, 0.36);
+  grp.add(sign);
+  const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.3, 12, 8), new THREE.MeshBasicMaterial({ color: 0xff2a1a, transparent: true, toneMapped: false }));
+  beacon.position.set(0, 6.15, 0);
+  grp.add(beacon);
+  // colliders: the leaves (removed on opening), the posts and walls (always)
+  const cols = [col.box(0, gz, 6.4, 0.45, 0, 4, 'gate')];
+  for (const side of [-1, 1]) col.box(side * 7.7, gz, 1.4, 0.55, 0, 4.6);
+  world.gates[k] = { group: grp, cols, leaves, beacon, open: false, t: 0, z: gz };
+  // lighting and cover on the near side
+  floodlight(-7.2, gz + 3.2, 0.1);
+  floodlight(7.2, gz + 3.2, 3.0);
+  put('barrel', -5.0, gz + 2.2, 0, { circle: 0.32, h: 0.9 }); fire(-5.0, gz + 2.2);
+  put('barrel', 5.0, gz + 2.2, 0, { circle: 0.32, h: 0.9 }); fire(5.0, gz + 2.2);
+  sandbags(-2.6, gz + 5.0, 0);
+  sandbags(2.6, gz + 5.0, 0);
+}
+
+// ------------------------------------------------------- the landing zone ----
+function padTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 512;
+  const g = c.getContext('2d');
+  g.clearRect(0, 0, 512, 512);
+  g.fillStyle = 'rgba(28,30,32,0.96)'; g.beginPath(); g.arc(256, 256, 250, 0, 7); g.fill();
+  g.strokeStyle = '#d6b21c'; g.lineWidth = 14; g.beginPath(); g.arc(256, 256, 232, 0, 7); g.stroke();
+  g.strokeStyle = 'rgba(214,178,28,0.6)'; g.lineWidth = 5; g.beginPath(); g.arc(256, 256, 204, 0, 7); g.stroke();
+  g.fillStyle = '#e8e4d6'; g.fillRect(168, 156, 30, 200); g.fillRect(314, 156, 30, 200); g.fillRect(168, 238, 176, 34);
+  for (let i = 0; i < 700; i++) { g.fillStyle = `rgba(0,0,0,${Math.random() * 0.16})`; g.fillRect(Math.random() * 512, Math.random() * 512, 2 + Math.random() * 14, 1 + Math.random() * 5); }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+}
+
+function buildPad(world, put, sandbags, floodlight, fire, police) {
+  const { x, z, r } = L.lz;
+  const pad = new THREE.Mesh(new THREE.PlaneGeometry(r * 2 + 1, r * 2 + 1), new THREE.MeshStandardMaterial({ map: padTexture(), transparent: true, roughness: 0.8, metalness: 0.1, polygonOffset: true, polygonOffsetFactor: -3 }));
+  pad.rotation.x = -Math.PI / 2;
+  pad.position.set(x, 0.03, z);
+  pad.receiveShadow = true;
+  world.add(pad);
+  // perimeter lights
+  const lampMat = new THREE.MeshBasicMaterial({ color: 0x6dffa0, toneMapped: false });
+  const g = new THREE.SphereGeometry(0.12, 8, 6);
+  for (let i = 0; i < 14; i++) {
+    const a = i / 14 * Math.PI * 2;
+    const m = new THREE.Mesh(g, lampMat);
+    m.position.set(x + Math.cos(a) * (r + 0.1), 0.14, z + Math.sin(a) * (r + 0.1));
+    world.add(m);
+  }
+  // flares and floods, a cordon of cars and sandbags either side of the pad
+  fire(x - 5, z - 5, { size: 1.0, y: 0.25, rgb: [1, 0.2, 0.12], color: 0xff3020 });
+  fire(x + 5, z - 5, { size: 1.0, y: 0.25, rgb: [1, 0.2, 0.12], color: 0xff3020 });
+  floodlight(-7.0, z + 6, 0.0);
+  floodlight(7.0, z + 6, 3.14);
+  sandbags(-5.2, z + 12.5, Math.PI);
+  sandbags(5.2, z + 12.5, Math.PI);
+  police(-4.2, z + 17, 0.4);
+  police(4.2, z + 17.5, -0.4);
+  // chain-link along the sidewalks, closing the end
+  for (const side of [-1, 1]) {
+    for (const dz of [-4, 0, 4, 8]) put('fence_chain', side * 8.3, z + dz, Math.PI / 2, { box: [0.08, 1.5], h: 2 });
+  }
+  for (const dx of [-6, -3, 0, 3, 6]) put('fence_chain', dx, L.zMin + 10, 0, { box: [1.5, 0.08], h: 2 });
 }
 
 // ------------------------------------------------------------ the ground ---
@@ -135,72 +296,69 @@ export function dressGround(game) {
   const { world, fx, scene } = game;
   const rng = mulberry(31);
   const gy = (x, z) => world.groundY(x, z);
-
-  // decals: tinted, stretched, flat on the ground
-  const mk = (file, max, o = {}) => {
-    const d = fx.makeDecals(file, max, o);
-    return d;
-  };
-  const manhole = mk('manhole', 12, { rough: 0.5 });
-  const drain = mk('drain', 24, { rough: 0.6 });
-  const skid = mk('skid', 12, { rough: 0.9 });
-  const scorch = mk('scorch', 16, { rough: 0.95 });
+  const mk = (file, max, o = {}) => fx.makeDecals(file, max, o);
+  const manhole = mk('manhole', 16, { rough: 0.5 });
+  const drain = mk('drain', 40, { rough: 0.6 });
+  const skid = mk('skid', 16, { rough: 0.9 });
+  const scorch = mk('scorch', 40, { rough: 0.95 });
   const oil = mk('oil', 14, { rough: 0.15 });
-  const crack = mk('crackdec', 20, { rough: 0.9 });
-  const drag = mk('drag', 20, { rough: 0.2 });
-  const tag = mk('tag', 6, { rough: 0.8 });
+  const crack = mk('crackdec', 28, { rough: 0.9 });
+  const drag = mk('drag', 24, { rough: 0.2 });
+  const tag = mk('tag', 12, { rough: 0.8 });
   const free = (x, z, r = 0.3) => { const p = world.col.resolve(x, z, r); return Math.abs(p.x - x) + Math.abs(p.z - z) < 1e-3; };
-  for (const [x, z] of [[-2, -14], [3, 6], [-3, 17], [5, -27], [-16, 1], [18, -2], [0, 0.5], [-5, 28]]) manhole.add(x, z, 1.05, rng() * 6, 0, gy(x, z) + 0.004);
+  world.steam = [];
+  for (const c of L.cross) { manhole.add(-1.6, c + 1.4, 1.05, rng() * 6, 0, 0.004); manhole.add(2.2, c - 2.2, 1.05, rng() * 6, 0, 0.004); world.steam.push({ x: -1.6, z: c + 1.4 }); }
+  for (let z = 10; z > L.zMin + 8; z -= 40 + rng() * 20) manhole.add((rng() - 0.5) * 6, z, 1.05, rng() * 6, 0, 0.004);
   // storm drains sit in the gutters beside each curb
-  for (let i = 0; i < 12; i++) {
-    const side = rng() < 0.5 ? -1 : 1;
-    const along = (rng() - 0.5) * 60;
-    if (rng() < 0.5) drain.add(side * 6.55, along, 0.85, Math.PI / 2, 0, 0.006); else drain.add(along, side * 5.55, 0.85, 0, 0, 0.006);
-  }
-  // brakes: long skids that end at wrecks
-  for (const [x, z, r] of [[1, -30, 1.57], [5.2, -21, 1.65], [-4.6, 21, -1.5], [17, 1, 3.1], [-20, -1, 0.1]]) skid.add(x, z, 6.5, r, 0, 0.007, 0, 0, 0.55);
+  for (let z = 20; z > L.zMin + 6; z -= 18 + rng() * 14) drain.add(rng() < 0.5 ? -5.55 : 5.55, z, 0.85, Math.PI / 2, 0, 0.006);
+  // brake marks that end at the wrecks
+  const wrecks = world.col.boxes.filter((b) => b.tag === 'solid' && b.hw > 2.3 && b.hw < 3.1 && Math.abs(b.cx) < 6);
+  wrecks.slice(0, 12).forEach((b, i) => { if (i % 2 === 0) skid.add(b.cx, b.cz + 4.5, 6.5, 1.57 + (rng() - 0.5) * 0.2, 0, 0.007, 0, 0, 0.55); });
   // everything that burned
-  for (const f of world.fires) scorch.add(f.x, f.z, 4.6 * f.size, rng() * 6, 0, 0.005);
-  for (let i = 0; i < 12; i++) { const x = (rng() - 0.5) * 50, z = (rng() - 0.5) * 50; if (free(x, z)) oil.add(x, z, 0.8 + rng() * 1.6, rng() * 6, 0, gy(x, z) + 0.006); }
-  for (let i = 0; i < 24; i++) { const x = (rng() - 0.5) * 56, z = (rng() - 0.5) * 56; if (free(x, z)) crack.add(x, z, 3 + rng() * 3, rng() * 6, 0, gy(x, z) + 0.005); }
-  for (let i = 0; i < 5; i++) {
-    const [x, z, nx, nz] = [[-9.02, -22, 1, 0], [8.98, -21, -1, 0], [-9.02, -16, 1, 0], [21.98, -13, -1, 0], [-14, 9.02, 0, -1]][i];
-    tag.add(x + nx * 0.01, z, 1.8, 0.0, 0, 1.6 + rng() * 0.9, nx, nz);
+  for (const f of world.fires) scorch.add(f.x, f.z, 4.2 * f.size, rng() * 6, 0, 0.005);
+  for (let z = 14; z > L.zMin + 10; z -= 30 + rng() * 25) { const x = (rng() - 0.5) * 9; if (free(x, z)) oil.add(x, z, 0.8 + rng() * 1.2, rng() * 6, 0, 0.006); }
+  for (let z = 18; z > L.zMin + 10; z -= 12 + rng() * 14) { const x = (rng() - 0.5) * 10; if (free(x, z)) crack.add(x, z, 3 + rng() * 3, rng() * 6, 0, 0.005); }
+  // spray paint on a few walls
+  for (let z = 6; z > L.zMin + 10; z -= 38 + rng() * 22) {
+    const side = rng() < 0.5 ? -1 : 1;
+    if (L.cross.some((c) => Math.abs(z - c) < 7)) continue;
+    tag.add(side * 9.02 - side * 0.01, z, 1.8, 0.0, 0, 1.6 + rng() * 0.9, -side, 0);
   }
 
-  // ---- debris by the hundred (instanced; nothing here casts a shadow)
-  const clusters = [...world.fires.map((f) => [f.x, f.z, 5]), [0.4, -19.5, 7], [11.5, 3.2, 4], [-3, -9, 6], [5.2, -25, 4], [-4.4, -33, 3], [4, 21, 4], [-4.5, 25.5, 4], [-13.5, 2.2, 4], [-9, 15.5, 4]];
-  const spots = (count, spread = 1) => {
+  // ---- debris: only where something happened (wrecks and fires), and only a little
+  const clusters = [...world.fires.map((f) => [f.x, f.z, 3.2]), ...wrecks.map((b) => [b.cx, b.cz, 3.0])];
+  const spots = (count) => {
     const out = [];
     let guard = 0;
-    while (out.length < count && guard++ < count * 25) {
-      let x, z;
-      if (rng() < 0.55) { const c = clusters[(rng() * clusters.length) | 0]; x = c[0] + (rng() - 0.5) * c[2] * 2 * spread; z = c[1] + (rng() - 0.5) * c[2] * 2 * spread; }
-      else { x = (rng() - 0.5) * 66; z = (rng() - 0.5) * 70; }
-      if (Math.abs(x) > 33 || z < -40 || z > 33) continue;
+    while (out.length < count && guard++ < count * 30) {
+      const c = clusters[(rng() * clusters.length) | 0];
+      const x = c[0] + (rng() - 0.5) * c[2] * 2, z = c[1] + (rng() - 0.5) * c[2] * 2;
       if (free(x, z, 0.12)) out.push([x, z]);
     }
     return out;
   };
-  const scatter = (name, count, scaleLo = 0.9, scaleHi = 1.15, lift = 0, spread = 1) => {
-    const ms = spots(count, spread).map(([x, z]) => {
+  const scatter = (name, count, scaleLo = 0.9, scaleHi = 1.15, lift = 0) => {
+    const ms = spots(count).map(([x, z]) => {
       const s = scaleLo + rng() * (scaleHi - scaleLo);
       _e.set((name === 'deb_can' || name === 'deb_bottle') && rng() < 0.6 ? Math.PI / 2 : 0, rng() * 6.28, 0, 'YXZ');
       _q.setFromEuler(_e);
       const y = gy(x, z) + lift + ((name === 'deb_can' || name === 'deb_bottle') ? 0.03 : 0);
       return new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), _q.clone(), new THREE.Vector3(s, s, s));
     });
-    world.add(instanced(name, ms));
+    if (ms.length) world.add(instanced(name, ms));
   };
-  scatter('deb_can', 80, 0.9, 1.1); scatter('deb_bottle', 60, 0.9, 1.1); scatter('deb_carton', 50, 0.8, 1.3, 0.004);
-  scatter('deb_brick', 55, 0.85, 1.1); scatter('deb_bag', 36, 0.8, 1.5, 0.002); scatter('deb_rag', 30, 0.9, 1.4, 0.004);
-  scatter('deb_glass', 60, 0.9, 1.5, 0.003, 0.6); scatter('deb_plank', 18, 0.8, 1.2, 0.002); scatter('deb_pipe', 10, 0.8, 1.2);
+  scatter('deb_can', 22, 0.9, 1.1); scatter('deb_bottle', 14, 0.9, 1.1); scatter('deb_carton', 10, 0.8, 1.3, 0.004);
+  scatter('deb_brick', 18, 0.85, 1.1); scatter('deb_bag', 8, 0.8, 1.5, 0.002); scatter('deb_rag', 8, 0.9, 1.4, 0.004);
+  scatter('deb_plank', 6, 0.8, 1.2, 0.002);
 
   // ---- the fallen: bodies in the road, each with its pool and a drag trail
   const dead = [
-    [-3.5, -13.2, 0.4, 'z_cop'], [-1.5, -11.6, 2.4, 'z_cop'], [2.6, -14.6, 5.0, 'z_worker'], [6.2, -17.5, 1.1, 'z_office'], [-5.8, -24, 3.2, 'z_nurse'],
-    [4.5, -28, 0.3, 'z_hoodie'], [-6.4, -2.2, 4.4, 'z_jogger'], [10.8, 1.6, 2.0, 'z_trucker'], [-11, 4.6, 5.5, 'z_patient'], [1.4, 9.8, 0.9, 'z_elder'],
-    [-6.2, 12.4, 3.8, 'z_burned'], [5.8, 17.4, 2.7, 'z_worker'], [-15.5, -1.4, 1.5, 'z_office'], [16.4, -1.0, 4.2, 'z_hoodie'],
+    [-3.5, L.cross[0] - 8.2, 0.4, 'z_cop'], [-1.5, L.cross[0] - 6.0, 2.4, 'z_cop'], [2.6, L.cross[0] + 1.6, 5.0, 'z_worker'],
+    [3.0, L.gate[0] + 6.5, 1.1, 'z_office'], [-5.0, -62, 3.2, 'z_nurse'], [1.2, L.cross[1] - 3.6, 0.3, 'z_hoodie'],
+    [-2.0, L.cross[1] + 4.6, 4.4, 'z_jogger'], [4.6, L.gate[1] + 6.8, 2.0, 'z_trucker'], [-1.0, -100, 5.5, 'z_patient'],
+    [2.0, L.cross[2] + 3.0, 0.9, 'z_elder'], [-3.4, L.cross[2] - 3.4, 3.8, 'z_burned'], [-2.6, L.gate[2] + 7.0, 2.7, 'z_worker'],
+    [3.4, -170, 1.5, 'z_office'], [-1.0, L.cross[3] + 2.0, 4.2, 'z_hoodie'], [2.8, L.gate[3] + 6.0, 0.6, 'z_cop'],
+    [-2.4, L.lz.z + 14, 5.2, 'z_nurse'], [3.2, L.lz.z + 12, 1.9, 'z_trucker'],
   ];
   game.corpses = [];
   for (const [x, z, face, model] of dead) {
@@ -210,7 +368,7 @@ export function dressGround(game) {
     if (rng() < 0.7) drag.add(x - Math.sin(face) * 2.0, z - Math.cos(face) * 2.0, 3.4, Math.atan2(Math.cos(face), -Math.sin(face)) + Math.PI, 0, gy(x, z) + 0.012);
   }
 
-  // ---- ground fog: big soft sheets that drift in the wind
+  // ---- ground fog: big soft sheets that drift in the wind, always around the survivors
   const N = 36;
   const pos = new Float32Array(N * 3);
   for (let i = 0; i < N; i++) { pos[i * 3] = (rng() - 0.5) * 70; pos[i * 3 + 1] = 0.5 + rng() * 0.9; pos[i * 3 + 2] = (rng() - 0.5) * 70; }

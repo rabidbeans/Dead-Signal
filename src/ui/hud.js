@@ -14,6 +14,7 @@ export class HUD {
           <div class="hp-bar"><div class="hp-fill"></div><div class="hp-ticks"></div></div>
           <div class="team"></div>
           <div class="objective"><i></i><span></span></div>
+          <div class="holdbar"><u></u></div>
         </div>
         <div class="wave"><span class="wave-label"></span><span class="wave-left"></span></div>
         <button class="pause" aria-label="Pause"><span></span><span></span></button>
@@ -45,6 +46,7 @@ export class HUD {
     this.el = {
       name: $('.hp-name', root), fill: $('.hp-fill', root), team: $('.team', root),
       waveLabel: $('.wave-label', root), waveLeft: $('.wave-left', root), obj: $('.objective span', root), objBox: $('.objective', root),
+      holdbar: $('.holdbar', root), holdfill: $('.holdbar u', root),
       ammoN: $('.ammo-n', root), weapon: $('.weapon', root),
       move: $('.stick.move', root), aim: $('.stick.aim', root),
       ring: $('.reload-ring', root), ringC: $('.reload-ring circle', root),
@@ -104,13 +106,24 @@ export class HUD {
       <div class="mate" data-id="${p.id}"><span>${escapeHtml(p.name)}</span><div class="mate-bar"><i></i></div></div>`).join('');
   }
 
-  wave(phase, wave, waves, left, total = 0) {
-    this.el.objBox.classList.toggle('on', phase === 'wave' || phase === 'break');
-    if (phase === 'wave') this.el.obj.textContent = `KILL THE INFECTED  [${Math.max(0, total - left)}/${total}]`;
-    else if (phase === 'break') this.el.obj.textContent = 'REGROUP · GRAB THE MEDKIT';
+  // the top plate and the objective line: the route, or a held junction
+  route({ phase, hold, title, left, secs, dist, opened, away, final }) {
+    const box = this.el.objBox;
+    box.classList.toggle('on', phase === 'run' || phase === 'hold' || phase === 'extract');
+    this.el.holdbar.classList.toggle('on', hold >= 0);
+    box.classList.toggle('away', hold >= 0 && !!away);
     if (phase === 'intro') { this.el.waveLabel.textContent = 'STAND BY'; this.el.waveLeft.textContent = ''; return; }
-    this.el.waveLabel.textContent = `WAVE ${wave + 1} / ${waves}`;
-    this.el.waveLeft.textContent = phase === 'wave' ? `${left} LEFT` : phase === 'break' ? 'BREATHE' : '';
+    if (hold >= 0) {
+      const t = Math.ceil(left);
+      this.el.obj.textContent = away ? 'GET BACK TO THE GATE' : final ? `HOLD THE LANDING ZONE  ·  ${t} s` : `HOLD THE JUNCTION  ·  ${t} s`;
+      this.el.holdfill.style.width = Math.min(100, (1 - left / Math.max(1, secs)) * 100) + '%';
+      this.el.waveLabel.textContent = title;
+      this.el.waveLeft.textContent = away ? 'PAUSED' : `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+    } else {
+      this.el.obj.textContent = phase === 'win' ? 'EVACUATED' : phase === 'extract' ? 'GET EVERYONE ON THE PAD' : opened >= 4 ? 'REACH THE LANDING ZONE' : `GET TO CHECKPOINT ${opened + 1}`;
+      this.el.waveLabel.textContent = phase === 'extract' ? 'EVAC' : 'EVAC ROUTE';
+      this.el.waveLeft.textContent = phase === 'win' ? '' : `${dist} M`;
+    }
   }
 
   banner(title, sub = '', secs = 2, note = '') {
@@ -143,21 +156,25 @@ export class HUD {
   end(win, s, why) {
     const e = this.el.end;
     e.classList.remove('hidden');
+    const mm = Math.floor(s.time / 60), ss = String(Math.floor(s.time % 60)).padStart(2, '0');
+    const cp = s.checkpoint || 0;
     $('.panel', e).innerHTML = `
-      <div class="end-kicker">${win ? 'LEVEL 1 · THE CHECKPOINT' : (why || 'THE CHECKPOINT FELL')}</div>
+      <div class="end-kicker">${win ? 'LEVEL 1 · EVAC ROUTE' : (why || 'THE ROUTE CLAIMED ANOTHER')}</div>
       <h1 class="${win ? 'win' : 'lose'}">${win ? 'SIGNAL ACQUIRED' : 'YOU DIED'}</h1>
       <div class="stats">
         <div><b>${s.kills}</b><span>KILLS</span></div>
         <div><b>${s.acc}%</b><span>ACCURACY</span></div>
         <div><b>${s.crits}</b><span>CRITICALS</span></div>
-        <div><b>${win ? s.waves : s.wave}/${s.waves}</b><span>WAVES</span></div>
+        <div><b>${mm}:${ss}</b><span>TIME</span></div>
       </div>
-      ${win ? '<p class="next">Level 2 and new weapons are next. Hold on to that pistol.</p>' : ''}
+      ${win ? '<p class="next">Level 2 and new weapons are next. Hold on to that pistol.</p>' : `<p class="next">${cp > 0 ? `You made it past checkpoint ${cp} of ${s.gates}.` : 'You never got past the first gate.'}</p>`}
       <div class="end-buttons">
-        <button class="btn primary retry">${win ? 'PLAY AGAIN' : 'TRY AGAIN'}</button>
+        ${!win && cp > 0 ? '<button class="btn primary retry-cp">FROM CHECKPOINT</button>' : ''}
+        <button class="btn ${!win && cp > 0 ? '' : 'primary'} retry">${win ? 'PLAY AGAIN' : 'FROM THE START'}</button>
         <button class="btn menu">MAIN MENU</button>
       </div>`;
-    $('.retry', e).addEventListener('click', () => this.onRetry?.());
+    $('.retry', e).addEventListener('click', () => this.onRetry?.(false));
+    $('.retry-cp', e)?.addEventListener('click', () => this.onRetry?.(true));
     $('.menu', e).addEventListener('click', () => this.onQuit?.());
   }
 

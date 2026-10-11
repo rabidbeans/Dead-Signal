@@ -167,6 +167,12 @@ input:focus { border-color: rgba(200,64,46,.7); }
 .end-buttons { display: flex; gap: 10px; }
 .end-buttons .btn { flex: 1; text-align: center; }
 
-.objective { margin-top: 10px; display: none; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; letter-spacing: .14em; text-shadow: 0 1px 3px #000; }
+.objective { margin-top: 10px; display: none; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; letter-spacing: .14em; text-shadow: 0 1px 3px #000; white-space: nowrap; }
 .objective.on { display: flex; }
 .objective i { width: 9px; height: 9px; border: 1.5px solid var(--text); display: inline-block; }
+
+.holdbar { display: none; margin-top: 6px; width: min(300px, 46vw); height: 5px; background: rgba(0,0,0,.55); border: 1px solid var(--line); }
+.holdbar.on { display: block; }
+.holdbar u { display: block; height: 100%; width: 0; background: var(--signal-hi); transition: width .25s linear; }
+.objective.away span { color: var(--signal-hi); animation: awayblink .8s steps(2) infinite; }
+@keyframes awayblink { 50% { opacity: .35; } }

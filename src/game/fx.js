@@ -428,7 +428,7 @@ export class FX {
       const rate = 26 * f.size;
       if (Math.random() < rate * dt * 2) {
         const r = 0.18 * f.size;
-        this.fire.emit({ x: f.x + (Math.random() - 0.5) * r, y: f.y, z: f.z + (Math.random() - 0.5) * r, vx: wind.x * 0.3, vy: 1.2 + Math.random(), vz: wind.z * 0.3, life: 0.45 + Math.random() * 0.3, s0: 0.45 * f.size, s1: 0.08, r: 1, g: 0.45 + Math.random() * 0.2, b: 0.12, a0: 0.75, a1: 0 });
+        this.fire.emit({ x: f.x + (Math.random() - 0.5) * r, y: f.y, z: f.z + (Math.random() - 0.5) * r, vx: wind.x * 0.3, vy: 1.2 + Math.random(), vz: wind.z * 0.3, life: 0.45 + Math.random() * 0.3, s0: 0.45 * f.size, s1: 0.08, r: f.rgb ? f.rgb[0] : 1, g: f.rgb ? f.rgb[1] : 0.45 + Math.random() * 0.2, b: f.rgb ? f.rgb[2] : 0.12, a0: 0.75, a1: 0 });
       }
       if (Math.random() < 6 * dt) {
         this.fire.emit({ x: f.x, y: f.y + 0.3, z: f.z, vx: (Math.random() - 0.5) * 0.8 + wind.x, vy: 1.5 + Math.random() * 1.5, vz: (Math.random() - 0.5) * 0.8 + wind.z, life: 1.6 + Math.random(), s0: 0.05, s1: 0.02, r: 1, g: 0.55, b: 0.2, a0: 1, a1: 0, spin: 3 });
@@ -436,6 +436,11 @@ export class FX {
       if (Math.random() < 7 * dt * f.size) {
         this.smoke.emit({ x: f.x, y: f.y + 0.8, z: f.z, vx: wind.x * 0.8, vy: 0.9, vz: wind.z * 0.8, life: 3, s0: 0.5, s1: 2.4 * f.size, r: 0.1, g: 0.1, b: 0.11, a0: 0.35, a1: 0, drag: 0.4, spin: 0.3 });
       }
+    }
+    // steam from the gratings
+    for (const v of this.world.steam || []) {
+      if (Math.abs(v.z - focus.z) > 28 || Math.abs(v.x - focus.x) > 28) continue;
+      if (Math.random() < 5 * dt) this.mist.emit({ x: v.x + (Math.random() - 0.5) * 0.3, y: 0.1, z: v.z + (Math.random() - 0.5) * 0.3, vx: wind.x * 0.6, vy: 0.5 + Math.random() * 0.4, vz: wind.z * 0.6, life: 3 + Math.random() * 1.5, s0: 0.5, s1: 2.6, r: 0.62, g: 0.66, b: 0.72, a0: 0.2, a1: 0, drag: 0.3, spin: 0.2 });
     }
     // rain: streaks in a box around the focus, slanted by the wind
     this.rain.list.length = 0;

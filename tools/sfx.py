@@ -82,8 +82,8 @@ def reverb(x, rt=1.2, wet=0.3, pre=0.012, bright=3500, seed=0):
     return mixl(x, y * wet * 3)
 
 
-def write(name, x, br='96k'):
-    x = norm(x)
+def write(name, x, br='96k', peak=0.89):
+    x = norm(x, peak)
     wav = f'/tmp/{name}.wav'
     from scipy.io import wavfile
     wavfile.write(wav, SR, (x * 32767).astype(np.int16))
@@ -127,37 +127,168 @@ def pistol(v):
     return out[: int(d * SR)] * np.minimum(1, np.linspace(30, 0, int(d * SR)))
 
 
-def dry_click():
-    r = np.random.RandomState(5)
-    x = np.zeros(int(0.12 * SR))
-    for fr, g in ((2600, 1), (5200, 0.5), (1700, 0.4)):
-        x += np.sin(2 * np.pi * fr * t(0.12)) * env_exp(0.12, 0.004, 0.0002) * g
-    x += hp(r.randn(len(x)), 3000) * env_exp(0.12, 0.002) * 0.6
-    return reverb(x, rt=0.4, wet=0.1)
+def burst(d, lo, hi, tau, attack=0.0002, seed=0, order=2):
+    """A band of noise with a fast exponential decay: the 'tk' of a mechanism."""
+    r = np.random.RandomState(seed)
+    n = int(d * SR)
+    return bp(r.randn(n), lo, hi, order) * env_exp(d, tau, attack)
 
 
-def metal_clack(fs, tau, noise=0.4, seed=0, d=0.25):
+def modes(parts, d, seed=0):
+    """Damped, inharmonic resonances of a small metal or plastic body.
+    parts: (freq Hz, decay s, gain). Phases are random so repeats differ."""
     r = np.random.RandomState(seed)
     x = np.zeros(int(d * SR))
-    for fr, g in fs:
-        x += np.sin(2 * np.pi * fr * t(d) + r.rand() * 6) * env_exp(d, tau * (0.6 + r.rand() * 0.8), 0.0003) * g
-    x += bp(r.randn(len(x)), 1500, 8000) * env_exp(d, 0.006) * noise
-    return reverb(x, rt=0.5, wet=0.12, seed=seed)
+    for f, tau, g in parts:
+        x += np.sin(2 * np.pi * f * t(d) + r.rand() * 6.28) * env_exp(d, tau, 0.0002) * g
+    return x
+
+
+def at(x, y, when):
+    """Lay y into x starting `when` seconds in."""
+    k = int(when * SR)
+    n = max(len(x), k + len(y))
+    out = pad(x, n)
+    out[k:k + len(y)] += y
+    return out
+
+
+def rasp(d, lo, hi, seed, rise=True, ridges=0):
+    """Metal sliding on metal: band noise, amplitude following the motion,
+    optionally chopped by the serrations or the grip's grooves."""
+    r = np.random.RandomState(seed)
+    n = int(d * SR)
+    x = bp(r.randn(n), lo, hi, 3)
+    tt = np.arange(n) / n
+    env = np.sin(np.pi * tt) ** 1.3 * (0.4 + 0.6 * (tt if rise else 1 - tt))
+    if ridges:
+        x *= 0.55 + 0.45 * np.sign(np.sin(2 * np.pi * ridges * np.arange(n) / SR + r.rand() * 6)) * 0.5 + 0.2 * lp(r.randn(n), 300)
+    return x * env
+
+
+def dry_click():
+    """Hammer falls on an empty chamber: a dry, hard 'tk' and the striker's tick."""
+    x = mixl(burst(0.1, 1800, 7500, 0.0018, seed=5) * 1.0,
+             modes([(1750, 0.006, 0.55), (3050, 0.004, 0.4), (4600, 0.003, 0.25)], 0.1, seed=5))
+    x = at(x, burst(0.05, 2500, 8000, 0.001, seed=6) * 0.35, 0.007)
+    return reverb(x, rt=0.3, wet=0.08, seed=5)
+
+
+def mag_release():
+    """The mag-catch button: a plastic click and its return."""
+    x = mixl(burst(0.08, 2200, 7000, 0.0015, seed=11), modes([(1250, 0.007, 0.5), (2850, 0.004, 0.3)], 0.08, seed=11))
+    x = at(x, burst(0.05, 1500, 5500, 0.001, seed=12) * 0.4, 0.045)
+    return reverb(x, rt=0.3, wet=0.07, seed=11)
+
+
+def mag_out():
+    """The magazine slides free of the well: friction, then the 'tok' as it clears."""
+    fr = rasp(0.085, 1500, 5200, 21, rise=False) * 0.55
+    tok = mixl(burst(0.12, 700, 4200, 0.004, seed=22) * 0.8, modes([(1080, 0.012, 0.5), (2300, 0.008, 0.3), (3900, 0.004, 0.15)], 0.12, seed=22))
+    return reverb(at(fr, tok, 0.07), rt=0.35, wet=0.08, seed=21)
+
+
+def mag_drop():
+    """The old magazine hits the road: a dull clunk, a smaller bounce."""
+    def hit(g, f):
+        body = modes([(f, 0.03, 0.8), (f * 2.45, 0.016, 0.45), (f * 5.1, 0.007, 0.25)], 0.2, seed=int(f))
+        return mixl(body, burst(0.12, 300, 3200, 0.007, seed=int(f)) * 0.5, lp(np.random.RandomState(7).randn(int(0.12 * SR)), 260) * env_exp(0.12, 0.02) * 0.6) * g
+    x = at(hit(1.0, 430), hit(0.34, 520), 0.11)
+    x = at(x, hit(0.12, 600), 0.19)
+    return reverb(x, rt=0.5, wet=0.15, seed=31)
+
+
+def mag_in():
+    """A fresh magazine: it slides up the well (friction rising), then seats with a solid 'clack'."""
+    fr = rasp(0.08, 1300, 4800, 41, rise=True) * 0.5
+    seat = mixl(burst(0.2, 600, 6500, 0.0035, seed=42) * 1.0,
+                modes([(880, 0.02, 0.7), (2050, 0.011, 0.5), (3500, 0.006, 0.3), (5200, 0.003, 0.15)], 0.2, seed=42),
+                lp(np.random.RandomState(8).randn(int(0.12 * SR)), 320) * env_exp(0.12, 0.016) * 0.7)
+    x = at(fr, seat, 0.075)
+    x = at(x, burst(0.05, 2000, 6000, 0.001, seed=43) * 0.25, 0.145)       # the catch engaging
+    return reverb(x, rt=0.4, wet=0.1, seed=41)
+
+
+def slide():
+    """Racking the slide: the pull (rasp over the serrations, a tick at the stop),
+    a beat on the spring, then the snap forward as it chambers."""
+    pull = rasp(0.095, 2200, 7500, 51, rise=True, ridges=165) * 0.7
+    pull = at(pull, mixl(burst(0.04, 1800, 6500, 0.002, seed=52) * 0.6, modes([(2400, 0.004, 0.4)], 0.04, seed=52)), 0.09)
+    snap = mixl(burst(0.25, 900, 9000, 0.0028, seed=53) * 1.1,
+                modes([(1650, 0.014, 0.7), (3300, 0.009, 0.5), (5600, 0.005, 0.3), (880, 0.02, 0.4)], 0.25, seed=53),
+                lp(np.random.RandomState(9).randn(int(0.15 * SR)), 280) * env_exp(0.15, 0.02) * 0.8)
+    snap = at(snap, burst(0.06, 1500, 6500, 0.0015, seed=54) * 0.45, 0.02)   # the round going home
+    x = at(pull, snap, 0.165)
+    return reverb(x, rt=0.45, wet=0.1, seed=51)
 
 
 def shell(v):
+    """A brass case on tarmac: a bright 'tink' and two smaller, quicker bounces."""
     r = np.random.RandomState(200 + v)
-    out = np.zeros(int(0.5 * SR))
-    pos = 0
-    for k in range(3):
-        f0 = 4800 + r.rand() * 1500
-        c = np.zeros(int(0.12 * SR))
-        for h, g in ((1, 1), (2.76, 0.5), (5.4, 0.25)):
-            c += np.sin(2 * np.pi * f0 * h * t(0.12)) * env_exp(0.12, 0.02 / h) * g
-        amp = 0.8 ** k * (1 if k == 0 else 0.5)
-        out[pos:pos + len(c)] += c * amp
-        pos += int((0.07 + r.rand() * 0.06) * SR / (k + 1))
-    return out
+    f0 = 3300 + r.rand() * 700
+
+    def tink(g):
+        return mixl(modes([(f0, 0.014, 0.8), (f0 * 1.9, 0.009, 0.45), (f0 * 3.1, 0.005, 0.25), (f0 * 0.52, 0.02, 0.3)], 0.14, seed=v),
+                    burst(0.03, 3000, 9000, 0.002, seed=v) * 0.5) * g
+    x = tink(1.0)
+    x = at(x, tink(0.45), 0.075 + r.rand() * 0.03)
+    x = at(x, tink(0.2), 0.13 + r.rand() * 0.03)
+    return x
+
+
+def gate_open():
+    """A steel gate rolling open: two warning beeps, the bolt, a motor under a
+    rail clatter, then the stop."""
+    d = 2.9
+    n = int(d * SR)
+    tt = np.arange(n) / SR
+    r = np.random.RandomState(77)
+    beeps = np.zeros(n)
+    for k0 in (0.0, 0.22):
+        b = np.sin(2 * np.pi * 1450 * t(0.11)) * np.hanning(int(0.11 * SR)) * 0.35
+        k = int(k0 * SR); beeps[k:k + len(b)] += b
+    bolt = mixl(burst(0.2, 400, 5000, 0.006, seed=1) * 1.0, modes([(210, 0.05, 0.8), (620, 0.03, 0.5), (1700, 0.015, 0.3)], 0.2, seed=1))
+    run = np.clip((tt - 0.35) / 0.4, 0, 1) * np.clip((2.55 - tt) / 0.3, 0, 1)
+    motor = (np.sin(2 * np.pi * 52 * tt) + 0.5 * np.sin(2 * np.pi * 104 * tt + 1) + 0.25 * np.sin(2 * np.pi * 156 * tt)) * 0.35
+    motor = lp(sat(motor, 1.6), 380) * run
+    rail = bp(r.randn(n), 250, 2200, 2) * 0.35 * run
+    # the rail joints: a thump every ~110 ms, a little uneven
+    clat = np.zeros(n)
+    k = int(0.4 * SR)
+    while k < int(2.5 * SR):
+        c = mixl(burst(0.08, 500, 4500, 0.008, seed=k), modes([(380, 0.02, 0.5), (1100, 0.01, 0.3)], 0.08, seed=k))
+        clat[k:k + len(c)] += c * (0.5 + 0.5 * r.rand())
+        k += int((0.095 + r.rand() * 0.045) * SR)
+    stop = mixl(burst(0.7, 300, 6000, 0.012, seed=9) * 0.9, modes([(180, 0.2, 0.9), (460, 0.12, 0.6), (980, 0.08, 0.4), (2300, 0.03, 0.2)], 0.7, seed=9))
+    x = beeps + at(np.zeros(n), bolt, 0.42) * 0.9 + motor + rail + clat * 0.6
+    x = at(x, stop, 2.5)
+    return reverb(x, rt=0.9, wet=0.18, bright=2600, seed=77)
+
+
+def rotor(d=4.0):
+    """A helicopter hovering close: the blade slap (12 per second), the turbine
+    whine and the downwash. Loops: every component repeats a whole number of times."""
+    n = int(d * SR)
+    tt = np.arange(n) / SR
+    r = np.random.RandomState(31)
+    x = np.zeros(n)
+    per = int(SR / 12)
+    for k in range(int(d * 12)):
+        i = k * per
+        L_ = min(per * 2, n - i)
+        slap = bp(r.randn(L_), 120, 1400, 2) * env_exp(L_ / SR, 0.018, 0.002) * (0.8 + 0.4 * r.rand())
+        thump = np.sin(2 * np.pi * 70 * t(L_ / SR)) * env_exp(L_ / SR, 0.03, 0.002) * 0.9
+        x[i:i + L_] += slap[:L_] + thump[:L_]
+    wash = lp(r.randn(n), 900) * 0.25 * (0.7 + 0.3 * np.sin(2 * np.pi * 0.5 * tt))
+    whine = np.sin(2 * np.pi * 1600 * tt + 2 * np.sin(2 * np.pi * 3 * tt)) * 0.03
+    y = x * 0.5 + wash + whine
+    f = int(0.3 * SR)                                    # tidy the seam
+    y[:f] = y[:f] * np.linspace(0, 1, f) + y[-f:] * np.linspace(1, 0, f)
+    return y[:-f]
+
+
+def ui_click():
+    return mixl(burst(0.1, 1500, 6000, 0.003, seed=3), modes([(1500, 0.01, 0.4)], 0.1, seed=3))
 
 
 def impact_flesh(v):
@@ -343,20 +474,19 @@ def hurt(v):
     return mixl(sat(thud * 3, 2), grunt * 0.6)
 
 
-def ui_click():
-    return metal_clack([(1800, 1), (3600, 0.3)], 0.01, noise=0.2, d=0.12)
-
-
 if __name__ == '__main__':
     for v in range(4):
         write(f'pistol{v}', pistol(v), br='128k')
     write('dryfire', dry_click())
-    write('mag_out', metal_clack([(1900, 1), (3400, 0.6), (5100, 0.3)], 0.02, seed=1))
-    write('mag_in', mixl(metal_clack([(1400, 1), (2900, 0.7), (4400, 0.4)], 0.025, noise=0.7, seed=2),
-                         lp(np.random.RandomState(9).randn(int(0.1 * SR)), 300) * env_exp(0.1, 0.02) * 0.6))
-    write('slide', metal_clack([(2200, 1), (3300, 0.8), (6100, 0.5), (1100, 0.4)], 0.018, noise=0.8, seed=3, d=0.3))
+    write('mag_release', mag_release(), peak=0.6)
+    write('mag_out', mag_out(), peak=0.7)
+    write('mag_drop', mag_drop(), peak=0.75)
+    write('mag_in', mag_in(), peak=0.85)
+    write('slide', slide(), peak=0.9)
+    write('gate', gate_open(), peak=0.9)
+    write('rotor', rotor(), br='96k', peak=0.8)
     for v in range(3):
-        write(f'shell{v}', shell(v))
+        write(f'shell{v}', shell(v), peak=0.6)
         write(f'flesh{v}', impact_flesh(v))
     for v in range(2):
         write(f'hard{v}', impact_hard(v))
@@ -374,4 +504,4 @@ if __name__ == '__main__':
     write('siren', siren(), br='64k')
     write('sting', sting())
     write('heart', heartbeat())
-    write('click', ui_click())
+    write('click', ui_click(), peak=0.6)

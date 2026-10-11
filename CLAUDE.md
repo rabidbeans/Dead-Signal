@@ -73,6 +73,8 @@ from the cloud sandbox, so trust Firebase's "release complete".
 
 ## Round 2 (2026-10-10, after Sam's first play): brighter, harder, denser
 
+⚠️ Round 3 below SUPERSEDES the waves, the single intersection and the debris counts described here (brightness, assets, `groundY`, `bake` notes still hold).
+
 Sam: "make it a bit brighter, I couldn't see"; "extremely detailed ... anywhere you shortcut, spice it up";
 "make level one a bit harder ... I was stuck on wave 1, the zombies were coming too slow".
 
@@ -115,3 +117,57 @@ Sam: "make it a bit brighter, I couldn't see"; "extremely detailed ... anywhere 
   shadows and hide beyond 24 m. If a phone sits at the lowest resolution and still averages >24 ms the moon shadow is
   switched off (`engine.onLowTier`).
 - `dirtify(material)` (assets.js) is the world-space grime/mud shader hook for paint and walls.
+
+## Round 3 (2026-10-11): a route, not waves; the gun in two hands; cleaner ground
+
+Sam: "the character isn't holding the gun properly"; "some sound effects sound wonky like the reload";
+"level up the graphics a bit more and remove some of the clutter all over the ground"; "change the game so that it's
+not wave style ... go through the level and get to the end ... about five min".
+
+- **The level is ONE LONG AVENUE** (`src/game/level.js` holds every layout number): z +40 (sealed south end) to -262,
+  four cross streets (`L.cross`), a steel checkpoint gate on the avenue beyond each (`L.gate`), a landing pad at z -240.
+  Buildings are generated lots (`buildLots`, seeded). `world.js` bakes static meshes PER 36 m CHUNK and chunks the
+  instanced windows/cornices so culling works along 300 m (measured 280-390 draw calls, 190-360k triangles a frame).
+  The nav grid is 160x636 cells, marked per collider (`NavField.mark`) and flooded only 120 cells (60 m) from the
+  players (`build(targets, maxD)`); a collider removed at runtime (gate) calls `nav.rebuildAround`.
+- **The run** (`game.js` director, host only; clients take `h: [hold, holdT, away, opened]` from every snapshot and
+  `phase` messages): `intro` -> `run` (sleepers streamed in 46 m ahead of the lead survivor, `buildPopulation`; they stand
+  or shuffle (`Zombie.idle/home`) until someone comes within ~10 m, shoots within 22 m, or a neighbour wakes
+  (`wakeNear`); ambushes at `AMBUSH` z's; a trickle) -> when the lead survivor is 22 m south of a gate, `startHold(k)`:
+  stay within 26 m of the gate for `HOLDS[k].secs` while `n` dead (x1.5 per extra player) pour in from off screen
+  (`pickSpawn`: free reachable cell 15-30 m from a survivor, off screen) -> `finishHold` opens the gate
+  (`world.openGate`: colliders removed, nav rebuilt, leaves slide into the walls, `gateTick` dust, camera shake), pulls
+  bled-out players back up at the lead's side, then `run` again. The last hold (`final`) ends in `extract`: the
+  helicopter beam + rotor (`startHeli`/`heliTick`), everyone alive must stand on the pad 1.5 s -> `win`.
+  The dead far behind (`cullBehind`, 48 m) are removed (`zgone` event). Medkits are fixed (`MEDKITS`), laid on every
+  machine. Total about 5 minutes: holds 34+38+42+46+50 s plus the walking.
+- **Checkpoints**: `Game.opened` is the number of open gates; "FROM CHECKPOINT" on the end card restarts with
+  `opts.checkpoint = opened` (gates open instantly, players placed past the last open gate). `?cp=N` for QA.
+- **Numbers to tune**: `HOLDS` (secs, n, lurch/runner share, cap), `AMBUSH`, the sleeper density in `buildPopulation`,
+  `TYPES` in zombie.js. Bot (`/home/user/tools/pw/run_bot.mjs`, circle-strafes and always shoots): clears holds 1-3 on
+  100 hp, dies in 3 or 4 or the finale depending on luck - a human is worse, so it is hard enough.
+- **The gun is held in BOTH hands** (`rig.js` `SurvivorAnim.holdGun`): the gun's pose (stance, recoil, gait bob) is
+  decided first, then both arms are solved onto it with two-bone IK (`aimBone`, elbow pole down and out; the support hand
+  wrist is `GRIP_L`, the shooting hand `GRIP_R`, in the GUN's frame, origin near the rear of the gun). Player.update just
+  copies `anim.gunPos/gunQuat` onto the model. Low ready (not aiming) is `STANCE.ready`. Finger curl is a rotation about the
+  body's Z axis (`this.curl`); the hand mesh is a single "fingers" bone so the grip is approximate (invisible at game scale).
+- **The reload is choreographed** (`R_GUN`, `R_HAND`, `RELOAD_EVENTS` in rig.js; `PISTOL.reload` 1.55 s): release the mag
+  (0.10), pull it out and drop it (0.20; a real falling mag in `Player.updateGunParts`, `mag_drop` on first bounce), the
+  support hand fetches a fresh one from the belt (a clone rides the hand), seats it (0.50, `mag_in`), racks the slide
+  (0.70, `slide`; the slide node moves back and forward, and locks back after the last shot). The anim fires the sound
+  callbacks (`anim.onEvent`) for local AND remote players, so everyone hears everyone's reload.
+  `tools/blender/weapons.py` now exports THREE nodes: `gun_slide`, `gun_mag`, `gun_frame`.
+- **Sounds were rewritten** (`tools/sfx.py`, run with the bpy venv's python: scipy/numpy there): the old reload used sine
+  "bells"; now transients + inharmonic damped modes + friction rasps (`burst`, `modes`, `rasp`): `dryfire`, `mag_release`,
+  `mag_out`, `mag_drop`, `mag_in`, `slide`, `shell*`, `click`, plus `gate` (gate rolling open) and `rotor` (loop).
+  Nobody has listened on real speakers; spectrograms were checked. Peaks are per sound (`write(..., peak=)`).
+- **Clutter**: the ground is clean. Debris (cans, bricks, cartons...) only around wrecks and fires, ~110 items in the whole
+  level (was ~400, no glass shards, no paper in the wind); decals thinned; wet-asphalt puddles are now the min of two scales of
+  the same map (`wetMask`), so they no longer tile or read as black blobs.
+- **Graphics**: four hand-dressed junction arenas, the steel gates (hazard stripes, CHECKPOINT sign, beacon red->green), the
+  landing pad ("H", perimeter lights, red flares), floodlights, steam from manholes, burning buses along the stretches,
+  generated neon signs, a proper end (helicopter beam). N8AO ambient occlusion was tried: +40% draw calls for a barely visible
+  change from the top-down camera, so it is NOT in.
+- QA tools (all in /home/user/tools/pw, not in the repo): `pose.mjs` (hands close-ups), `states.mjs` (aim/ready/run/fire/reload
+  frames), `over.mjs` (overviews and play-camera shots with draw-call counts, `EXTRA=` js), `run_bot.mjs [secs] [&cp=N]`,
+  `coop.mjs` (also checks the hold/gate sync), `boot.mjs`.

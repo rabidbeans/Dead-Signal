@@ -275,7 +275,7 @@ export function instanced(name, matrices, opts = {}) {
     im.instanceMatrix.needsUpdate = true;
     im.castShadow = !!opts.shadow;
     im.receiveShadow = true;
-    im.frustumCulled = false;
+    if (opts.cull) { im.computeBoundingSphere(); im.frustumCulled = true; } else im.frustumCulled = false;
     group.add(im);
   });
   return group;

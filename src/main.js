@@ -4,6 +4,7 @@ import '@fontsource/barlow-condensed/600.css';
 import '@fontsource/barlow-condensed/700.css';
 import '@fontsource/ibm-plex-mono/500.css';
 import './style.css';
+import * as THREE from 'three';
 import { Engine, isTouch } from './game/engine.js';
 import { loadCharacters, loadProps, ZOMBIES, SURVIVORS, loadWeapon } from './game/assets.js';
 import { Game } from './game/game.js';
@@ -59,14 +60,14 @@ async function boot() {
   requestAnimationFrame(loop);
   if (qs.has('play')) {
     // QA: straight into level 1 (?play&bot plays itself)
-    await startGame(soloPlayers(), 'me');
+    await startGame(soloPlayers(), 'me', { checkpoint: +(qs.get('cp') || 0) });
     if (qs.has('bot')) game.bot = true;
-    if (qs.has('wave')) { game.wave = +qs.get('wave'); }
   } else {
     await attract();
     show('menu');
   }
   window.__game = () => game;
+  window.__THREE = THREE;
   // QA: run the simulation forward without drawing (software GL is slow)
   window.__advance = (secs, step = 1 / 30) => { for (let t = 0; t < secs; t += step) game.update(step); return game.time; };
   window.__ready = true;
@@ -100,14 +101,14 @@ function loop(now) {
 }
 
 // ------------------------------------------------------------ play solo --
-async function startGame(players, localId) {
+async function startGame(players, localId, opts = {}) {
   starting = true;
   show('loading');
-  document.querySelector('.load-text').textContent = 'LEVEL 1 — THE CHECKPOINT';
+  document.querySelector('.load-text').textContent = 'LEVEL 1 — EVAC ROUTE';
   if (game) game.dispose();
   hud.reset();
   await loadCharacters([...new Set(players.map((p) => p.model))]);   // survivors load when chosen
-  game = new Game(engine, hud, input, net, { players, localId });
+  game = new Game(engine, hud, input, net, { players, localId, checkpoint: opts.checkpoint || 0 });
   await game.init();
   // replay anything that arrived while we were building the level
   const q = queued; queued = [];
@@ -117,7 +118,7 @@ async function startGame(players, localId) {
   game.start();
   hud.onReload = () => game?.me.startReload();
   hud.onQuit = () => quit();
-  hud.onRetry = () => retry();
+  hud.onRetry = (fromCp) => retry(fromCp);
   if (isTouch) {
     try { await document.documentElement.requestFullscreen?.({ navigationUI: 'hide' }); } catch (e) { /* iOS */ }
     try { await screen.orientation?.lock?.('landscape'); } catch (e) { /* not allowed */ }
@@ -126,11 +127,12 @@ async function startGame(players, localId) {
 
 function soloPlayers() { return [{ id: 'me', name: me.name, model: me.model, seat: 0 }]; }
 
-async function retry() {
-  if (!net || net.role === 'solo') return startGame(soloPlayers(), 'me');
+async function retry(fromCp = false) {
+  const checkpoint = fromCp ? (game?.opened || 0) : 0;
+  if (!net || net.role === 'solo') return startGame(soloPlayers(), 'me', { checkpoint });
   if (net.role === 'host') {
-    net.broadcast({ t: 'start', players: lobby });
-    return startGame(lobby, net.id);
+    net.broadcast({ t: 'start', players: lobby, cp: checkpoint });
+    return startGame(lobby, net.id, { checkpoint });
   }
   hud.toast('Waiting for the host to restart…');
 }
@@ -171,7 +173,7 @@ function status(text, err = false) {
 function lobbyMessage(from, m) {
   if (m.t === 'start' && net.role === 'client') {
     lobby = m.players;
-    startGame(lobby, net.id);
+    startGame(lobby, net.id, { checkpoint: m.cp || 0 });
     return;
   }
   if (starting || (game && !game.opts.attract)) {
@@ -195,7 +197,7 @@ function lobbyMessage(from, m) {
     status('In the room. Waiting for the host to start.');
   } else if (m.t === 'start') {
     lobby = m.players;
-    startGame(lobby, net.id);
+    startGame(lobby, net.id, { checkpoint: m.cp || 0 });
   }
 }
 

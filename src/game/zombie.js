@@ -16,7 +16,7 @@ const ATTACK_RANGE = 1.15;
 const WINDUP = 0.5;
 
 export class Zombie {
-  constructor(game, id, { type = 'shambler', model = null, seed = 1, x = 0, z = 0 } = {}) {
+  constructor(game, id, { type = 'shambler', model = null, seed = 1, x = 0, z = 0, idle = false, home = false } = {}) {
     this.game = game;
     this.id = id;
     this.type = type;
@@ -49,6 +49,9 @@ export class Zombie {
     this.deadT = 0;
     this.target = null;
     this.sunk = 0;
+    this.idle = idle;               // asleep on its feet until someone comes near
+    this.wakeR = 9 + r() * 3;
+    if (idle && home) { this.home = { x, z }; this.wander = { x: x + (r() - 0.5) * 5, z: z + (r() - 0.5) * 5 }; }
     // client interpolation buffer
     this.buf = [];
     this.place();
@@ -73,13 +76,20 @@ export class Zombie {
       if (d < bd) { bd = d; best = p; }
     }
     this.target = best;
-    const dist = Math.sqrt(bd);
+    let dist = Math.sqrt(bd);
+    if (this.idle) {
+      // the dead on their feet: they notice you close up, or a gunshot nearby
+      const g = this.game;
+      const noisy = g.noise && g.time - g.noise.t < 1.5 && (g.noise.x - this.x) ** 2 + (g.noise.z - this.z) ** 2 < 22 * 22;
+      if (dist < this.wakeR || noisy || this.state !== 'walk') this.wake();
+      else best = null;
+    }
     // rescue: a body that has not got anywhere for 3 s is put back on the road
     this.stuckT = (this.stuckT || 0) + dt;
     if (this.stuckT > 3) {
       const moved = Math.hypot(this.x - (this.sx ?? this.x), this.z - (this.sz ?? this.z));
       this.sx = this.x; this.sz = this.z; this.stuckT = 0;
-      if (moved < 0.35 && dist > 4 && this.state === 'walk' && !this.wander) this.game.relocate(this);
+      if (moved < 0.35 && dist > 4 && this.state === 'walk' && !this.wander && !this.idle) this.game.relocate(this);
     }
     let want = 0, dirx = 0, dirz = 0;
     if (best) {
@@ -96,10 +106,10 @@ export class Zombie {
     } else if (this.wander) {
       // nobody to chase (the menu): drift between points
       const tx = this.wander.x - this.x, tz = this.wander.z - this.z, d = Math.hypot(tx, tz);
-      if (d < 1) this.wander = { x: (this.r() - 0.5) * 40, z: (this.r() - 0.5) * 40 };
+      if (d < 1) this.wander = this.home ? { x: this.home.x + (this.r() - 0.5) * 6, z: this.home.z + (this.r() - 0.5) * 6 } : { x: (this.r() - 0.5) * 40, z: (this.r() - 0.5) * 40 };
       const f = d > 0.01 ? { x: tx / d, z: tz / d } : { x: 0, z: 0 };
       dirx = f.x; dirz = f.z;
-      want = this.speed * 0.8;
+      want = this.speed * (this.home ? 0.35 : 0.8);
     }
     // lurchers: a sudden dash with a scream (the RE6 scare)
     if (this.type === 'lurcher' && best) {
@@ -159,9 +169,17 @@ export class Zombie {
 
   setState(s) { this.state = s; this.stateT = 0; }
 
+  wake() {
+    if (!this.idle) return;
+    this.idle = false;
+    this.wander = null; this.home = null;
+    this.game.wakeNear?.(this);
+  }
+
   // bullets (host applies; clients send hits to the host)
   damage(dmg, dirx, dirz, crit, byId) {
     if (!this.alive) return false;
+    this.wake();
     this.hp -= dmg;
     this.knock.x += dirx * (crit ? 0.9 : 0.45) * 4;
     this.knock.z += dirz * (crit ? 0.9 : 0.45) * 4;
@@ -202,8 +220,8 @@ export class Zombie {
       this.groanT -= dt;
       if (this.groanT < 0) {
         const near = this.target ? Math.hypot(this.target.x - this.x, this.target.z - this.z) : 30;
-        this.groanT = (near < 8 ? 2.5 : 4.5) + Math.random() * 4;
-        audio.zombie('groan', this.x, this.z, near < 8 ? 1 : 0.65);
+        this.groanT = (near < 8 ? 2.5 : 4.5) * (this.idle ? 2 : 1) + Math.random() * 4;
+        audio.zombie('groan', this.x, this.z, this.idle ? 0.4 : near < 8 ? 1 : 0.65);
       }
     }
     const moved = Math.hypot(this.x - this.px, this.z - this.pz);
