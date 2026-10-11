@@ -1,4 +1,4 @@
-// Online co-op: Firestore is the lobby and the handshake; the game itself
+// Online co-op: Firestore (plain HTTPS requests, no SDK: the SDK's streaming connection stalled for ~30 s on iPhones) is the lobby and the handshake; the game itself
 // runs over WebRTC data channels, player to player, host-authoritative.
 //
 //   rooms/{CODE}                      { host, created, status, level }
@@ -8,7 +8,7 @@
 // Offers and answers are sent complete (non-trickle ICE) so each side
 // writes exactly one signal. Two channels per friend: 'u' unordered and
 // unreliable for snapshots/inputs, 'r' reliable for events.
-import { db } from './firebase.js';
+import { firebaseConfig } from './firebase.js';
 
 const ICE = [
   { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
@@ -33,6 +33,25 @@ function waitIce(pc, ms = 2500) {
   });
 }
 
+
+// ---- Firestore over plain fetch. The rules (firestore.rules) allow exactly these calls without signing in.
+const FS = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents`;
+const KEY = `key=${firebaseConfig.apiKey}`;
+const str = (v) => ({ stringValue: String(v) });
+const int = (v) => ({ integerValue: String(Math.round(v)) });
+async function api(path, { method = 'GET', body, query = '', ms = 9000 } = {}) {
+  const ctl = new AbortController();
+  const to = setTimeout(() => ctl.abort(), ms);
+  try {
+    const r = await fetch(`${FS}/${path}?${query}${query ? '&' : ''}${KEY}`, { method, body: body ? JSON.stringify(body) : undefined, headers: body ? { 'content-type': 'application/json' } : undefined, signal: ctl.signal });
+    if (r.status === 404) return null;
+    if (!r.ok) throw new Error(`Lobby server said ${r.status}`);
+    return await r.json();
+  } finally { clearTimeout(to); }
+}
+const plain = (doc) => { const o = { _id: doc.name.split('/').pop() }; for (const [k, v] of Object.entries(doc.fields || {})) o[k] = v.stringValue ?? (v.integerValue !== undefined ? +v.integerValue : v); return o; };
+const list = async (path) => ((await api(path, { query: 'pageSize=100' }))?.documents || []).map(plain);
+
 class Link {
   constructor(id, pc) {
     this.id = id; this.pc = pc; this.u = null; this.r = null; this.open = false;
@@ -54,10 +73,8 @@ export class Net {
     this.code = null;
     this.id = rid();
     this.links = new Map();
-    this.unsubs = [];
     this.timers = [];
     this.offered = new Set();
-    this.noListen = new URLSearchParams(location.search).has('nolisten');     // QA: pretend the streaming listener is dead
     this.onMessage = null;    // (fromId, msg)
     this.onPeer = null;       // (id, 'open'|'close')
     this.onStatus = null;     // text
@@ -65,51 +82,35 @@ export class Net {
 
   status(s) { this.onStatus?.(s); }
 
-  async fs() {
-    if (!this._fs) this._fs = await import('firebase/firestore');
-    return this._fs;
-  }
-
   // ------------------------------------------------------------- host --
   async host() {
-    const F = await this.fs();
-    const d = await db();
     this.role = 'host';
     for (let tries = 0; tries < 6; tries++) {
       const c = code4();
-      const ref = F.doc(d, 'rooms', c);
-      const snap = await F.getDoc(ref);
-      if (snap.exists() && Date.now() - (snap.data().created || 0) < 6 * 3600e3) continue;
-      await F.setDoc(ref, { host: this.id, created: Date.now(), status: 'lobby', level: 1 });
+      const old = await api(`rooms/${c}`);
+      if (old && Date.now() - (plain(old).created || 0) < 6 * 3600e3) continue;
+      await api(`rooms/${c}`, { method: 'PATCH', body: { fields: { host: str(this.id), created: int(Date.now()), status: str('lobby'), level: int(1) } } });
       this.code = c;
       break;
     }
     if (!this.code) throw new Error('Could not reserve a room code');
-    // a friend knocks: offer them a connection
-    // Two ways to hear it, because either can fail on a phone: Firestore's live listener, and a plain read every 2 s.
-    const peersCol = F.collection(d, 'rooms', this.code, 'peers');
-    const knock = (id, data) => {
-      if (this.offered.has(id)) return;
-      this.offered.add(id);
-      this.status(`${(data?.name?.stringValue ?? data?.name ?? 'A friend')} is knocking…`);
-      this.offerTo(id).catch((e) => { console.warn('offer', e); this.offered.delete(id); this.status('Could not answer a friend: ' + (e.message || e)); });
-    };
-    if (!this.noListen) {
-      this.unsubs.push(F.onSnapshot(peersCol, (qs) => {
-        qs.docChanges().forEach((ch) => { if (ch.type === 'added') knock(ch.doc.id, ch.doc.data()); });
-      }, (e) => console.warn('peers listener', e)));
-    }
+    // a friend knocks: offer them a connection (checked every 1.5 s)
     this.peerPoll = setInterval(async () => {
-      try { (await F.getDocs(peersCol)).forEach((doc) => knock(doc.id, doc.data())); } catch (e) { /* offline: try again */ }
-    }, 2000);
+      try {
+        for (const p of await list(`rooms/${this.code}/peers`)) {
+          if (this.offered.has(p._id)) continue;
+          this.offered.add(p._id);
+          this.status(`${p.name || 'A friend'} is knocking…`);
+          this.offerTo(p._id).catch((e) => { console.warn('offer', e); this.offered.delete(p._id); this.status('Could not answer a friend: ' + (e.message || e)); });
+        }
+      } catch (e) { /* offline: try again */ }
+    }, 1500);
     this.timers.push(this.peerPoll);
     return this.code;
   }
 
   async offerTo(peerId) {
     if (this.links.has(peerId)) return;
-    const F = await this.fs();
-    const d = await db();
     const pc = new RTCPeerConnection({ iceServers: ICE });
     const link = new Link(peerId, pc);
     this.links.set(peerId, link);
@@ -118,40 +119,39 @@ export class Net {
     this.wire(link);
     await pc.setLocalDescription(await pc.createOffer());
     await waitIce(pc);
-    const sigs = F.collection(d, 'rooms', this.code, 'peers', peerId, 'signals');
-    await F.addDoc(sigs, { from: 'host', kind: 'offer', data: JSON.stringify(pc.localDescription), t: Date.now() });
-    const take = async (s) => {
-      if (s.kind === 'answer' && !pc.remoteDescription) {
-        try { await pc.setRemoteDescription(JSON.parse(s.data)); this.status('Friend answered, connecting…'); } catch (e) { console.warn(e); }
-      }
-    };
-    if (!this.noListen) this.unsubs.push(F.onSnapshot(sigs, (qs) => { qs.docChanges().forEach((ch) => { if (ch.type === 'added') take(ch.doc.data()); }); }, (e) => console.warn('answer listener', e)));
+    const sigs = `rooms/${this.code}/peers/${peerId}/signals`;
+    await api(sigs, { method: 'POST', body: { fields: { from: str('host'), kind: str('offer'), data: str(JSON.stringify(pc.localDescription)), t: int(Date.now()) } } });
     const poll = setInterval(async () => {
       if (pc.remoteDescription || !this.links.has(peerId)) { clearInterval(poll); return; }
-      try { (await F.getDocs(sigs)).forEach((doc) => take(doc.data())); } catch (e) { /* retry */ }
-    }, 1500);
+      try {
+        for (const s of await list(sigs)) {
+          if (s.kind === 'answer' && !pc.remoteDescription) {
+            await pc.setRemoteDescription(JSON.parse(s.data));
+            this.status('Friend answered, connecting…');
+          }
+        }
+      } catch (e) { /* retry */ }
+    }, 1000);
     this.timers.push(poll);
   }
 
   async setStatus(status) {
     if (this.role !== 'host' || !this.code) return;
-    const F = await this.fs();
-    const d = await db();
     if (status !== 'lobby') clearInterval(this.peerPoll);          // nobody joins a game in progress: stop asking
-    try { await F.updateDoc(F.doc(d, 'rooms', this.code), { status }); } catch (e) { /* offline */ }
+    try { await api(`rooms/${this.code}`, { method: 'PATCH', query: 'updateMask.fieldPaths=status', body: { fields: { status: str(status) } } }); } catch (e) { /* offline */ }
   }
 
   // ------------------------------------------------------------- join --
   async join(code, name) {
-    const F = await this.fs();
-    const d = await db();
     code = code.toUpperCase().trim();
-    const room = await F.getDoc(F.doc(d, 'rooms', code));
-    if (!room.exists()) throw new Error('No game with that code');
-    if (room.data().status === 'closed') throw new Error('That game has ended');
+    this.status('Looking for the game…');
+    const room = await api(`rooms/${code}`).catch(() => { throw new Error('Could not reach the lobby server. Check your connection and try again.'); });
+    if (!room) throw new Error('No game with that code');
+    const info = plain(room);
+    if (info.status === 'closed') throw new Error('That game has ended');
     this.role = 'client';
     this.code = code;
-    const hostId = room.data().host;
+    const hostId = info.host;
     this.hostId = hostId;
     const pc = new RTCPeerConnection({ iceServers: ICE });
     const link = new Link(hostId, pc);
@@ -163,34 +163,30 @@ export class Net {
     };
     pc.onconnectionstatechange = () => this.connState(link);
     pc.oniceconnectionstatechange = () => { if (pc.iceConnectionState === 'failed') this.status('Could not reach the host over the network (ICE failed).'); };
-    const sigs = F.collection(d, 'rooms', code, 'peers', this.id, 'signals');
-    const answered = new Promise((resolve, reject) => {
-      const to = setTimeout(() => { done = true; reject(new Error('The host did not answer. Ask them to keep the game open on the lobby screen, then try again.')); }, 40000);
-      let done = false, working = false;
-      const handle = async (s) => {
-        if (done || working || s.kind !== 'offer' || pc.remoteDescription) return;
-        working = true;
+    const sigs = `rooms/${code}/peers/${this.id}/signals`;
+    this.status('Knocking…');
+    await api(`rooms/${code}/peers/${this.id}`, { method: 'PATCH', body: { fields: { name: str((name || 'Survivor').slice(0, 16)), t: int(Date.now()) } } });
+    await new Promise((resolve, reject) => {
+      const t0 = Date.now();
+      let working = false, done = false;
+      const iv = setInterval(async () => {
+        if (done || working) return;
+        if (Date.now() - t0 > 45000) { done = true; clearInterval(iv); reject(new Error('The host did not answer. Ask them to keep the game open on the lobby screen, then try again.')); return; }
         try {
+          const offer = (await list(sigs)).find((s) => s.kind === 'offer');
+          if (!offer) return;
+          working = true;
           this.status('Host answered, connecting…');
-          await pc.setRemoteDescription(JSON.parse(s.data));
+          await pc.setRemoteDescription(JSON.parse(offer.data));
           await pc.setLocalDescription(await pc.createAnswer());
           await waitIce(pc);
-          await F.addDoc(sigs, { from: this.id, kind: 'answer', data: JSON.stringify(pc.localDescription), t: Date.now() });
-          done = true; clearTimeout(to);
+          await api(sigs, { method: 'POST', body: { fields: { from: str(this.id), kind: str('answer'), data: str(JSON.stringify(pc.localDescription)), t: int(Date.now()) } } });
+          done = true; clearInterval(iv);
           resolve();
-        } catch (e) { done = true; clearTimeout(to); reject(e); }
-      };
-      if (!this.noListen) {
-        this.unsubs.push(F.onSnapshot(sigs, (qs) => { qs.docChanges().forEach((ch) => { if (ch.type === 'added') handle(ch.doc.data()); }); }, (e) => console.warn('signals listener', e)));
-      }
-      this.timers.push(setInterval(async () => {
-        if (done) return;
-        try { (await F.getDocs(sigs)).forEach((doc) => handle(doc.data())); } catch (e) { /* retry */ }
-      }, 1500));
+        } catch (e) { working = false; if (pc.remoteDescription) { done = true; clearInterval(iv); reject(e); } }
+      }, 1000);
+      this.timers.push(iv);
     });
-    await F.setDoc(F.doc(d, 'rooms', code, 'peers', this.id), { name: (name || 'Survivor').slice(0, 16), t: Date.now() });
-    this.status('Knocking…');
-    await answered;
     this.status('Connecting…');
     await new Promise((resolve, reject) => {
       const to = setTimeout(() => reject(new Error('Found the game but could not open a line to the host. If you are on mobile data, try the same Wi-Fi as the host (or have the host try Wi-Fi).')), 25000);
@@ -247,8 +243,6 @@ export class Net {
   toHost(msg, reliable = true) { if (this.hostId) this.send(this.hostId, msg, reliable); }
 
   async close() {
-    this.unsubs.forEach((u) => { try { u(); } catch (e) { /* gone */ } });
-    this.unsubs = [];
     this.timers.forEach(clearInterval);
     this.timers = [];
     this.offered.clear();
