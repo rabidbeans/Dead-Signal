@@ -14,8 +14,8 @@ export const TYPES = {
   // is coming, and it is a big one.
   brute: { hp: 380, speed: [0.85, 1.05], turn: 2.0, dmg: 28, scale: 1.32, rad: 0.5, reach: 1.55, windup: 0.8, recover: 1.2, stagger: 0.12, knock: 0.22, models: ['z_trucker', 'z_burned', 'z_worker'] },
   // the bosses: one at the landing zone of each level. Huge, they charge in bursts, and they do not flinch.
-  warden: { boss: true, name: 'THE WARDEN', hp: 1500, speed: [0.95, 1.05], turn: 2.2, dmg: 42, scale: 1.75, rad: 0.85, reach: 2.1, windup: 0.85, recover: 1.3, stagger: 0.03, knock: 0.06, burst: 3.6, burstEvery: [5, 4], models: ['z_cop'], anim: 'brute', tint: [1, 0.95, 0.95] },
-  patientzero: { boss: true, name: 'PATIENT ZERO', hp: 2400, speed: [1.0, 1.1], turn: 2.4, dmg: 50, scale: 1.85, rad: 0.9, reach: 2.2, windup: 0.8, recover: 1.2, stagger: 0.02, knock: 0.05, burst: 4.2, burstEvery: [4, 3], models: ['z_patient'], anim: 'brute', tint: [0.8, 1.0, 0.8] },
+  warden: { boss: true, name: 'THE WARDEN', hp: 1500, speed: [0.95, 1.05], turn: 2.2, dmg: 34, scale: 1.75, rad: 0.85, reach: 2.1, windup: 0.85, recover: 1.3, stagger: 0.03, knock: 0.06, burst: 3.6, burstEvery: [5, 4], models: ['z_cop'], anim: 'brute', tint: [1, 0.95, 0.95] },
+  patientzero: { boss: true, name: 'PATIENT ZERO', hp: 2400, speed: [1.0, 1.1], turn: 2.4, dmg: 40, scale: 1.85, rad: 0.9, reach: 2.2, windup: 0.8, recover: 1.2, stagger: 0.02, knock: 0.05, burst: 4.2, burstEvery: [4, 3], models: ['z_patient'], anim: 'brute', tint: [0.8, 1.0, 0.8] },
 };
 
 export const SPEED_K = 1.1;      // everything walks 10% faster than the numbers below
