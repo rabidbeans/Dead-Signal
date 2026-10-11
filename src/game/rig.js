@@ -136,6 +136,10 @@ export class ZombieAnim {
       this.p.lean = 0.55 + r() * 0.15; this.p.stride = 0.5; this.p.reach = 'none';
       this.p.timeScale = 1.25 + r() * 0.2; this.p.limp = null; this.p.sway = 0.04;
     } else if (kind === 'lurcher') { this.p.lean += 0.1; }
+    else if (kind === 'brute') {        // a heavy, deliberate walk, both arms hanging forward
+      this.p.lean = 0.3 + r() * 0.1; this.p.stride = 0.36; this.p.reach = 'both'; this.p.reachAmt = 0.6;
+      this.p.timeScale = 0.62 + r() * 0.1; this.p.limp = null; this.p.sway = 0.14; this.p.shoulderDrop = 0.1;
+    }
     this.phase = r();
     this.t = r() * 10;
     this.twitchT = 1 + r() * 4;
@@ -316,14 +320,27 @@ function rollBone(bone, child, ang) {
 const AXIS = new THREE.Vector3();
 const sm = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
 
-// grip offsets in the GUN's frame (x forward, y up, z the shooter's right)
-const GRIP_R = [-0.075, 0.014, 0.022];
-const GRIP_L = [-0.056, -0.034, -0.034];
+// Per-gun hold, in the GUN's frame (x forward, y up, z the shooter's right): where each wrist goes,
+// how the hands point, where the gun floats in front of the chest, and where the support hand
+// goes to pull the magazine and work the action.
 const HAND_R = { down: 0.55, yaw: 0 };
-const HAND_L = { down: 0.25, yaw: 0.25 };
-const STANCE = {
-  aimed: { p: [-0.02, -0.075, 0.46], pitch: 0, roll: 0 },
-  ready: { p: [-0.04, -0.30, 0.34], pitch: -0.55, roll: 0 },
+export const WEAPON_RIG = {
+  pistol: {
+    gripR: [-0.075, 0.014, 0.022], gripL: [-0.056, -0.034, -0.034],
+    handL: { down: 0.25, yaw: 0.25 },
+    stance: { aimed: { p: [-0.02, -0.075, 0.46], pitch: 0, roll: 0 }, ready: { p: [-0.04, -0.30, 0.34], pitch: -0.55, roll: 0 } },
+    well: [-0.06, -0.012],     // [x, z] of the magazine well (the hand goes under it)
+    rack: [-0.075, -0.048],    // [x, z] where the support hand takes the slide / charging handle
+    rackBack: -0.12,
+  },
+  smg: {
+    gripR: [-0.075, 0.012, 0.022], gripL: [0.135, -0.02, -0.036],
+    handL: { down: 0.9, yaw: 0.1 },
+    stance: { aimed: { p: [-0.02, -0.07, 0.34], pitch: 0, roll: 0 }, ready: { p: [-0.04, -0.28, 0.27], pitch: -0.5, roll: 0 } },
+    well: [0.112, -0.012],
+    rack: [-0.075, -0.045],
+    rackBack: -0.14,
+  },
 };
 // A reload, as fractions of its length. Poses are relative to the shoulders.
 export const RELOAD_EVENTS = [
@@ -335,13 +352,17 @@ const R_GUN = [
   { u: 0.72, p: [-0.02, -0.09, 0.40], pitch: 0.08, roll: 0.1 }, { u: 0.88, p: [-0.02, -0.08, 0.44], pitch: 0.02, roll: 0 }, { u: 1.0 },
 ];
 // the support hand: 'g' keys are in the gun's frame, 'c' keys in the body's
-const R_HAND = [
-  { u: 0.00, g: GRIP_L }, { u: 0.09, g: [-0.06, -0.085, -0.012] }, { u: 0.20, g: [-0.06, -0.20, -0.012] },
-  { u: 0.34, c: [0.20, -0.52, 0.16] }, { u: 0.43, c: [0.17, -0.47, 0.22] },
-  { u: 0.52, g: [-0.06, -0.17, -0.01] }, { u: 0.58, g: [-0.06, -0.075, -0.004] }, { u: 0.64, g: [-0.06, -0.085, -0.014] },
-  { u: 0.71, g: [-0.075, 0.085, -0.048] }, { u: 0.80, g: [-0.12, 0.085, -0.048] }, { u: 0.84, g: [-0.075, 0.085, -0.048] },
-  { u: 0.93, g: GRIP_L }, { u: 1.0, g: GRIP_L },
-];
+function handKeys(W) {
+  const [wx, wz] = W.well, [rx, rz] = W.rack, gl = W.gripL;
+  return [
+    { u: 0.00, g: gl }, { u: 0.09, g: [wx, -0.085, wz] }, { u: 0.20, g: [wx, -0.20, wz] },
+    { u: 0.34, c: [0.20, -0.52, 0.16] }, { u: 0.43, c: [0.17, -0.47, 0.22] },
+    { u: 0.52, g: [wx, -0.17, wz + 0.002] }, { u: 0.58, g: [wx, -0.075, wz + 0.008] }, { u: 0.64, g: [wx, -0.085, wz - 0.002] },
+    { u: 0.71, g: [rx, 0.085, rz] }, { u: 0.80, g: [W.rackBack, 0.085, rz] }, { u: 0.84, g: [rx, 0.085, rz] },
+    { u: 0.93, g: gl }, { u: 1.0, g: gl },
+  ];
+}
+for (const W of Object.values(WEAPON_RIG)) W.keys = handKeys(W);
 
 export class SurvivorAnim {
   constructor(rig) {
@@ -364,6 +385,8 @@ export class SurvivorAnim {
     this.gunQuat = new THREE.Quaternion();
     this.handL = new THREE.Vector3();      // world position of the support wrist (for the mag prop)
     this.rollR = 0; this.rollL = 0;
+    this.W = WEAPON_RIG.pistol;
+    this.swap = 0;         // 1 just after drawing a gun, easing to 0
     const root = rig.c.root;
     root.updateMatrixWorld(true);
     const wp = (n) => rig.b[n].getWorldPosition(new THREE.Vector3());
@@ -373,7 +396,8 @@ export class SurvivorAnim {
     }
   }
 
-  fire(last = false) { this.recoil.kick(26); this.spineKick.kick(6); this.slide = 0.03; if (last) this.slideLock = true; }
+  setWeapon(id) { this.W = WEAPON_RIG[id] || WEAPON_RIG.pistol; }
+  fire(last = false, kick = 26) { this.recoil.kick(kick); this.spineKick.kick(6); this.slide = 0.03; if (last) this.slideLock = true; }
   hit() { this.hurt.kick(10); }
 
   // moveLocal: velocity in the character's frame (x left, z forward), m/s
@@ -383,6 +407,7 @@ export class SurvivorAnim {
     this.recoil.step(dt);
     this.spineKick.step(dt);
     this.hurt.step(dt);
+    this.swap = Math.max(0, this.swap - dt / 0.38);
     this.aim += ((aiming ? 1 : 0) - this.aim) * Math.min(1, dt * 12);
     const speed = Math.hypot(moveLocal.x, moveLocal.z);
     const run = Math.min(1, speed / 3.5);
@@ -437,7 +462,7 @@ export class SurvivorAnim {
     M.copy(Lw).add(Rw).multiplyScalar(0.5);
     const a = this.aim;
     // ---- the gun's pose, in the body's frame
-    const A = STANCE.aimed, D = STANCE.ready;
+    const A = this.W.stance.aimed, D = this.W.stance.ready;
     let px = D.p[0] + (A.p[0] - D.p[0]) * a, py = D.p[1] + (A.p[1] - D.p[1]) * a, pz = D.p[2] + (A.p[2] - D.p[2]) * a;
     let pitch = D.pitch + (A.pitch - D.pitch) * a, roll = 0;
     const u = this.reload > 0 ? Math.min(1, this.reload) : 0;
@@ -458,8 +483,9 @@ export class SurvivorAnim {
     this._ru = this.reload > 0 ? u : -1;
     // recoil and gait
     const rec = this.recoil.x;
+    py -= this.swap * this.swap * 0.16;
     const pos = S_POS.set(M.x + px, M.y + py + Math.sin(this.phase * TAU * 2) * 0.012 * run, M.z + pz - rec * 0.03);
-    pitch += rec * 0.12 + this.hurt.x * 0.01;
+    pitch += rec * 0.12 + this.hurt.x * 0.01 - this.swap * this.swap * 0.7;
     // the gun's frame: x forward (pitched), y up, z the shooter's right
     S_FWD.set(0, Math.sin(pitch), Math.cos(pitch));
     S_ZR.crossVectors(S_FWD, Y).normalize();
@@ -468,7 +494,8 @@ export class SurvivorAnim {
     const q0 = S_Q0.setFromRotationMatrix(S_MAT);
     q0.multiply(S_QR.setFromAxisAngle(X, roll));
     // reach: the gun hand must be able to get there
-    const wR = S_WR.set(GRIP_R[0], GRIP_R[1], GRIP_R[2]).applyQuaternion(q0).add(pos);
+    const GR = this.W.gripR, GL = this.W.gripL;
+    const wR = S_WR.set(GR[0], GR[1], GR[2]).applyQuaternion(q0).add(pos);
     const v = S_V.copy(wR).sub(Rw);
     const reach = (this.len.R[0] + this.len.R[1]) * 0.985;
     const vl = v.length();
@@ -480,20 +507,20 @@ export class SurvivorAnim {
     // ---- the support hand's target
     const wL = S_WL;
     if (u > 0) {
-      const keys = R_HAND;
+      const keys = this.W.keys;
       let i = 0;
       while (i < keys.length - 2 && u > keys[i + 1].u) i++;
       const k0 = keys[i], k1 = keys[i + 1], t = sm((u - k0.u) / Math.max(1e-4, k1.u - k0.u));
       const at = (k, out) => (k.g ? out.set(k.g[0], k.g[1], k.g[2]).applyQuaternion(q0).add(pos) : out.set(M.x + k.c[0], M.y + k.c[1], M.z + k.c[2]));
       at(k0, S_A); at(k1, S_B);
       wL.copy(S_A).lerp(S_B, t);
-    } else wL.set(GRIP_L[0], GRIP_L[1], GRIP_L[2]).applyQuaternion(q0).add(pos);
+    } else wL.set(GL[0], GL[1], GL[2]).applyQuaternion(q0).add(pos);
     // the mag leaves the gun at 'magout' and a fresh one rides the hand until it seats
     this.magOut = u <= 0 ? 0 : u < 0.2 ? 0 : u < 0.5 ? 1 : u < 0.58 ? 1 - sm((u - 0.5) / 0.08) : 0;
     this.magHand = u >= 0.2 && u < 0.58 ? 1 : 0;
     // ---- solve both arms
     this._arm('R', wR, q0, HAND_R, roll);
-    this._arm('L', wL, q0, HAND_L, roll);
+    this._arm('L', wL, q0, this.W.handL, roll);
     this.handL.copy(wL); root.localToWorld(this.handL);
   }
 

@@ -1,6 +1,8 @@
 // The in-game HUD: DOM over the canvas (crisp text, cheap to update).
 import * as THREE from 'three';
-import { PISTOL } from '../game/player.js';
+import { WEAPONS } from '../game/weapons.js';
+
+const ICON = (id) => `${import.meta.env.BASE_URL}assets/weapons/${WEAPONS[id].icon}`;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 
@@ -12,6 +14,8 @@ export class HUD {
         <div class="hp">
           <div class="hp-name"></div>
           <div class="hp-bar"><div class="hp-fill"></div><div class="hp-ticks"></div></div>
+          <div class="ar-bar hidden"><div class="ar-fill"></div></div>
+          <div class="cash"><b>$</b><span class="cash-n">0</span><em class="cash-d"></em></div>
           <div class="team"></div>
           <div class="objective"><i></i><span></span></div>
           <div class="holdbar"><u></u></div>
@@ -20,11 +24,12 @@ export class HUD {
         <button class="pause" aria-label="Pause"><span></span><span></span></button>
       </div>
       <div class="weapon">
-        <img class="weapon-icon" src="${import.meta.env.BASE_URL}assets/weapons/pistol_icon.webp" alt="">
+        <img class="weapon-icon" src="${ICON('pistol')}" alt="">
         <div class="ammo"><span class="ammo-n">12</span><span class="ammo-r">/ ∞</span></div>
-        <div class="weapon-name">${PISTOL.name}</div>
+        <div class="weapon-name">${WEAPONS.pistol.name}</div>
       </div>
       <button class="reload-btn" aria-label="Reload"><svg viewBox="0 0 24 24"><path d="M12 5V2L7 6l5 4V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z"/></svg></button>
+      <button class="swap-btn hidden" aria-label="Switch weapon"><svg viewBox="0 0 24 24"><path d="M7 7h11l-3-3 1.4-1.4L22 8l-5.6 5.4L15 12l3-3H7zm10 10H6l3 3-1.4 1.4L2 16l5.6-5.4L9 12l-3 3h11z"/></svg></button>
       <div class="stick move"><div class="knob"></div></div>
       <div class="stick aim"><div class="knob"></div></div>
       <div class="reload-ring"><svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="17"/></svg></div>
@@ -47,7 +52,8 @@ export class HUD {
       name: $('.hp-name', root), fill: $('.hp-fill', root), team: $('.team', root),
       waveLabel: $('.wave-label', root), waveLeft: $('.wave-left', root), obj: $('.objective span', root), objBox: $('.objective', root),
       holdbar: $('.holdbar', root), holdfill: $('.holdbar u', root),
-      ammoN: $('.ammo-n', root), weapon: $('.weapon', root),
+      ammoN: $('.ammo-n', root), weapon: $('.weapon', root), wIcon: $('.weapon-icon', root), wName: $('.weapon-name', root), swapBtn: $('.swap-btn', root),
+      arBar: $('.ar-bar', root), arFill: $('.ar-fill', root), cashN: $('.cash-n', root), cashD: $('.cash-d', root), cashBox: $('.cash', root),
       move: $('.stick.move', root), aim: $('.stick.aim', root),
       ring: $('.reload-ring', root), ringC: $('.reload-ring circle', root),
       assist: $('.assist', root), vig: $('.vignette', root),
@@ -61,9 +67,13 @@ export class HUD {
     this.reloadT = 0;
     this.reloadMax = 1;
     this.onReload = null;
+    this.onSwap = null;
+    this.onSafehouse = null;
+    this.onNext = null;
     this.onQuit = null;
     this.onRetry = null;
     this.el.reloadBtn.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); this.onReload?.(); });
+    this.el.swapBtn.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); this.onSwap?.(); });
     this.el.pause.addEventListener('click', () => this.el.pauseMenu.classList.remove('hidden'));
     $('.resume', root).addEventListener('click', () => this.el.pauseMenu.classList.add('hidden'));
     $('.quit', root).addEventListener('click', () => this.onQuit?.());
@@ -74,9 +84,34 @@ export class HUD {
   get paused() { return !this.el.pauseMenu.classList.contains('hidden'); }
 
   // -------------------------------------------------------------- bits --
-  health(hp) {
-    this.el.fill.style.width = Math.max(0, hp) + '%';
-    this.el.fill.classList.toggle('low', hp <= 35);
+  health(hp, max = 100) {
+    const f = Math.max(0, hp) / max;
+    this.el.fill.style.width = (f * 100).toFixed(1) + '%';
+    this.el.fill.classList.toggle('low', f <= 0.35);
+  }
+
+  armor(a, max) {
+    this.el.arBar.classList.toggle('hidden', max <= 0);
+    this.el.arFill.style.width = (max > 0 ? Math.max(0, a) / max * 100 : 0).toFixed(1) + '%';
+  }
+
+  // the gun in hand: its picture, its name, and whether there is another to switch to
+  weapon(p) {
+    const W = p.W;
+    this.el.wIcon.src = ICON(W.id);
+    this.el.wName.textContent = W.name.toUpperCase();
+    this.el.swapBtn.classList.toggle('hidden', p.order.length < 2);
+  }
+
+  // the wallet for this run, with a little "+10" that floats up
+  cash(total, delta = 0, label = null) {
+    this.el.cashN.textContent = total;
+    if (!delta) return;
+    const d = this.el.cashD;
+    d.textContent = (label ? label + '  ' : '') + '+' + delta;
+    d.classList.remove('on');
+    cancelAnimationFrame(this._cashA);
+    this._cashA = requestAnimationFrame(() => d.classList.add('on'));
   }
 
   ammo(p) {
@@ -92,9 +127,9 @@ export class HUD {
 
   reload(t) { this.reloadT = t; this.reloadMax = t; }
 
-  damage(dmg, hp) {
+  damage(dmg, hp, max = 100) {
     this.vig = Math.min(1, this.vig + dmg / 25);
-    this.health(hp);
+    this.health(hp, max);
   }
 
   killConfirm() {
@@ -111,7 +146,7 @@ export class HUD {
   }
 
   // the top plate and the objective line: the route, or a held junction
-  route({ phase, hold, title, left, secs, dist, opened, away, final }) {
+  route({ phase, hold, title, left, secs, dist, opened, away, final, gates = 4, name = 'EVAC ROUTE' }) {
     const box = this.el.objBox;
     box.classList.toggle('on', phase === 'run' || phase === 'hold' || phase === 'extract');
     this.el.holdbar.classList.toggle('on', hold >= 0);
@@ -124,8 +159,8 @@ export class HUD {
       this.el.waveLabel.textContent = title;
       this.el.waveLeft.textContent = away ? 'PAUSED' : `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
     } else {
-      this.el.obj.textContent = phase === 'win' ? 'EVACUATED' : phase === 'extract' ? 'GET EVERYONE ON THE PAD' : opened >= 4 ? 'REACH THE LANDING ZONE' : `GET TO CHECKPOINT ${opened + 1}`;
-      this.el.waveLabel.textContent = phase === 'extract' ? 'EVAC' : 'EVAC ROUTE';
+      this.el.obj.textContent = phase === 'win' ? 'EVACUATED' : phase === 'extract' ? 'GET EVERYONE ON THE PAD' : opened >= gates ? 'REACH THE LANDING ZONE' : `GET TO CHECKPOINT ${opened + 1}`;
+      this.el.waveLabel.textContent = phase === 'extract' ? 'EVAC' : name;
       this.el.waveLeft.textContent = phase === 'win' ? '' : `${dist} M`;
     }
   }
@@ -162,23 +197,31 @@ export class HUD {
     e.classList.remove('hidden');
     const mm = Math.floor(s.time / 60), ss = String(Math.floor(s.time % 60)).padStart(2, '0');
     const cp = s.checkpoint || 0;
+    const next = win && !s.last;
+    const note = win
+      ? (s.last ? 'The Row is behind you. More of the city is still out there.' : 'The safehouse is open: spend the cash on guns, armor and speed before you go on.')
+      : (cp > 0 ? `You made it past checkpoint ${cp} of ${s.gates}.` : 'You never got past the first gate.');
     $('.panel', e).innerHTML = `
-      <div class="end-kicker">${win ? 'LEVEL 1 · EVAC ROUTE' : (why || 'THE ROUTE CLAIMED ANOTHER')}</div>
+      <div class="end-kicker">${win ? s.name : (why || 'THE ROUTE CLAIMED ANOTHER')}</div>
       <h1 class="${win ? 'win' : 'lose'}">${win ? 'SIGNAL ACQUIRED' : 'YOU DIED'}</h1>
       <div class="stats">
         <div><b>${s.kills}</b><span>KILLS</span></div>
         <div><b>${s.acc}%</b><span>ACCURACY</span></div>
-        <div><b>${s.crits}</b><span>CRITICALS</span></div>
         <div><b>${mm}:${ss}</b><span>TIME</span></div>
+        <div class="cashbox"><b>$${s.cash}</b><span>LOOTED</span></div>
       </div>
-      ${win ? '<p class="next">Level 2 and new weapons are next. Hold on to that pistol.</p>' : `<p class="next">${cp > 0 ? `You made it past checkpoint ${cp} of ${s.gates}.` : 'You never got past the first gate.'}</p>`}
+      <p class="next">${note}</p>
+      <div class="wallet">WALLET <b>$${s.wallet}</b></div>
       <div class="end-buttons">
         ${!win && cp > 0 ? '<button class="btn primary retry-cp">FROM CHECKPOINT</button>' : ''}
-        <button class="btn ${!win && cp > 0 ? '' : 'primary'} retry">${win ? 'PLAY AGAIN' : 'FROM THE START'}</button>
+        ${next ? '<button class="btn primary safe">SAFEHOUSE</button>' : '<button class="btn safe">SAFEHOUSE</button>'}
+        ${win ? '' : '<button class="btn retry">FROM THE START</button>'}
+        ${win ? '<button class="btn retry">PLAY AGAIN</button>' : ''}
         <button class="btn menu">MAIN MENU</button>
       </div>`;
-    $('.retry', e).addEventListener('click', () => this.onRetry?.(false));
+    $('.retry', e)?.addEventListener('click', () => this.onRetry?.(false));
     $('.retry-cp', e)?.addEventListener('click', () => this.onRetry?.(true));
+    $('.safe', e).addEventListener('click', () => this.onSafehouse?.());
     $('.menu', e).addEventListener('click', () => this.onQuit?.());
   }
 
@@ -199,7 +242,7 @@ export class HUD {
     };
     // damage vignette fades
     this.vig = Math.max(0, this.vig - dt * 0.9);
-    const low = me.alive ? Math.max(0, (35 - me.hp) / 35) * (0.55 + 0.25 * Math.sin(performance.now() / 180)) : 0.7;
+    const low = me.alive ? Math.max(0, (0.35 - me.hp / me.maxHp) / 0.35) * (0.55 + 0.25 * Math.sin(performance.now() / 180)) : 0.7;
     const vo = Math.round(Math.min(1, this.vig + low * 0.6) * 100) / 100;
     if (vo !== this._vo) { this._vo = vo; this.el.vig.style.opacity = vo; }
     // reload ring around the player
@@ -207,7 +250,7 @@ export class HUD {
       const p = proj(me.x, 0.1, me.z);
       this.el.ring.style.opacity = 1; this._ringOn = true;
       this.el.ring.style.transform = `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px)`;
-      const k = 1 - me.reloadT / PISTOL.reload;
+      const k = 1 - me.reloadT / me.W.reload;
       this.el.ringC.style.strokeDashoffset = 106.8 * (1 - k);
     } else if (this._ringOn) { this._ringOn = false; this.el.ring.style.opacity = 0; }
     // assist bracket on the target the pistol is locked to
@@ -227,7 +270,7 @@ export class HUD {
       for (const p of game.players.values()) {
         if (p === me) continue;
         const bar = this.root.querySelector(`.mate[data-id="${p.id}"] i`);
-        if (bar) { bar.style.width = Math.max(0, p.hp) + '%'; bar.parentElement.parentElement.classList.toggle('down', p.down); }
+        if (bar) { bar.style.width = Math.max(0, p.hp / (p.maxHp || 100) * 100) + '%'; bar.parentElement.parentElement.classList.toggle('down', p.down); }
       }
     }
     if (this.bannerT > 0) { this.bannerT -= dt; if (this.bannerT <= 0) this.el.banner.classList.remove('on'); }

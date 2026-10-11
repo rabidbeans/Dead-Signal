@@ -17,6 +17,8 @@ export class Input {
     this.firing = false;
     this.tapShot = false;
     this.reloadPressed = false;
+    this.slotPressed = null;
+    this.swapPressed = false;
     this.sticks = {};               // pointerId -> stick
     this.R = 62;
     this.mouse = null;
@@ -29,6 +31,9 @@ export class Input {
     addEventListener('keydown', (e) => {
       this.keys.add(e.code);
       if (e.code === 'KeyR') this.reloadPressed = true;
+      if (e.code === 'Digit1') this.slotPressed = 0;
+      if (e.code === 'Digit2') this.slotPressed = 1;
+      if (e.code === 'KeyQ') this.swapPressed = true;
     });
     addEventListener('keyup', (e) => this.keys.delete(e.code));
     this.mouseAim = null;   // for desktop: the cursor in screen px
@@ -106,6 +111,8 @@ export class Input {
     this.mouseFiring = !!this.mouseDown;
     const tap = this.tapShot; this.tapShot = false;
     const rl = this.reloadPressed; this.reloadPressed = false;
-    return { move: mv, aim, firing, tap, reload: rl, mouse: this.mouseAim, mouseFiring: this.mouseFiring };
+    const slot = this.slotPressed; this.slotPressed = null;
+    const swap = this.swapPressed; this.swapPressed = false;
+    return { move: mv, aim, firing, tap, reload: rl, slot, swap, mouse: this.mouseAim, mouseFiring: this.mouseFiring };
   }
 }

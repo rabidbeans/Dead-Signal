@@ -3,14 +3,16 @@
 import * as THREE from 'three';
 import { World, cutaway } from './world.js';
 import { FX } from './fx.js';
-import { Player, PISTOL } from './player.js';
+import { Player } from './player.js';
+import { save } from './save.js';
+import { WEAPON_IDS, BOUNTY } from './weapons.js';
 import { Zombie } from './zombie.js';
 import { audio, buzz } from './audio.js';
 import { loadWeapon, tex, makeCharacter, ZOMBIES } from './assets.js';
 import { nightEnvironment, isTouch } from './engine.js';
 import { perlin1 } from './noise.js';
 import { dressGround, tickFog } from './dress.js';
-import { L, HOLDS, HOLD_TRIGGER, HOLD_RADIUS, MEDKITS } from './level.js';
+import { L, LV, HOLDS, AMBUSH, HOLD_TRIGGER, HOLD_RADIUS, MEDKITS, setLevel } from './level.js';
 import { mulberry } from './rng.js';
 import { Q } from './quality.js';
 
@@ -67,7 +69,6 @@ class CameraRig {
 // held junction at each checkpoint gate (HOLDS in level.js). The director is
 // host-only; clients get the state in every snapshot.
 const ATTRACT_Z = 8;
-const AMBUSH = [{ z: -4, n: 4 }, { z: -56, n: 6 }, { z: -110, n: 7 }, { z: -164, n: 8 }, { z: -218, n: 9 }];
 
 export class Game {
   constructor(engine, hud, input, net, opts) {
@@ -78,6 +79,10 @@ export class Game {
     this.role = net?.role || 'solo';
     this.isHost = this.role !== 'client';
     this.opts = opts;
+    setLevel(opts.level || 1);
+    this.level = LV.id;
+    this.cash = 0;             // earned this run; banked into the save when the run ends
+    this.banked = false;
     this.scene = engine.scene;
     this.camera = engine.camera;
     this.touch = isTouch;
@@ -115,13 +120,13 @@ export class Game {
 
   async init() {
     const s = this.scene;
-    s.background = new THREE.Color(0x0a0f16);
-    s.fog = new THREE.FogExp2(0x101822, 0.019);
+    s.background = new THREE.Color(LV.theme.bg);
+    s.fog = new THREE.FogExp2(LV.theme.fog, LV.theme.fogD);
     if (Q.env) { s.environment = nightEnvironment(this.engine.renderer); s.environmentIntensity = 1.0; }
     this.world = new World(s);
     this.fx = new FX(s, this.world);
     this.corpses = [];
-    this.pistolModel = await loadWeapon('pistol');
+    this.gunModels = { pistol: await loadWeapon('pistol'), smg: await loadWeapon('smg') };
     this.cam = new CameraRig(this.camera);
     dressGround(this);
     this.engine.onLowTier = () => { this.world.moon.castShadow = false; if (this.groundFog) this.groundFog.pts.visible = false; this.hud.toast?.('Performance mode'); };
@@ -130,7 +135,8 @@ export class Game {
     const baseZ = this.opts.attract ? ATTRACT_Z : cp > 0 ? L.gate[cp - 1] - 5 : L.start.z;
     const spawn = [[0, 0], [1.4, 0.5], [-1.4, 0.5], [0, 1.6]];
     for (const p of this.opts.players) {
-      const pl = new Player(this, p.id, { name: p.name, model: p.model, local: p.id === this.opts.localId, seat: p.seat });
+      const local = p.id === this.opts.localId;
+      const pl = new Player(this, p.id, { name: p.name, model: p.model, local, seat: p.seat, loadout: local && !this.opts.attract ? save.loadout() : null });
       const sp = spawn[p.seat % 4];
       pl.spawnAt(sp[0], baseZ + sp[1]);
       this.players.set(p.id, pl);
@@ -138,8 +144,11 @@ export class Game {
     this.me = this.players.get(this.opts.localId);
     this.cam.focus.set(this.me.x, 0, this.me.z);
     if (!this.opts.attract) {
+      this.hud.weapon(this.me);
       this.hud.ammo(this.me);
-      this.hud.health(this.me.hp);
+      this.hud.health(this.me.hp, this.me.maxHp);
+      this.hud.armor(this.me.armor, this.me.maxArmor);
+      this.hud.cash(0);
       this.hud.team([...this.players.values()], this.me);
     }
     this.world.nav.build([...this.players.values()]);
@@ -235,7 +244,7 @@ export class Game {
     this.phaseT = 0;
     if (p === 'intro') {
       if (this.opened > 0) this.hud.banner(`CHECKPOINT ${this.opened}`, 'Keep moving. Evac is north.', 3.0);
-      else this.hud.banner('LEVEL 1', 'The Evac Route', 3.2, 'Fight north to the landing zone. Hold each junction until the gate opens.');
+      else this.hud.banner(`LEVEL ${this.level}`, LV.name.replace(/^THE /, 'The ').replace(/ROW$/, 'Row').replace('ST. MERCY', 'St. Mercy').replace('EVAC ROUTE', 'Evac Route'), 3.2, LV.banner);
     }
     if (p === 'extract') {
       this.hud.banner('EVAC IS HERE', 'Get everyone on the pad!', 3);
@@ -319,15 +328,17 @@ export class Game {
     const me = this.me;
     const dist = this.phase === 'extract' ? Math.max(0, Math.round(Math.hypot(me.x - L.lz.x, me.z - L.lz.z) - L.lz.r + 1)) : Math.max(0, Math.round(me.z - L.lz.z));
     const secs = this.hold >= 0 ? HOLDS[this.hold].secs : 0;
-    this.hud.route({ phase: this.phase, hold: this.hold, title: this.hold >= 0 ? HOLDS[this.hold].title : null, left: Math.max(0, secs - this.holdT), secs, dist, opened: this.opened, away: this.holdAway, final: this.hold === HOLDS.length - 1 });
+    this.hud.route({ phase: this.phase, hold: this.hold, title: this.hold >= 0 ? HOLDS[this.hold].title : null, left: Math.max(0, secs - this.holdT), secs, dist, opened: this.opened, away: this.holdAway, final: this.hold === HOLDS.length - 1, gates: L.gate.length, name: LV.short });
   }
 
   startHold(k) {
     this.hold = k;
     this.holdT = 0;
     this.holdSpawned = 0;
+    this.holdBrutes = 0;
     const H = HOLDS[k];
     this.holdTotal = Math.round(H.n * (1 + 0.5 * (this.players.size - 1)));
+    this.holdBruteN = H.brutes ? H.brutes + (this.players.size - 1) : 0;
     this.spawnT = 0.4;
     this.hud.banner(H.final ? 'EVAC INBOUND' : `CHECKPOINT ${k + 1}`, H.final ? 'Hold the landing zone until the bird arrives' : 'Hold the junction while the gate is cut open', 2.8);
     audio.play('sting', { vol: 0.7, jitter: 0 });
@@ -354,6 +365,7 @@ export class Game {
       this.opened++;
       if (!instant) {
         this.hud.banner('GATE OPEN', 'Move up. Evac is north.', 2.4);
+        this.earn(50 + 10 * this.level, 'CHECKPOINT');
         audio.play('gate', { vol: 0.9, jitter: 0 });
         this.cam.trauma(0.35);
       }
@@ -367,9 +379,9 @@ export class Game {
     for (const p of this.players.values()) {
       if (!p.dead && !p.down) continue;
       const x = lead.x + (Math.random() - 0.5) * 2, z = lead.z + 1.5;
-      if (p.local) { p.x = x; p.z = z; p.revive(); p.hp = 60; this.hud.health(p.hp); this.hud.banner('', 'Back on your feet', 1.6); }
+      if (p.local) { p.x = x; p.z = z; p.revive(); p.hp = p.maxHp * 0.6; this.hud.health(p.hp, p.maxHp); this.hud.banner('', 'Back on your feet', 1.6); }
       else this.net.send(p.id, { t: 'revive', x, z });
-      p.hp = 60;
+      p.hp = p.maxHp * 0.6;
     }
   }
 
@@ -400,7 +412,10 @@ export class Game {
         if (this.spawnT <= 0 && this.holdSpawned < want && hunting < H.cap + 8 * (this.players.size - 1)) {
           this.spawnT = 0.25 + Math.random() * 0.5;
           const roll = Math.random();
-          this.spawnZombie(roll < H.runner ? 'runner' : roll < H.runner + H.lurch ? 'lurcher' : 'shambler');
+          let type = roll < H.runner ? 'runner' : roll < H.runner + H.lurch ? 'lurcher' : 'shambler';
+          // the brutes lumber in at even points through the hold
+          if (this.holdBrutes < this.holdBruteN && this.holdSpawned >= this.holdTotal * (this.holdBrutes + 1) / (this.holdBruteN + 1)) { type = 'brute'; this.holdBrutes++; this.hud.toast('Something big is coming…'); }
+          this.spawnZombie(type);
           this.holdSpawned++;
         }
         if (H.final && prog > 0.8) this.startHeli();
@@ -444,7 +459,7 @@ export class Game {
         const x = cx + (rng() - 0.5) * 3, zz = z + (rng() - 0.5) * 3;
         if (!free(x, zz)) continue;
         const r = rng();
-        this.pop.push({ x, z: zz, type: r < 0.12 ? 'lurcher' : 'shambler', seed: (rng() * 1e6) | 0, home: rng() < 0.65, done: false });
+        this.pop.push({ x, z: zz, type: r < LV.brutePop && z < L.cross[0] - 40 ? 'brute' : r < 0.12 + LV.brutePop ? 'lurcher' : 'shambler', seed: (rng() * 1e6) | 0, home: rng() < 0.65, done: false });
       }
     }
   }
@@ -463,6 +478,7 @@ export class Game {
       this.ambushed.add(i);
       if (this.opened > 0 && L.gate[this.opened - 1] > a.z + 6) return;        // already behind us
       for (let k = 0; k < a.n + 2 * (this.players.size - 1); k++) this.spawnZombie(Math.random() < 0.35 ? 'runner' : Math.random() < 0.3 ? 'lurcher' : 'shambler');
+      for (let k = 0; k < (a.brutes || 0); k++) this.spawnZombie('brute');
     });
     // a trickle, so the road never feels safe
     this.trickleT -= dt;
@@ -583,6 +599,7 @@ export class Game {
   onKill(z, dx, dz, crit, mine, byId = null) {
     if (mine) {
       this.stats.kills++;
+      this.earn(Math.round((BOUNTY[z.type] || 10) * (this.me.cashMul || 1)), null, z);
       this.hitstop = crit ? 0.07 : 0.045;       // a beat of weight on kills only
       buzz([0, 25]);
       this.hud.killConfirm();
@@ -634,7 +651,7 @@ export class Game {
     } else if (m.t === 'revive') {
       if (m.x !== undefined) { this.me.x = m.x; this.me.z = m.z; }
       this.me.revive();
-      this.hud.health(this.me.hp);
+      this.hud.health(this.me.hp, this.me.maxHp);
       this.hud.banner('', 'You were pulled back up', 1.5);
     } else if (m.t === 'phase' && !this.isHost) {
       this.hold = m.hold;
@@ -661,7 +678,7 @@ export class Game {
       if (p && !p.local) { p.remoteShot(e); this.noise = { x: p.x, z: p.z, t: this.time }; }
     } else if (e.k === 'reload') {
       const p = this.players.get(e.pid);
-      if (p && !p.local) { p.anim.reload = 0.01; p.remoteReload = PISTOL.reload; }
+      if (p && !p.local) { p.anim.reload = 0.01; p.remoteReload = e.rt || p.W.reload; p.remoteReloadMax = p.remoteReload; }
     } else if (e.k === 'lurch') {
       const z = this.zombies.get(e.id);
       if (z) { z.anim.doLurch(); if (!this.isHost) audio.zombie('scream', z.x, z.z, 1); }
@@ -676,6 +693,8 @@ export class Game {
     if (p.buf.length > 20) p.buf.shift();
     p.aimx = m.ax; p.aimz = m.az; p.aiming = !!(m.fl & 1);
     p.hp = m.hp;
+    if (m.mh) p.maxHp = m.mh;
+    if (m.w !== undefined && p.order) { const id = WEAPON_IDS[m.w]; if (id && p.cur.id !== id) p.setWeapon(id, true); }
     p.down = !!(m.fl & 2);
     p.dead = !!(m.fl & 4);
   }
@@ -691,10 +710,10 @@ export class Game {
       this.holdT = ht;
     }
     for (const r of m.p) {
-      const [id, x, z, f, ax, az, hp, fl] = r;
+      const [id, x, z, f, ax, az, hp, fl, w, mh] = r;
       if (id === this.me.id) continue;
       const p = this.players.get(id);
-      if (p) this.applyRemote(p, { x, z, f, ax, az, hp, fl });
+      if (p) this.applyRemote(p, { x, z, f, ax, az, hp, fl, w, mh });
     }
     for (const r of m.z) {
       const [id, x, z, f, st] = r;
@@ -729,13 +748,13 @@ export class Game {
         this.inT = 1 / 20;
         const p = this.me;
         const fl = (p.aiming ? 1 : 0) | (p.down ? 2 : 0) | (p.dead ? 4 : 0);
-        this.net.toHost({ t: 'in', x: +p.x.toFixed(2), z: +p.z.toFixed(2), f: +p.face.toFixed(3), ax: +p.aimx.toFixed(2), az: +p.aimz.toFixed(2), hp: p.hp, fl }, false);
+        this.net.toHost({ t: 'in', x: +p.x.toFixed(2), z: +p.z.toFixed(2), f: +p.face.toFixed(3), ax: +p.aimx.toFixed(2), az: +p.aimz.toFixed(2), hp: p.hp, fl, w: WEAPON_IDS.indexOf(p.cur.id), mh: p.maxHp }, false);
       }
     } else if (this.role === 'host') {
       this.snapT -= dt;
       if (this.snapT <= 0) {
         this.snapT = 1 / 15;
-        const P = [...this.players.values()].map((p) => [p.id, +p.x.toFixed(2), +p.z.toFixed(2), +p.face.toFixed(3), +p.aimx.toFixed(2), +p.aimz.toFixed(2), p.hp, (p.aiming ? 1 : 0) | (p.down ? 2 : 0) | (p.dead ? 4 : 0)]);
+        const P = [...this.players.values()].map((p) => [p.id, +p.x.toFixed(2), +p.z.toFixed(2), +p.face.toFixed(3), +p.aimx.toFixed(2), +p.aimz.toFixed(2), p.hp, (p.aiming ? 1 : 0) | (p.down ? 2 : 0) | (p.dead ? 4 : 0), WEAPON_IDS.indexOf(p.cur.id), p.maxHp]);
         const Z = [];
         for (const z of this.zombies.values()) {
           if (!z.alive) continue;
@@ -765,7 +784,7 @@ export class Game {
       p.reviveT = helper ? p.reviveT + dt : Math.max(0, p.reviveT - dt);
       if (p.reviveT > 3) {
         p.reviveT = 0;
-        if (p.local) { p.revive(); this.hud.health(p.hp); } else this.net.send(p.id, { t: 'revive' });
+        if (p.local) { p.revive(); this.hud.health(p.hp, p.maxHp); } else this.net.send(p.id, { t: 'revive' });
       }
     }
   }
@@ -773,9 +792,30 @@ export class Game {
   finish(win, why = null) {
     if (this.over) return;
     this.over = true;
+    this.won = !!win;
     if (this.role === 'host') this.net.broadcast({ t: 'end', win });
     const acc = this.stats.shots ? Math.round(100 * this.stats.hits / this.stats.shots) : 0;
-    this.hud.end(win, { ...this.stats, acc, time: this.time, checkpoint: this.opened, gates: L.gate.length }, why);
+    if (win) this.earn(150 + 100 * this.level, 'EVACUATED');
+    const bank = this.bank(win);
+    this.hud.end(win, { ...this.stats, acc, time: this.time, checkpoint: this.opened, gates: L.gate.length, level: this.level, name: LV.kicker, cash: this.cash, wallet: save.cash, last: this.level >= 2, host: this.role !== 'client', coop: this.role !== 'solo', ...bank }, why);
+  }
+
+  // money found this run: kills pay a bounty, each gate a bonus, getting out a big one
+  earn(n, label = null, at = null) {
+    if (n <= 0) return;
+    this.cash += n;
+    this.hud.cash(this.cash, n, label);
+  }
+
+  // put this run's money in the wallet (once), and open the next level on a win
+  bank(win) {
+    if (this.banked || this.opts.attract) return {};
+    this.banked = true;
+    save.addCash(this.cash);
+    save.data.runs++;
+    if (win) { save.unlock(this.level + 1); const b = save.data.best[this.level]; if (!b || this.time < b) save.data.best[this.level] = Math.round(this.time); }
+    save.write();
+    return {};
   }
 
   // a body that has been lying here for days: a zombie put straight into its
@@ -822,9 +862,9 @@ export class Game {
     // medkits
     for (const m of [...this.medkits]) {
       m.g.rotation.y += dt;
-      if (me.alive && me.hp < 100 && Math.hypot(me.x - m.x, me.z - m.z) < 0.9) {
-        me.hp = Math.min(100, me.hp + 50);
-        this.hud.health(me.hp);
+      if (me.alive && me.hp < me.maxHp && Math.hypot(me.x - m.x, me.z - m.z) < 0.9) {
+        me.hp = Math.min(me.maxHp, me.hp + Math.max(50, me.maxHp * 0.5));
+        this.hud.health(me.hp, me.maxHp);
         audio.play('click', { vol: 0.8 });
         this.takeMedkit(m.id);
         if (this.role === 'host') this.net.broadcast({ t: 'medkit_take', id: m.id });
@@ -872,7 +912,7 @@ export class Game {
       z.char.mesh.castShadow = zr2 > 0 && z.alive && (z.x - me.x) ** 2 + (z.z - me.z) ** 2 < zr2;
     }
     for (const p of this.players.values()) {
-      if (p.remoteReload > 0) { p.remoteReload -= dt; p.anim.reload = 1 - p.remoteReload / PISTOL.reload; if (p.remoteReload <= 0) p.anim.reload = 0; }
+      if (p.remoteReload > 0) { p.remoteReload -= dt; p.anim.reload = 1 - p.remoteReload / (p.remoteReloadMax || p.W.reload); if (p.remoteReload <= 0) p.anim.reload = 0; }
       p.update(dt);
     }
     // environment
@@ -889,8 +929,8 @@ export class Game {
     this.gateTick(dt);
     this.updateCutaway();
     // low health: heartbeat and a draining picture
-    const low = me.alive ? Math.max(0, (40 - me.hp) / 40) : 0.8;
-    this.engine.grade.saturation = -0.06 - low * 0.5;
+    const low = me.alive ? Math.max(0, (0.4 - me.hp / me.maxHp) / 0.4) : 0.8;
+    this.engine.grade.saturation = LV.theme.sat - low * 0.5;
     this.heartT = (this.heartT || 0) - dtReal;
     if (low > 0 && this.heartT <= 0) { this.heartT = 1.1 - low * 0.4; audio.play('heart', { vol: 0.35 + low * 0.5, jitter: 0 }); }
     this.hud.frame(this, dtReal);
@@ -959,6 +999,7 @@ export class Game {
   }
 
   dispose() {
+    this.bank(false);          // quitting keeps what you looted
     for (const z of this.zombies.values()) z.dispose();
     for (const p of this.players.values()) p.dispose();
     this.scene.clear();
@@ -966,4 +1007,3 @@ export class Game {
   }
 }
 
-export { PISTOL };

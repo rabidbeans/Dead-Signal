@@ -198,3 +198,43 @@ nav flood 4.8 ms -> 0.6, draw calls 408 -> ~290, triangles 555k -> ~240k.
   modules were simplified (street_kit.py, props.py -> rebuild with the bpy venv).
 - Known/not done: no LOD meshes for zombies (9.5k tris); the window/cornice instancing is chunked per 36 m, so a chunk is drawn whole when any part is
   visible; GPU time on a real phone is unmeasured - if a phone still struggles, the next knobs are `Q.moonShadow` (0 = off), `startDpr`, `zombieShadows`.
+
+## Round 5 (2026-10-11): level 2, the safehouse shop, the SMG, armor/health/speed perks
+
+Sam: "add a level 2, and a transition point in the middle where you can upgrade your weapons and buy new
+weapons, health, armor, movement speed… only one new weapon: a submachine gun."
+
+- **Weapons** (`src/game/weapons.js`): `WEAPONS` (pistol, smg: every stat, plus `tip` = muzzle in the gun's frame,
+  `spare` = where the spare mag sits in the support hand), `WEAPON_UPGRADES` (damage x5, magazine x3, fast hands x3,
+  stability x3; SMG prices x1.3), `PERKS` (health +20 x5, armor +25 x5 refilled each level, speed +5% x4, Scavenger
+  +15% cash x3), `weaponStats(id, levels)`, `BOUNTY`. Player reads `this.W` (current gun's stats) — never a constant.
+- **Player** keeps a `kit` of gun models (`makeGun`), one per owned weapon (a remote survivor carries every gun
+  because a friend's machine does not know what he owns). `setWeapon/cycleWeapon/selectSlot`; ammo lives with the
+  gun (`cur.ammo`; `player.ammo` is an accessor). Keys 1/2/Q, a swap button on touch (`.swap-btn`, shown only when
+  you own 2). Drawing a gun = 0.38 s `drawT` (cannot fire) + `anim.swap` dip. Fire cadence carries the remainder
+  (`cool = interval + max(cool,-dt)`) so the SMG's 11.8/s is true at any frame time. Armor soaks 60% of each hit
+  (`ARMOR_ABSORB`) until spent. `maxHp` is per player; HUD bars use fractions.
+- **Rig** (`WEAPON_RIG` in rig.js): per-gun wrist grips, support-hand pose, stance and reload hand keys (built by
+  `handKeys(W)` from the mag-well and charging-handle positions). SMG: support hand on the vertical foregrip.
+- **SMG model**: `tools/blender/smg.py` -> `public/assets/weapons/smg.glb` (same node names: gun_frame/gun_slide/gun_mag).
+  Sounds: `tools/sfx_smg.py` (run with the bpy venv python) -> smg0..3, swap, buy, deny.
+- **Save** (`src/game/save.js`, localStorage `dead-signal-save-v1`): cash, unlocked level, equipped, per-gun levels,
+  perks, best times. `save.loadout()` is what a run starts with. Each player brings his OWN loadout and wallet in
+  co-op (damage is computed on the shooter's machine, as before). Cash is earned per kill (`BOUNTY` x Scavenger),
+  per gate (50 + 10/level) and on evac (150 + 100/level); `Game.bank()` puts it in the wallet once, on a win, a
+  death, or quitting (you keep what you looted). Winning level N unlocks N+1.
+- **Safehouse** (`src/ui/shop.js`, `#shop`): GUNS and SURVIVOR tabs. Opened from the menu, or SAFEHOUSE on the end
+  card; DEPLOY starts the next level (host only in co-op; a friend sees "waiting for the host").
+- **Levels** (`level.js`): `L`, `HOLDS`, `MEDKITS`, `AMBUSH`, `LV` are live objects that `setLevel(n)` rewrites in place
+  (Game's constructor calls it). `LEVELS` holds both levels: geometry, holds, ambushes, medkits, building heights, sign
+  words, colour theme, which arena kit stands at each junction (`arenas: [{k, flip}]`), bus spots. dress.js has five
+  arena kits (`arenas[1..5]`) with a mirror wrapper. Level 1 is unchanged (same rng order). Level 2 "St. Mercy Row":
+  5 gates, 326 m, taller buildings, teal night, hospital signs, a 5th arena (ambulance convoy), more dead.
+- **Brute** (`TYPES.brute`, zombie.js): 380 hp, 28 dmg, scale 1.32, slow, 0.8 s wind-up, almost never staggers, 22%
+  knockback, bullet radius 0.5 (`def.rad`). Level 2 holds spawn them at even points (`HOLDS[k].brutes`, +1 per extra
+  player), ambushes bring some (`brutes`), sleepers 7%.
+- **Net**: `in` messages carry weapon index `w` and `mh` (max hp); snapshot rows gain them as [8],[9]; `shot`
+  events carry `wp`; `reload` carries `rt`; `start` messages carry `lvl`.
+- QA URL flags: `?play&fast&lvl=2&kit=smg&cash=5000&perks=hp:2,armor:2` (writes the QA browser's save). Scripts in
+  /home/user/tools/pw (not in repo): flow.mjs (win -> safehouse -> level 2), perk.mjs, shop.mjs, l2.mjs, brute.mjs.
+- **Not verified**: real phone play of level 2 / SMG feel; sounds by ear; co-op with two real devices.

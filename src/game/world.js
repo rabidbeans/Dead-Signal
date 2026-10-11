@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { prop, surface, tex, propMaterial, instanced, awningMaterial, dirtify } from './assets.js';
 import { populate } from './dress.js';
-import { L, blockRanges, buildLots, lampSites } from './level.js';
+import { L, LV, blockRanges, buildLots, lampSites } from './level.js';
 import { mulberry } from './rng.js';
 import { Q } from './quality.js';
 
@@ -580,7 +580,7 @@ float wetG = smoothstep(0.25, 0.7, wetMask(vRoughnessMapUv)) * ${amount.toFixed(
       }
       // a neon sign on some of the fronts
       if (lot.r < 0.32 && h >= 8) {
-        const words = [['PHARMACY', '#3dff8a', 5.5], ['LIQUOR', '#ff4040', 4.5], ['MOTEL', '#ff8a3a', 4.5], ['24 HR', '#6aa8ff', 3.5], ['DINER', '#ff5fb0', 4], ['CLINIC', '#7affd6', 4.5], ['PAWN', '#ffd34a', 3.5], ['HOTEL', '#ff7a4a', 4.5], ['BAR', '#8aa0ff', 3]];
+        const words = LV.signs;
         const [txt, col, sw] = words[Math.floor(lot.r * 1000) % words.length];
         const mm = new THREE.MeshBasicMaterial({ map: signTexture(txt, col), toneMapped: false, color: 0xffffff });
         const sgn = new THREE.Mesh(new THREE.PlaneGeometry(sw, sw / 4), mm);
@@ -827,10 +827,11 @@ float wetG = smoothstep(0.25, 0.7, wetMask(vRoughnessMapUv)) * ${amount.toFixed(
   // ----------------------------------------------------------- lighting --
   lights() {
     const s = this.scene;
-    const hemi = new THREE.HemisphereLight(0x5f759b, 0x1a1a1f, 1.7);
+    const T = LV.theme;
+    const hemi = new THREE.HemisphereLight(T.hemiSky, T.hemiGround, T.hemiI);
     s.add(hemi);
-    const moon = new THREE.DirectionalLight(0x9db6dc, 1.5);
-    this.moonBase = 1.5;
+    const moon = new THREE.DirectionalLight(T.moon, T.moonI);
+    this.moonBase = T.moonI;
     moon.castShadow = Q.moonShadow > 0;
     if (Q.moonShadow > 0) moon.shadow.mapSize.set(Q.moonShadow, Q.moonShadow);
     const msc = moon.shadow.camera;

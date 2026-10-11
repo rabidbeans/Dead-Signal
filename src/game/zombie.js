@@ -10,6 +10,9 @@ export const TYPES = {
   shambler: { hp: 110, speed: [1.0, 1.5], turn: 2.6, dmg: 16 },
   lurcher: { hp: 100, speed: [1.2, 1.65], turn: 3.4, dmg: 18, burst: 3.5 },
   runner: { hp: 70, speed: [2.4, 3.0], turn: 4.6, dmg: 12 },
+  // the brute (level 2): a hulking, slow, hard-hitting body that shrugs off a stagger. A long wind-up tells you the blow
+  // is coming, and it is a big one.
+  brute: { hp: 380, speed: [0.85, 1.05], turn: 2.0, dmg: 28, scale: 1.32, rad: 0.5, reach: 1.55, windup: 0.8, recover: 1.2, stagger: 0.12, knock: 0.22, models: ['z_trucker', 'z_burned', 'z_worker'] },
 };
 
 const ATTACK_RANGE = 1.15;
@@ -23,9 +26,9 @@ export class Zombie {
     this.def = TYPES[type];
     const r = mulberry(seed);
     this.r = r;
-    this.model = model || ZOMBIES[Math.floor(r() * ZOMBIES.length)];
+    this.model = model || (this.def.models || ZOMBIES)[Math.floor(r() * (this.def.models || ZOMBIES).length)];
     this.char = makeCharacter(this.model);
-    const scale = 0.92 + r() * 0.16;
+    const scale = (0.92 + r() * 0.16) * (this.def.scale || 1);
     this.char.root.scale.setScalar(scale);
     this.rig = new Rig(this.char);
     this.anim = new ZombieAnim(this.rig, seed, type);
@@ -124,18 +127,19 @@ export class Zombie {
     if (this.bursting > 0) { this.bursting -= dt; want = this.def.burst; }
     // states
     if (this.state === 'stagger') { want *= 0.15; if (this.stateT > this.staggerFor) this.setState('walk'); }
-    if (this.state === 'walk' && best && dist < ATTACK_RANGE) {
+    const reach = this.def.reach || ATTACK_RANGE, windup = this.def.windup || WINDUP;
+    if (this.state === 'walk' && best && dist < reach) {
       this.setState('windup');
       this.game.emit({ k: 'windup', id: this.id });
     }
     if (this.state === 'windup') {
       want = 0.3;
-      if (this.stateT > WINDUP) {
-        if (best && dist < ATTACK_RANGE + 0.35) this.game.hurtPlayer(best, this.def.dmg, this);
+      if (this.stateT > windup) {
+        if (best && dist < reach + 0.35) this.game.hurtPlayer(best, this.def.dmg, this);
         this.setState('recover');
       }
     }
-    if (this.state === 'recover') { want = 0.2; if (this.stateT > 0.9) this.setState('walk'); }
+    if (this.state === 'recover') { want = 0.2; if (this.stateT > (this.def.recover || 0.9)) this.setState('walk'); }
     // turn toward the travel direction at a limited rate
     if (dirx || dirz) {
       const ta = Math.atan2(dirx, dirz);
@@ -181,13 +185,15 @@ export class Zombie {
     if (!this.alive) return false;
     this.wake();
     this.hp -= dmg;
-    this.knock.x += dirx * (crit ? 0.9 : 0.45) * 4;
-    this.knock.z += dirz * (crit ? 0.9 : 0.45) * 4;
+    const kk = this.def.knock ?? 1;
+    this.knock.x += dirx * (crit ? 0.9 : 0.45) * 4 * kk;
+    this.knock.z += dirz * (crit ? 0.9 : 0.45) * 4 * kk;
     if (this.hp <= 0) { this.die(dirx, dirz, crit); return true; }
     // a stagger meter: torso shots lose effect, but a run of hits staggers
+    const sg = this.def.stagger ?? 1;          // a brute almost never breaks stride
     this.staggerFor = 0.15 + Math.random() * 0.15;
-    if (this.state === 'walk' || this.state === 'recover') this.setState('stagger');
-    if (this.state === 'windup' && Math.random() < 0.5) this.setState('stagger');
+    if ((this.state === 'walk' || this.state === 'recover') && Math.random() < sg) this.setState('stagger');
+    if (this.state === 'windup' && Math.random() < 0.5 * sg) this.setState('stagger');
     return false;
   }
 

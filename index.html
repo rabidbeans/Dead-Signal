@@ -27,7 +27,7 @@
   <div id="menu" class="screen hidden">
     <div class="menu-left">
       <div class="logo">DEAD<span>SIGNAL</span></div>
-      <div class="tagline">The city went quiet three days ago. You still have a pistol.</div>
+      <div class="tagline">The city went quiet three days ago. Loot what you can. Spend it before the next road.</div>
       <label class="field">
         <span>CALLSIGN</span>
         <input id="name" maxlength="14" autocomplete="off" spellcheck="false" placeholder="Survivor">
@@ -39,14 +39,19 @@
           <button class="chip" data-model="survivor_b">ELENA</button>
         </div>
       </div>
+      <div class="field">
+        <span>LEVEL</span>
+        <div class="pick" id="levels"></div>
+      </div>
       <div class="menu-buttons">
         <button class="btn primary" id="solo">PLAY SOLO</button>
         <button class="btn" id="host">HOST CO-OP</button>
         <button class="btn" id="join">JOIN WITH CODE</button>
+        <button class="btn" id="safehouse">SAFEHOUSE <span class="wallet-chip" id="menu-cash"></span></button>
       </div>
       <div class="level-card">
-        <b>LEVEL 1 — EVAC ROUTE</b>
-        <span>Fight north along the avenue. Hold each junction until the checkpoint gate opens, then make it to the landing zone. About five minutes.</span>
+        <b id="lc-name">LEVEL 1 — EVAC ROUTE</b>
+        <span id="lc-text">Fight north along the avenue. Hold each junction until the checkpoint gate opens, then make it to the landing zone. About five minutes.</span>
       </div>
     </div>
     <div class="controls-help">
@@ -69,7 +74,7 @@
       <div class="lobby-status" id="lobby-status"></div>
       <div class="seats" id="seats"></div>
       <div class="lobby-buttons">
-        <button class="btn primary hidden" id="start">START LEVEL 1</button>
+        <button class="btn primary hidden" id="start">START</button>
         <button class="btn" id="leave">BACK</button>
       </div>
     </div>

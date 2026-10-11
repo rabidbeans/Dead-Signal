@@ -12,6 +12,9 @@ import { HUD, escapeHtml } from './ui/hud.js';
 import { Input } from './game/input.js';
 import { audio } from './game/audio.js';
 import { Net } from './net/net.js';
+import { Shop } from './ui/shop.js';
+import { save } from './game/save.js';
+import { LEVEL_IDS, levelInfo } from './game/level.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('view');
@@ -23,6 +26,8 @@ let net = null;
 let lobby = [];          // [{ id, name, model, seat }]
 let queued = [];
 let starting = false;
+let picked = 1;                // the level chosen on the menu
+const shop = new Shop();
 
 const store = {
   get(k, d) { try { return localStorage.getItem('ds.' + k) ?? d; } catch (e) { return d; } },
@@ -42,7 +47,7 @@ function show(screen) {
 async function boot() {
   const bar = document.querySelector('.load-bar i');
   let done = 0;
-  const steps = [loadCharacters(ZOMBIES), loadProps(), loadWeapon('pistol')];
+  const steps = [loadCharacters(ZOMBIES), loadProps(), loadWeapon('pistol'), loadWeapon('smg')];
   steps.forEach((p) => p.then(() => { done++; bar.style.width = (done / steps.length * 100) + '%'; }));
   await Promise.all(steps);
   $('name').value = store.get('name', '');
@@ -60,17 +65,73 @@ async function boot() {
   requestAnimationFrame(loop);
   if (qs.has('play')) {
     // QA: straight into level 1 (?play&bot plays itself)
-    await startGame(soloPlayers(), 'me', { checkpoint: +(qs.get('cp') || 0) });
+    // QA: ?kit=smg starts with the SMG bought and equipped, ?cash=5000 fills the wallet, ?lvl=2 picks the level
+    if (qs.get('kit') === 'smg') { save.data.weapons.smg.owned = true; save.data.equipped = 'smg'; }
+    if (qs.has('cash')) save.data.cash = +qs.get('cash');
+    if (qs.get('perks')) for (const kv of qs.get('perks').split(',')) { const [k, v] = kv.split(':'); save.data.perks[k] = +v; }
+    save.write();
+    await startGame(soloPlayers(), 'me', { checkpoint: +(qs.get('cp') || 0), level: +(qs.get('lvl') || 1) });
     if (qs.has('bot')) game.bot = true;
   } else {
     await attract();
+    buildLevelPicker();
     show('menu');
   }
   window.__game = () => game;
   window.__THREE = THREE;
+  window.__save = save;
+  window.__shop = shop;
   // QA: run the simulation forward without drawing (software GL is slow)
   window.__advance = (secs, step = 1 / 30) => { for (let t = 0; t < secs; t += step) game.update(step); return game.time; };
   window.__ready = true;
+}
+
+// ------------------------------------------------------------- the safehouse --
+// `level` is the one DEPLOY starts. After a win it is the next level; from the menu it is the one picked.
+function openShop(level, won = false) {
+  const target = won ? Math.min(level + 1, Math.max(...LEVEL_IDS)) : level;
+  const host = !net || net.role !== 'client';
+  shop.open({
+    level: target,
+    deploy: host && target <= save.unlocked ? () => deploy(target) : null,
+    why: host ? `LEVEL ${target} IS LOCKED` : 'WAITING FOR THE HOST',
+    onClose: () => { refreshMenu(); },
+  });
+}
+
+function deploy(level) {
+  shop.el.classList.add('hidden');
+  if (!net || net.role === 'solo') return startGame(soloPlayers(), 'me', { level });
+  net.broadcast({ t: 'start', players: lobby, lvl: level });
+  return startGame(lobby, net.id, { level });
+}
+
+function buildLevelPicker() {
+  const box = $('levels');
+  box.innerHTML = '';
+  for (const id of LEVEL_IDS) {
+    const b = document.createElement('button');
+    b.className = 'chip';
+    b.dataset.level = id;
+    b.textContent = `LEVEL ${id}`;
+    b.addEventListener('click', () => { if (id > save.unlocked) { audio.unlock(); audio.play('deny', { vol: 0.6, jitter: 0 }); hud.toast?.('Win the earlier level first'); return; } picked = id; click(); refreshMenu(); });
+    box.appendChild(b);
+  }
+  refreshMenu();
+}
+
+function refreshMenu() {
+  if (picked > save.unlocked) picked = 1;
+  document.querySelectorAll('#levels .chip').forEach((b) => {
+    const id = +b.dataset.level;
+    b.classList.toggle('on', id === picked);
+    b.classList.toggle('lock', id > save.unlocked);
+  });
+  const info = levelInfo(picked);
+  $('lc-name').textContent = `LEVEL ${picked} — ${info.name}`;
+  $('lc-text').textContent = info.blurb;
+  $('menu-cash').textContent = '$' + save.cash.toLocaleString('en-US');
+  $('start').textContent = `START LEVEL ${picked}`;
 }
 
 function click() { audio.unlock(); audio.play('click', { vol: 0.5, jitter: 0 }); }
@@ -107,11 +168,13 @@ function loop(now) {
 async function startGame(players, localId, opts = {}) {
   starting = true;
   show('loading');
-  document.querySelector('.load-text').textContent = 'LEVEL 1 — EVAC ROUTE';
+  const level = opts.level || 1;
+  document.querySelector('.load-text').textContent = `LEVEL ${level} — ${levelInfo(level).name}`;
   if (game) game.dispose();
   hud.reset();
   await loadCharacters([...new Set(players.map((p) => p.model))]);   // survivors load when chosen
-  game = new Game(engine, hud, input, net, { players, localId, checkpoint: opts.checkpoint || 0 });
+  shop.el.classList.add('hidden');
+  game = new Game(engine, hud, input, net, { players, localId, checkpoint: opts.checkpoint || 0, level });
   await game.init();
   // replay anything that arrived while we were building the level
   const q = queued; queued = [];
@@ -122,6 +185,8 @@ async function startGame(players, localId, opts = {}) {
   hud.onReload = () => game?.me.startReload();
   hud.onQuit = () => quit();
   hud.onRetry = (fromCp) => retry(fromCp);
+  hud.onSwap = () => game?.me.cycleWeapon();
+  hud.onSafehouse = () => openShop(game.level, !!game.won);
   if (isTouch) {
     try { await document.documentElement.requestFullscreen?.({ navigationUI: 'hide' }); } catch (e) { /* iOS */ }
     try { await screen.orientation?.lock?.('landscape'); } catch (e) { /* not allowed */ }
@@ -132,10 +197,11 @@ function soloPlayers() { return [{ id: 'me', name: me.name, model: me.model, sea
 
 async function retry(fromCp = false) {
   const checkpoint = fromCp ? (game?.opened || 0) : 0;
-  if (!net || net.role === 'solo') return startGame(soloPlayers(), 'me', { checkpoint });
+  const level = game?.level || 1;
+  if (!net || net.role === 'solo') return startGame(soloPlayers(), 'me', { checkpoint, level });
   if (net.role === 'host') {
-    net.broadcast({ t: 'start', players: lobby, cp: checkpoint });
-    return startGame(lobby, net.id, { checkpoint });
+    net.broadcast({ t: 'start', players: lobby, cp: checkpoint, lvl: level });
+    return startGame(lobby, net.id, { checkpoint, level });
   }
   hud.toast('Waiting for the host to restart…');
 }
@@ -146,13 +212,14 @@ async function quit() {
   hud.reset();
   show('loading');
   await attract();
+  buildLevelPicker();
   show('menu');
 }
 
 $('solo').addEventListener('click', async () => {
   click();
   store.set('name', $('name').value.trim());
-  await startGame(soloPlayers(), 'me');
+  await startGame(soloPlayers(), 'me', { level: picked });
 });
 
 // --------------------------------------------------------------- co-op --
@@ -176,7 +243,7 @@ function status(text, err = false) {
 function lobbyMessage(from, m) {
   if (m.t === 'start' && net.role === 'client') {
     lobby = m.players;
-    startGame(lobby, net.id, { checkpoint: m.cp || 0 });
+    startGame(lobby, net.id, { checkpoint: m.cp || 0, level: m.lvl || 1 });
     return;
   }
   if (starting || (game && !game.opts.attract)) {
@@ -200,7 +267,7 @@ function lobbyMessage(from, m) {
     status('In the room. Waiting for the host to start.');
   } else if (m.t === 'start') {
     lobby = m.players;
-    startGame(lobby, net.id, { checkpoint: m.cp || 0 });
+    startGame(lobby, net.id, { checkpoint: m.cp || 0, level: m.lvl || 1 });
   }
 }
 
@@ -225,6 +292,11 @@ function newNet() {
   net.onStatus = (s) => status(s);
   return net;
 }
+
+$('safehouse').addEventListener('click', () => {
+  click();
+  openShop(picked, false);
+});
 
 $('host').addEventListener('click', async () => {
   click();
@@ -302,8 +374,8 @@ $('start').addEventListener('click', async () => {
   click();
   if (!net) return;
   await net.setStatus('playing');
-  net.broadcast({ t: 'start', players: lobby });
-  startGame(lobby, net.id);
+  net.broadcast({ t: 'start', players: lobby, lvl: picked });
+  startGame(lobby, net.id, { level: picked });
 });
 
 $('leave').addEventListener('click', async () => {
