@@ -14,8 +14,10 @@ let _db = null;
 export async function db() {
   if (_db) return _db;
   const { initializeApp } = await import('firebase/app');
-  const { getFirestore } = await import('firebase/firestore');
+  const { initializeFirestore } = await import('firebase/firestore');
   const app = initializeApp(firebaseConfig);
-  _db = getFirestore(app);
+  // Phones behind content blockers, school/office proxies or odd carriers often cannot hold Firestore's streaming
+  // connection open: the host then never hears a friend knock. Auto-detect falls back to plain long-polling.
+  _db = initializeFirestore(app, { experimentalAutoDetectLongPolling: true });
   return _db;
 }

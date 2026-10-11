@@ -55,6 +55,9 @@ export class Net {
     this.id = rid();
     this.links = new Map();
     this.unsubs = [];
+    this.timers = [];
+    this.offered = new Set();
+    this.noListen = new URLSearchParams(location.search).has('nolisten');     // QA: pretend the streaming listener is dead
     this.onMessage = null;    // (fromId, msg)
     this.onPeer = null;       // (id, 'open'|'close')
     this.onStatus = null;     // text
@@ -83,16 +86,28 @@ export class Net {
     }
     if (!this.code) throw new Error('Could not reserve a room code');
     // a friend knocks: offer them a connection
+    // Two ways to hear it, because either can fail on a phone: Firestore's live listener, and a plain read every 2 s.
     const peersCol = F.collection(d, 'rooms', this.code, 'peers');
-    this.unsubs.push(F.onSnapshot(peersCol, (qs) => {
-      qs.docChanges().forEach((ch) => {
-        if (ch.type === 'added' && !this.links.has(ch.doc.id)) this.offerTo(ch.doc.id, ch.doc.data());
-      });
-    }));
+    const knock = (id, data) => {
+      if (this.offered.has(id)) return;
+      this.offered.add(id);
+      this.status(`${(data?.name?.stringValue ?? data?.name ?? 'A friend')} is knocking…`);
+      this.offerTo(id).catch((e) => { console.warn('offer', e); this.offered.delete(id); this.status('Could not answer a friend: ' + (e.message || e)); });
+    };
+    if (!this.noListen) {
+      this.unsubs.push(F.onSnapshot(peersCol, (qs) => {
+        qs.docChanges().forEach((ch) => { if (ch.type === 'added') knock(ch.doc.id, ch.doc.data()); });
+      }, (e) => console.warn('peers listener', e)));
+    }
+    this.peerPoll = setInterval(async () => {
+      try { (await F.getDocs(peersCol)).forEach((doc) => knock(doc.id, doc.data())); } catch (e) { /* offline: try again */ }
+    }, 2000);
+    this.timers.push(this.peerPoll);
     return this.code;
   }
 
   async offerTo(peerId) {
+    if (this.links.has(peerId)) return;
     const F = await this.fs();
     const d = await db();
     const pc = new RTCPeerConnection({ iceServers: ICE });
@@ -105,21 +120,24 @@ export class Net {
     await waitIce(pc);
     const sigs = F.collection(d, 'rooms', this.code, 'peers', peerId, 'signals');
     await F.addDoc(sigs, { from: 'host', kind: 'offer', data: JSON.stringify(pc.localDescription), t: Date.now() });
-    const un = F.onSnapshot(sigs, (qs) => {
-      qs.docChanges().forEach(async (ch) => {
-        const s = ch.doc.data();
-        if (ch.type === 'added' && s.kind === 'answer' && !pc.remoteDescription) {
-          try { await pc.setRemoteDescription(JSON.parse(s.data)); } catch (e) { console.warn(e); }
-        }
-      });
-    });
-    this.unsubs.push(un);
+    const take = async (s) => {
+      if (s.kind === 'answer' && !pc.remoteDescription) {
+        try { await pc.setRemoteDescription(JSON.parse(s.data)); this.status('Friend answered, connecting…'); } catch (e) { console.warn(e); }
+      }
+    };
+    if (!this.noListen) this.unsubs.push(F.onSnapshot(sigs, (qs) => { qs.docChanges().forEach((ch) => { if (ch.type === 'added') take(ch.doc.data()); }); }, (e) => console.warn('answer listener', e)));
+    const poll = setInterval(async () => {
+      if (pc.remoteDescription || !this.links.has(peerId)) { clearInterval(poll); return; }
+      try { (await F.getDocs(sigs)).forEach((doc) => take(doc.data())); } catch (e) { /* retry */ }
+    }, 1500);
+    this.timers.push(poll);
   }
 
   async setStatus(status) {
     if (this.role !== 'host' || !this.code) return;
     const F = await this.fs();
     const d = await db();
+    if (status !== 'lobby') clearInterval(this.peerPoll);          // nobody joins a game in progress: stop asking
     try { await F.updateDoc(F.doc(d, 'rooms', this.code), { status }); } catch (e) { /* offline */ }
   }
 
@@ -144,31 +162,38 @@ export class Net {
       this.wireChannel(link, e.channel);
     };
     pc.onconnectionstatechange = () => this.connState(link);
+    pc.oniceconnectionstatechange = () => { if (pc.iceConnectionState === 'failed') this.status('Could not reach the host over the network (ICE failed).'); };
     const sigs = F.collection(d, 'rooms', code, 'peers', this.id, 'signals');
     const answered = new Promise((resolve, reject) => {
-      const to = setTimeout(() => reject(new Error('The host did not answer')), 20000);
-      const un = F.onSnapshot(sigs, (qs) => {
-        qs.docChanges().forEach(async (ch) => {
-          const s = ch.doc.data();
-          if (ch.type !== 'added' || s.kind !== 'offer' || pc.remoteDescription) return;
-          try {
-            await pc.setRemoteDescription(JSON.parse(s.data));
-            await pc.setLocalDescription(await pc.createAnswer());
-            await waitIce(pc);
-            await F.addDoc(sigs, { from: this.id, kind: 'answer', data: JSON.stringify(pc.localDescription), t: Date.now() });
-            clearTimeout(to);
-            resolve();
-          } catch (e) { reject(e); }
-        });
-      });
-      this.unsubs.push(un);
+      const to = setTimeout(() => { done = true; reject(new Error('The host did not answer. Ask them to keep the game open on the lobby screen, then try again.')); }, 40000);
+      let done = false, working = false;
+      const handle = async (s) => {
+        if (done || working || s.kind !== 'offer' || pc.remoteDescription) return;
+        working = true;
+        try {
+          this.status('Host answered, connecting…');
+          await pc.setRemoteDescription(JSON.parse(s.data));
+          await pc.setLocalDescription(await pc.createAnswer());
+          await waitIce(pc);
+          await F.addDoc(sigs, { from: this.id, kind: 'answer', data: JSON.stringify(pc.localDescription), t: Date.now() });
+          done = true; clearTimeout(to);
+          resolve();
+        } catch (e) { done = true; clearTimeout(to); reject(e); }
+      };
+      if (!this.noListen) {
+        this.unsubs.push(F.onSnapshot(sigs, (qs) => { qs.docChanges().forEach((ch) => { if (ch.type === 'added') handle(ch.doc.data()); }); }, (e) => console.warn('signals listener', e)));
+      }
+      this.timers.push(setInterval(async () => {
+        if (done) return;
+        try { (await F.getDocs(sigs)).forEach((doc) => handle(doc.data())); } catch (e) { /* retry */ }
+      }, 1500));
     });
     await F.setDoc(F.doc(d, 'rooms', code, 'peers', this.id), { name: (name || 'Survivor').slice(0, 16), t: Date.now() });
     this.status('Knocking…');
     await answered;
     this.status('Connecting…');
     await new Promise((resolve, reject) => {
-      const to = setTimeout(() => reject(new Error('Could not connect to the host (network blocked?)')), 20000);
+      const to = setTimeout(() => reject(new Error('Found the game but could not open a line to the host. If you are on mobile data, try the same Wi-Fi as the host (or have the host try Wi-Fi).')), 25000);
       const check = () => { if (link.open) { clearTimeout(to); resolve(); } else setTimeout(check, 100); };
       check();
     });
@@ -224,6 +249,9 @@ export class Net {
   async close() {
     this.unsubs.forEach((u) => { try { u(); } catch (e) { /* gone */ } });
     this.unsubs = [];
+    this.timers.forEach(clearInterval);
+    this.timers = [];
+    this.offered.clear();
     for (const l of this.links.values()) l.close();
     this.links.clear();
     if (this.role === 'host' && this.code) await this.setStatus('closed');
