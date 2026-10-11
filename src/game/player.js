@@ -164,7 +164,8 @@ export class Player {
     for (const zb of g.zombies.values()) {
       if (!zb.alive) continue;
       const dx = res.x - zb.x, dz = res.z - zb.z, d = Math.hypot(dx, dz);
-      if (d < 0.55 && d > 1e-4) { res.x = zb.x + dx / d * 0.55; res.z = zb.z + dz / d * 0.55; }
+      const rr = 0.55 + ((zb.def.rad || 0.32) - 0.32) * 0.9;
+      if (d < rr && d > 1e-4) { res.x = zb.x + dx / d * rr; res.z = zb.z + dz / d * rr; }
     }
     const moved = Math.hypot(res.x - this.x, res.z - this.z);
     this.x = res.x; this.z = res.z;

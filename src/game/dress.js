@@ -397,7 +397,7 @@ export function dressGround(game) {
     [3.0, L.gate[0] + 6.5, 1.1, 'z_office'], [-5.0, -62, 3.2, 'z_nurse'], [1.2, L.cross[1] - 3.6, 0.3, 'z_hoodie'],
     [-2.0, L.cross[1] + 4.6, 4.4, 'z_jogger'], [4.6, L.gate[1] + 6.8, 2.0, 'z_trucker'], [-1.0, -100, 5.5, 'z_patient'],
     [2.0, L.cross[2] + 3.0, 0.9, 'z_elder'], [-3.4, L.cross[2] - 3.4, 3.8, 'z_burned'], [-2.6, L.gate[2] + 7.0, 2.7, 'z_worker'],
-    [3.4, -170, 1.5, 'z_office'], [-1.0, L.cross[3] + 2.0, 4.2, 'z_hoodie'], [2.8, L.gate[3] + 6.0, 0.6, 'z_cop'],
+    [3.4, -170, 1.5, 'z_office'],
     [-2.4, L.lz.z + 14, 5.2, 'z_nurse'], [3.2, L.lz.z + 12, 1.9, 'z_trucker'],
   ] : [
     ...L.cross.flatMap((c, i) => [

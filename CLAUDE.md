@@ -238,3 +238,20 @@ weapons, health, armor, movement speed… only one new weapon: a submachine gun.
 - QA URL flags: `?play&fast&lvl=2&kit=smg&cash=5000&perks=hp:2,armor:2` (writes the QA browser's save). Scripts in
   /home/user/tools/pw (not in repo): flow.mjs (win -> safehouse -> level 2), perk.mjs, shop.mjs, l2.mjs, brute.mjs.
 - **Not verified**: real phone play of level 2 / SMG feel; sounds by ear; co-op with two real devices.
+
+## Round 6 (2026-10-11): twice the dead, 10% faster, three junctions, a boss at the end of each level
+
+Sam: "twice as many zombies and they are 10% faster … a boss at the end of each level, and only three junctions and then you leave."
+
+- **Three junctions per level** (`level.js` `LEVELS`): level 1 crosses -26/-80/-134, gates -40/-94/-148, pad -186; level 2 crosses -26/-86/-146,
+  gates -40/-100/-160, pad -202. `HOLDS` = 3 junction holds + a final boss hold. Arena kits: L1 [1, 2, 4], L2 [3 flip, 5, 4 flip].
+  ⚠️ dress.js's level-1 corpse list used to name `cross[3]`/`gate[3]`: anything that indexes the 4th junction must be gone.
+- **Twice the dead**: every hold's `n`, every ambush `n`, the sleepers (`LV.popGap` 4+rng*4.5 instead of 8+rng*9), the trickle (twice as often,
+  twice the cap) and the extract spawns; hold `cap`s are ~1.7x (not 2x: the phone has to draw them). **10% faster**: `SPEED_K` 1.1 in zombie.js
+  (walk and charge speeds). Phone frame rate with this many bodies is UNMEASURED.
+- **Bosses** (`TYPES.warden`, `TYPES.patientzero`, `boss: true`): level 1 THE WARDEN (a 1.75x cop, 1500 hp, 42 dmg), level 2 PATIENT ZERO (1.85x gown
+  patient, 2400 hp, 50 dmg). They charge in bursts (`def.burst`/`burstEvery`, shared with lurchers), barely stagger, take little knockback, have a
+  long wind-up, and get +60% hp per extra player. Bounty 400 / 700. `Game.bossZ()` finds the living one on every machine.
+- **The final hold is the boss fight**: `startHold` spawns the boss at the north end of the pad (host); the hold ends only when it is dead (and
+  8 s have passed), the dead keep trickling in meanwhile; then `extract` (heli) -> win as before. The HUD shows a boss bar (`.bossbar`, from
+  `game.bossZ()`); snapshots carry `B: [id, hp]` so a client's bar moves.

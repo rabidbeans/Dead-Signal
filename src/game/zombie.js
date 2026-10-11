@@ -8,13 +8,17 @@ import { audio } from './audio.js';
 export const TYPES = {
   // research: shamblers 0.6-1.0 m/s turning 90-150°/s; lurchers burst to ~3 m/s for 0.4-0.8 s every 3-6 s
   shambler: { hp: 110, speed: [1.0, 1.5], turn: 2.6, dmg: 16 },
-  lurcher: { hp: 100, speed: [1.2, 1.65], turn: 3.4, dmg: 18, burst: 3.5 },
+  lurcher: { hp: 100, speed: [1.2, 1.65], turn: 3.4, dmg: 18, burst: 3.5, burstEvery: [3, 3] },
   runner: { hp: 70, speed: [2.4, 3.0], turn: 4.6, dmg: 12 },
   // the brute (level 2): a hulking, slow, hard-hitting body that shrugs off a stagger. A long wind-up tells you the blow
   // is coming, and it is a big one.
   brute: { hp: 380, speed: [0.85, 1.05], turn: 2.0, dmg: 28, scale: 1.32, rad: 0.5, reach: 1.55, windup: 0.8, recover: 1.2, stagger: 0.12, knock: 0.22, models: ['z_trucker', 'z_burned', 'z_worker'] },
+  // the bosses: one at the landing zone of each level. Huge, they charge in bursts, and they do not flinch.
+  warden: { boss: true, name: 'THE WARDEN', hp: 1500, speed: [0.95, 1.05], turn: 2.2, dmg: 42, scale: 1.75, rad: 0.85, reach: 2.1, windup: 0.85, recover: 1.3, stagger: 0.03, knock: 0.06, burst: 3.6, burstEvery: [5, 4], models: ['z_cop'], anim: 'brute', tint: [1, 0.95, 0.95] },
+  patientzero: { boss: true, name: 'PATIENT ZERO', hp: 2400, speed: [1.0, 1.1], turn: 2.4, dmg: 50, scale: 1.85, rad: 0.9, reach: 2.2, windup: 0.8, recover: 1.2, stagger: 0.02, knock: 0.05, burst: 4.2, burstEvery: [4, 3], models: ['z_patient'], anim: 'brute', tint: [0.8, 1.0, 0.8] },
 };
 
+export const SPEED_K = 1.1;      // everything walks 10% faster than the numbers below
 const ATTACK_RANGE = 1.15;
 const WINDUP = 0.5;
 
@@ -31,19 +35,22 @@ export class Zombie {
     const scale = (0.92 + r() * 0.16) * (this.def.scale || 1);
     this.char.root.scale.setScalar(scale);
     this.rig = new Rig(this.char);
-    this.anim = new ZombieAnim(this.rig, seed, type);
+    this.anim = new ZombieAnim(this.rig, seed, this.def.anim || type);
     // a little colour drift per body so a horde of the same model isn't clones
     const tint = 0.9 + r() * 0.16;
-    this.char.material.userData.uniforms.uTint.value.setRGB(tint, tint * (0.97 + r() * 0.05), tint * (0.95 + r() * 0.06));
+    const tk = this.def.tint || [1, 1, 1];
+    this.char.material.userData.uniforms.uTint.value.setRGB(tint * tk[0], tint * (0.97 + r() * 0.05) * tk[1], tint * (0.95 + r() * 0.06) * tk[2]);
     game.scene.add(this.char.root);
     this.x = x; this.z = z;
     this.px = x; this.pz = z;
     this.face = Math.atan2(-x, -z);
-    this.hp = this.def.hp;
-    this.speed = this.def.speed[0] + r() * (this.def.speed[1] - this.def.speed[0]);
+    // a boss has more health with every extra player
+    this.maxHp = this.hp = this.def.hp * (this.def.boss ? 1 + 0.6 * (game.players.size - 1) : 1);
+    this.speed = (this.def.speed[0] + r() * (this.def.speed[1] - this.def.speed[0])) * SPEED_K;
     this.state = 'walk';      // walk | windup | recover | stagger | dead
     this.stateT = 0;
     this.burstT = 2 + r() * 4;
+    this.boss = !!this.def.boss;
     this.bursting = 0;
     this.slot = (r() - 0.5) * 2.2;   // flanking offset (radians around the target)
     this.groanT = 1 + r() * 6;
@@ -92,7 +99,7 @@ export class Zombie {
     if (this.stuckT > 3) {
       const moved = Math.hypot(this.x - (this.sx ?? this.x), this.z - (this.sz ?? this.z));
       this.sx = this.x; this.sz = this.z; this.stuckT = 0;
-      if (moved < 0.35 && dist > 4 && this.state === 'walk' && !this.wander && !this.idle) this.game.relocate(this);
+      if (moved < 0.35 && dist > 4 && this.state === 'walk' && !this.wander && !this.idle && !this.boss) this.game.relocate(this);
     }
     let want = 0, dirx = 0, dirz = 0;
     if (best) {
@@ -114,17 +121,18 @@ export class Zombie {
       dirx = f.x; dirz = f.z;
       want = this.speed * (this.home ? 0.35 : 0.8);
     }
-    // lurchers: a sudden dash with a scream (the RE6 scare)
-    if (this.type === 'lurcher' && best) {
+    // lurchers and bosses: a sudden dash with a scream (the RE6 scare)
+    if (this.def.burst && best) {
       this.burstT -= dt;
       if (this.burstT < 0 && dist < 14 && dist > 2.5 && this.state === 'walk') {
         this.bursting = 0.45 + this.r() * 0.35;
-        this.burstT = 3 + this.r() * 3;
+        const be = this.def.burstEvery;
+        this.burstT = be[0] + this.r() * be[1];
         this.anim.doLurch();
         this.game.emit({ k: 'lurch', id: this.id });
       }
     }
-    if (this.bursting > 0) { this.bursting -= dt; want = this.def.burst; }
+    if (this.bursting > 0) { this.bursting -= dt; want = this.def.burst * SPEED_K; }
     // states
     if (this.state === 'stagger') { want *= 0.15; if (this.stateT > this.staggerFor) this.setState('walk'); }
     const reach = this.def.reach || ATTACK_RANGE, windup = this.def.windup || WINDUP;

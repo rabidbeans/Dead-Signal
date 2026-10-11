@@ -23,6 +23,7 @@ export class HUD {
         <div class="wave"><span class="wave-label"></span><span class="wave-left"></span></div>
         <button class="pause" aria-label="Pause"><span></span><span></span></button>
       </div>
+      <div class="bossbar hidden"><b></b><div><i></i></div></div>
       <div class="weapon">
         <img class="weapon-icon" src="${ICON('pistol')}" alt="">
         <div class="ammo"><span class="ammo-n">12</span><span class="ammo-r">/ ∞</span></div>
@@ -53,6 +54,7 @@ export class HUD {
       waveLabel: $('.wave-label', root), waveLeft: $('.wave-left', root), obj: $('.objective span', root), objBox: $('.objective', root),
       holdbar: $('.holdbar', root), holdfill: $('.holdbar u', root),
       ammoN: $('.ammo-n', root), weapon: $('.weapon', root), wIcon: $('.weapon-icon', root), wName: $('.weapon-name', root), swapBtn: $('.swap-btn', root),
+      bossBar: $('.bossbar', root), bossName: $('.bossbar b', root), bossFill: $('.bossbar i', root),
       arBar: $('.ar-bar', root), arFill: $('.ar-fill', root), cashN: $('.cash-n', root), cashD: $('.cash-d', root), cashBox: $('.cash', root),
       move: $('.stick.move', root), aim: $('.stick.aim', root),
       ring: $('.reload-ring', root), ringC: $('.reload-ring circle', root),
@@ -146,13 +148,18 @@ export class HUD {
   }
 
   // the top plate and the objective line: the route, or a held junction
-  route({ phase, hold, title, left, secs, dist, opened, away, final, gates = 4, name = 'EVAC ROUTE' }) {
+  route({ phase, hold, title, left, secs, dist, opened, away, final, gates = 3, name = 'EVAC ROUTE', boss = null }) {
     const box = this.el.objBox;
     box.classList.toggle('on', phase === 'run' || phase === 'hold' || phase === 'extract');
     this.el.holdbar.classList.toggle('on', hold >= 0);
     box.classList.toggle('away', hold >= 0 && !!away);
     if (phase === 'intro') { this.el.waveLabel.textContent = 'STAND BY'; this.el.waveLeft.textContent = ''; return; }
-    if (hold >= 0) {
+    if (hold >= 0 && boss) {
+      this.el.holdbar.classList.remove('on');
+      this.el.obj.textContent = away ? 'GET BACK TO THE LANDING ZONE' : `KILL ${boss}`;
+      this.el.waveLabel.textContent = title;
+      this.el.waveLeft.textContent = away ? 'PAUSED' : 'BOSS';
+    } else if (hold >= 0) {
       const t = Math.ceil(left);
       this.el.obj.textContent = away ? 'GET BACK TO THE GATE' : final ? `HOLD THE LANDING ZONE  ·  ${t} s` : `HOLD THE JUNCTION  ·  ${t} s`;
       this.el.holdfill.style.width = Math.min(100, (1 - left / Math.max(1, secs)) * 100) + '%';
@@ -272,6 +279,12 @@ export class HUD {
         const bar = this.root.querySelector(`.mate[data-id="${p.id}"] i`);
         if (bar) { bar.style.width = Math.max(0, p.hp / (p.maxHp || 100) * 100) + '%'; bar.parentElement.parentElement.classList.toggle('down', p.down); }
       }
+    }
+    if (this._bt === undefined || (this._bt -= dt) < 0) {
+      this._bt = 0.15;
+      const bz = game.bossZ?.();
+      this.el.bossBar.classList.toggle('hidden', !bz);
+      if (bz) { this.el.bossName.textContent = bz.def.name; this.el.bossFill.style.width = Math.max(0, bz.hp / bz.maxHp * 100).toFixed(1) + '%'; }
     }
     if (this.bannerT > 0) { this.bannerT -= dt; if (this.bannerT <= 0) this.el.banner.classList.remove('on'); }
     game.paused = this.paused && game.role === 'solo';

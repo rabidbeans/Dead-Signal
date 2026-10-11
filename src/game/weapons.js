@@ -64,4 +64,4 @@ export function upgradeCost(weaponId, key, level) {
 }
 
 // what a zombie is worth
-export const BOUNTY = { shambler: 10, lurcher: 16, runner: 14, brute: 60 };
+export const BOUNTY = { shambler: 10, lurcher: 16, runner: 14, brute: 60, warden: 400, patientzero: 700 };

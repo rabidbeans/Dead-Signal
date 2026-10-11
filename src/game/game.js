@@ -6,7 +6,7 @@ import { FX } from './fx.js';
 import { Player } from './player.js';
 import { save } from './save.js';
 import { WEAPON_IDS, BOUNTY } from './weapons.js';
-import { Zombie } from './zombie.js';
+import { Zombie, TYPES } from './zombie.js';
 import { audio, buzz } from './audio.js';
 import { loadWeapon, tex, makeCharacter, ZOMBIES } from './assets.js';
 import { nightEnvironment, isTouch } from './engine.js';
@@ -313,6 +313,12 @@ export class Game {
     this.gateFx = this.gateFx.filter((g) => g.t > 0);
   }
 
+  // the living boss, if there is one (every machine finds it the same way)
+  bossZ() {
+    for (const z of this.zombies.values()) if (z.boss && z.alive) return z;
+    return null;
+  }
+
   // the survivor furthest up the avenue
   lead() {
     let best = null;
@@ -328,7 +334,7 @@ export class Game {
     const me = this.me;
     const dist = this.phase === 'extract' ? Math.max(0, Math.round(Math.hypot(me.x - L.lz.x, me.z - L.lz.z) - L.lz.r + 1)) : Math.max(0, Math.round(me.z - L.lz.z));
     const secs = this.hold >= 0 ? HOLDS[this.hold].secs : 0;
-    this.hud.route({ phase: this.phase, hold: this.hold, title: this.hold >= 0 ? HOLDS[this.hold].title : null, left: Math.max(0, secs - this.holdT), secs, dist, opened: this.opened, away: this.holdAway, final: this.hold === HOLDS.length - 1, gates: L.gate.length, name: LV.short });
+    this.hud.route({ phase: this.phase, hold: this.hold, title: this.hold >= 0 ? HOLDS[this.hold].title : null, left: Math.max(0, secs - this.holdT), secs, dist, opened: this.opened, away: this.holdAway, final: this.hold === HOLDS.length - 1, gates: L.gate.length, name: LV.short, boss: this.hold >= 0 && HOLDS[this.hold].boss ? TYPES[HOLDS[this.hold].boss].name : null });
   }
 
   startHold(k) {
@@ -340,7 +346,12 @@ export class Game {
     this.holdTotal = Math.round(H.n * (1 + 0.5 * (this.players.size - 1)));
     this.holdBruteN = H.brutes ? H.brutes + (this.players.size - 1) : 0;
     this.spawnT = 0.4;
-    this.hud.banner(H.final ? 'EVAC INBOUND' : `CHECKPOINT ${k + 1}`, H.final ? 'Hold the landing zone until the bird arrives' : 'Hold the junction while the gate is cut open', 2.8);
+    if (H.boss && this.isHost) {
+      // the boss comes down from the north end of the pad toward the survivors
+      this.bossSpawned = true;
+      this.spawnZombie(H.boss, { x: 0, z: L.lz.z - 8, seed: 424242 + this.level });
+    }
+    this.hud.banner(H.boss ? TYPES[H.boss].name : `CHECKPOINT ${k + 1}`, H.boss ? 'Kill it to call in the bird' : 'Hold the junction while the gate is cut open', 2.8);
     audio.play('sting', { vol: 0.7, jitter: 0 });
     if (this.role === 'host') this.net.broadcast({ t: 'phase', p: this.phase, hold: this.hold, opened: this.opened });
     this.refreshHud();
@@ -408,9 +419,10 @@ export class Game {
         this.spawnT -= dt;
         // the dead arrive on a curve: slow at first, a flood in the middle
         const prog = Math.min(1, this.holdT / H.secs);
-        const want = Math.round(this.holdTotal * Math.min(1, prog * 1.15));
+        // (the boss fight goes on until the boss is dead: after the planned dead have come, a steady trickle keeps coming)
+        const want = H.boss && prog >= 1 ? 1e9 : Math.round(this.holdTotal * Math.min(1, prog * 1.15));
         if (this.spawnT <= 0 && this.holdSpawned < want && hunting < H.cap + 8 * (this.players.size - 1)) {
-          this.spawnT = 0.25 + Math.random() * 0.5;
+          this.spawnT = (H.boss && prog >= 1 ? 1.0 : 0.25) + Math.random() * 0.5;
           const roll = Math.random();
           let type = roll < H.runner ? 'runner' : roll < H.runner + H.lurch ? 'lurcher' : 'shambler';
           // the brutes lumber in at even points through the hold
@@ -418,8 +430,8 @@ export class Game {
           this.spawnZombie(type);
           this.holdSpawned++;
         }
-        if (H.final && prog > 0.8) this.startHeli();
-        if (this.holdT >= H.secs) { this.phase = 'run'; this.finishHold(); }
+        const done = H.boss ? this.bossSpawned && !this.bossZ() && this.holdT > 8 : this.holdT >= H.secs;
+        if (done) { this.phase = 'run'; this.finishHold(); }
       }
       if (this.phaseT > 0.25) { this.phaseT = 0; this.refreshHud(); }
       // let the dead behind us go
@@ -433,7 +445,7 @@ export class Game {
       let hunting = 0;
       for (const z of this.zombies.values()) if (z.alive && !z.idle) hunting++;
       this.spawnT -= dt;
-      if (this.spawnT <= 0 && hunting < 18 + 6 * (this.players.size - 1)) { this.spawnT = 0.9; this.spawnZombie(Math.random() < 0.3 ? 'runner' : 'shambler'); }
+      if (this.spawnT <= 0 && hunting < 26 + 8 * (this.players.size - 1)) { this.spawnT = 0.7; this.spawnZombie(Math.random() < 0.3 ? 'runner' : 'shambler'); }
       if (this.padT > 1.5) this.setPhase('win');
       if (this.phaseT > 0.25) { this.phaseT = 0; this.refreshHud(); }
     } else if (this.phase === 'win' && this.time > this.endAt && !this.over) {
@@ -451,7 +463,7 @@ export class Game {
     const nav = this.world.nav;
     this.pop = [];
     const free = (x, z) => { const k = nav.idx(x, z); return k >= 0 && !nav.block[k]; };
-    for (let z = L.start.z - 22; z > L.lz.z + 24; z -= 8 + rng() * 9) {
+    for (let z = L.start.z - 22; z > L.lz.z + 24; z -= LV.popGap[0] + rng() * LV.popGap[1]) {
       if (L.cross.some((c) => Math.abs(z - c) < 10)) continue;       // junctions are for the hold
       const n = 1 + Math.floor(rng() * 3.4);
       const cx = (rng() - 0.5) * 9;
@@ -483,8 +495,8 @@ export class Game {
     // a trickle, so the road never feels safe
     this.trickleT -= dt;
     if (this.trickleT <= 0) {
-      this.trickleT = 5 + Math.random() * 4;
-      if (hunting < 5 + 2 * this.players.size) this.spawnZombie(Math.random() < 0.2 ? 'runner' : 'shambler');
+      this.trickleT = 2.5 + Math.random() * 2;
+      if (hunting < 10 + 4 * this.players.size) this.spawnZombie(Math.random() < 0.2 ? 'runner' : 'shambler');
     }
   }
 
@@ -606,6 +618,7 @@ export class Game {
     }
     setTimeout(() => this.fx.pool(z.x + dx * 0.6, z.z + dz * 0.6), 450);
     if (this.isHost) this.netEvent({ k: 'zdie', id: z.id, dx, dz, crit: crit ? 1 : 0, by: byId });
+    if (z.boss) { this.hud.banner('BOSS DOWN', TYPES[z.type].name, 3); this.cam.trauma(0.6); this.hitstop = 0.18; audio.play('sting', { vol: 0.8, jitter: 0 }); }
     if (this.hold >= 0) this.refreshHud();
   }
 
@@ -705,7 +718,6 @@ export class Game {
       // [hold index, hold seconds so far, away, gates opened]
       const [hold, ht, away, opened] = m.h;
       if (opened > this.opened) this.openGateTo(opened);
-      if (hold === HOLDS.length - 1 && ht > HOLDS[hold].secs * 0.8) this.startHeli();
       if (hold !== this.hold || away !== (this.holdAway ? 1 : 0)) { this.hold = hold; this.holdAway = !!away; this.holdT = ht; this.refreshHud(); }
       this.holdT = ht;
     }
@@ -715,6 +727,7 @@ export class Game {
       const p = this.players.get(id);
       if (p) this.applyRemote(p, { x, z, f, ax, az, hp, fl, w, mh });
     }
+    if (m.B) { const bz = this.zombies.get(m.B[0]); if (bz) bz.hp = m.B[1]; }
     for (const r of m.z) {
       const [id, x, z, f, st] = r;
       const zb = this.zombies.get(id);
@@ -760,7 +773,8 @@ export class Game {
           if (!z.alive) continue;
           Z.push([z.id, +z.x.toFixed(2), +z.z.toFixed(2), +z.face.toFixed(2), { walk: 0, windup: 1, stagger: 2, recover: 3 }[z.state] || 0]);
         }
-        this.net.broadcast({ t: 'snap', p: P, z: Z, h: [this.hold, +this.holdT.toFixed(1), this.holdAway ? 1 : 0, this.opened] }, false);
+        const bz = this.bossZ();
+        this.net.broadcast({ t: 'snap', p: P, z: Z, B: bz ? [bz.id, Math.round(bz.hp)] : 0, h: [this.hold, +this.holdT.toFixed(1), this.holdAway ? 1 : 0, this.opened] }, false);
       }
     }
   }
