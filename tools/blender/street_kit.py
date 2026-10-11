@@ -163,8 +163,8 @@ def facade(m):
              blk((w + 2 * t, 0.12, t), (0, -0.04, -(h / 2 + t / 2)), m['frame']),
              blk((0.035, 0.07, h), (0, -0.03, 0), m['frame']),
              blk((w, 0.07, 0.035), (0, -0.03, 0.18), m['frame']),
-             blk((w + 0.3, 0.2, 0.07), (0, -0.1, -(h / 2 + 0.1)), m['concrete'], bev=0.012, segs=1),     # sill
-             blk((w + 0.28, 0.14, 0.13), (0, -0.07, h / 2 + 0.13), m['concrete'], bev=0.012, segs=1)]    # lintel
+             blk((w + 0.3, 0.2, 0.07), (0, -0.1, -(h / 2 + 0.1)), m['concrete']),     # sill
+             blk((w + 0.28, 0.14, 0.13), (0, -0.07, h / 2 + 0.13), m['concrete'])]    # lintel
         return p
     finish('win_frame', frame_parts(), 1.0)
     # --- glass: a plane just behind the frame
@@ -174,24 +174,23 @@ def facade(m):
     # --- boarded up
     parts = frame_parts()
     for z, a in ((-0.4, 0.04), (0.0, -0.06), (0.42, 0.03)):
-        parts.append(blk((1.35, 0.04, 0.26), (0.02, -0.11, z), m['wood'], rot=(0, a, 0), bev=0.006))
-    parts.append(blk((0.22, 0.04, 1.9), (-0.2, -0.15, 0.0), m['wood'], rot=(0, 0.22, 0), bev=0.006))
+        parts.append(blk((1.35, 0.04, 0.26), (0.02, -0.11, z), m['wood'], rot=(0, a, 0)))
+    parts.append(blk((0.22, 0.04, 1.9), (-0.2, -0.15, 0.0), m['wood'], rot=(0, 0.22, 0)))
     for x, z in ((-0.5, -0.4), (0.5, -0.4), (-0.5, 0.42), (0.5, 0.42), (0.1, 0.0)):
         parts.append(cylz(0.012, 0.03, (x, -0.17, z), m['steel'], 6))
         parts[-1].rotation_euler = (math.pi / 2, 0, 0)
     finish('win_boarded', parts, 1.0)
     # --- window unit
     parts = frame_parts()
-    parts += [blk((0.7, 0.45, 0.42), (0, -0.28, -0.1), M('metal_grey', (0.42, 0.43, 0.42), metal=0.6, rough=0.5), bev=0.02),
+    parts += [blk((0.7, 0.45, 0.42), (0, -0.28, -0.1), M('metal_grey', (0.42, 0.43, 0.42), metal=0.6, rough=0.5)),
               blk((0.6, 0.02, 0.3), (0, -0.52, -0.1), m['dark'])]
     finish('win_ac', parts, 1.0)
     # --- cornice (1 m long along x, bottom at z=0, front -Y)
     parts = [blk((1.0, 0.08, 0.22), (0, -0.04, 0.11), m['concrete']),
-             blk((1.0, 0.2, 0.1), (0, -0.1, 0.27), m['concrete']),
-             blk((1.0, 0.32, 0.08), (0, -0.16, 0.36), m['concrete']),
-             blk((1.0, 0.4, 0.06), (0, -0.2, 0.43), m['concrete'])]
-    for i in range(10):
-        parts.append(blk((0.06, 0.12, 0.1), (-0.45 + i * 0.1, -0.2, 0.22), m['concrete']))
+             blk((1.0, 0.26, 0.1), (0, -0.13, 0.27), m['concrete']),
+             blk((1.0, 0.4, 0.14), (0, -0.2, 0.39), m['concrete'])]
+    for i in range(5):
+        parts.append(blk((0.09, 0.12, 0.1), (-0.4 + i * 0.2, -0.2, 0.22), m['concrete']))
     finish('cornice', parts, 1.0)
     # --- shop awning (width 4.4), wall at y=0, hangs from z=3.1 down to 2.5 at the front
     w = 4.4

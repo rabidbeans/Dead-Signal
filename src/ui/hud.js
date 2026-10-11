@@ -82,9 +82,12 @@ export class HUD {
   ammo(p) {
     this.el.ammoN.textContent = p.ammo;
     this.el.ammoN.classList.toggle('empty', p.ammo === 0);
-    this.el.weapon.classList.remove('kick');
-    void this.el.weapon.offsetWidth;
-    this.el.weapon.classList.add('kick');
+    // restart the little recoil animation WITHOUT forcing a layout (reading offsetWidth on every shot is a
+    // forced reflow: a few ms on a phone, five times a second)
+    const w = this.el.weapon;
+    w.classList.remove('kick');
+    cancelAnimationFrame(this._kick);
+    this._kick = requestAnimationFrame(() => w.classList.add('kick'));
   }
 
   reload(t) { this.reloadT = t; this.reloadMax = t; }
@@ -95,9 +98,10 @@ export class HUD {
   }
 
   killConfirm() {
-    this.el.weapon.classList.remove('kill');
-    void this.el.weapon.offsetWidth;
-    this.el.weapon.classList.add('kill');
+    const w = this.el.weapon;
+    w.classList.remove('kill');
+    cancelAnimationFrame(this._kill);
+    this._kill = requestAnimationFrame(() => w.classList.add('kill'));
   }
 
   team(players, me) {
@@ -196,30 +200,35 @@ export class HUD {
     // damage vignette fades
     this.vig = Math.max(0, this.vig - dt * 0.9);
     const low = me.alive ? Math.max(0, (35 - me.hp) / 35) * (0.55 + 0.25 * Math.sin(performance.now() / 180)) : 0.7;
-    this.el.vig.style.opacity = Math.min(1, this.vig + low * 0.6);
+    const vo = Math.round(Math.min(1, this.vig + low * 0.6) * 100) / 100;
+    if (vo !== this._vo) { this._vo = vo; this.el.vig.style.opacity = vo; }
     // reload ring around the player
     if (me.reloadT > 0) {
       const p = proj(me.x, 0.1, me.z);
-      this.el.ring.style.opacity = 1;
-      this.el.ring.style.transform = `translate(${p.x}px, ${p.y}px)`;
+      this.el.ring.style.opacity = 1; this._ringOn = true;
+      this.el.ring.style.transform = `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px)`;
       const k = 1 - me.reloadT / PISTOL.reload;
       this.el.ringC.style.strokeDashoffset = 106.8 * (1 - k);
-    } else this.el.ring.style.opacity = 0;
+    } else if (this._ringOn) { this._ringOn = false; this.el.ring.style.opacity = 0; }
     // assist bracket on the target the pistol is locked to
     const t = me.assistTarget;
     if (t && t.alive && me.aiming) {
       const p = proj(t.x, 1.1, t.z);
-      this.el.assist.style.opacity = 0.8;
-      this.el.assist.style.transform = `translate(${p.x}px, ${p.y}px)`;
-    } else this.el.assist.style.opacity = 0;
+      this.el.assist.style.opacity = 0.8; this._asOn = true;
+      this.el.assist.style.transform = `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px)`;
+    } else if (this._asOn) { this._asOn = false; this.el.assist.style.opacity = 0; }
     // down
-    this.el.down.classList.toggle('on', me.down && !me.dead);
-    if (me.down) this.el.bleed.style.width = Math.max(0, 100 - me.downT / 30 * 100) + '%';
+    const dn = me.down && !me.dead;
+    if (dn !== this._dn) { this._dn = dn; this.el.down.classList.toggle('on', dn); }
+    if (me.down) this.el.bleed.style.width = Math.max(0, 100 - me.downT / 30 * 100).toFixed(0) + '%';
     // team bars
-    for (const p of game.players.values()) {
-      if (p === me) continue;
-      const bar = this.root.querySelector(`.mate[data-id="${p.id}"] i`);
-      if (bar) { bar.style.width = Math.max(0, p.hp) + '%'; bar.parentElement.parentElement.classList.toggle('down', p.down); }
+    if (this._mt === undefined || (this._mt -= dt) < 0) {            // teammates' bars: a few times a second is plenty
+      this._mt = 0.2;
+      for (const p of game.players.values()) {
+        if (p === me) continue;
+        const bar = this.root.querySelector(`.mate[data-id="${p.id}"] i`);
+        if (bar) { bar.style.width = Math.max(0, p.hp) + '%'; bar.parentElement.parentElement.classList.toggle('down', p.down); }
+      }
     }
     if (this.bannerT > 0) { this.bannerT -= dt; if (this.bannerT <= 0) this.el.banner.classList.remove('on'); }
     game.paused = this.paused && game.role === 'solo';

@@ -299,7 +299,7 @@ def sandbags(name='sandbags', rows=3, per=7, radius=3.2, arc=60):
             bpy.ops.object.transform_apply(scale=True, rotation=True)
             bv = b.modifiers.new('b', 'BEVEL')
             bv.width = 0.07
-            bv.segments = 3
+            bv.segments = 2
             apply(b)
             # stuffed, slumped bag: squash the top, bulge the sides
             for v in b.data.vertices:

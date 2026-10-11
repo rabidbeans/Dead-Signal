@@ -6,6 +6,7 @@ import { makeCharacter } from './assets.js';
 import { Rig, SurvivorAnim } from './rig.js';
 import { audio, buzz } from './audio.js';
 import { tex } from './assets.js';
+import { Q } from './quality.js';
 
 // Numbers from design/research.md (Nuclear Throne / Eiserloh / Housemarque).
 export const PISTOL = {
@@ -31,6 +32,7 @@ export const PISTOL = {
 
 const GUN_TURN = new THREE.Quaternion();     // the gun's own frame already has x forward
 const sm01 = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
+const _tip = new THREE.Vector3(), _loc = new THREE.Vector3(), _mz = new THREE.Vector3();
 const SPEED = 3.6;        // a jog; zombies shamble at 0.6-1.0, lurchers burst to 3.1
 
 export class Player {
@@ -85,10 +87,10 @@ export class Player {
     this.anim.onEvent = (n) => this.reloadEvent(n);
     // the flashlight: the one shadow caster for the local player
     const fl = new THREE.SpotLight(0xfff1dc, local ? 560 : 400, 28, 0.46, 0.5, 1.5);
-    fl.map = tex('tex/flashlight.webp');
-    fl.castShadow = local;
-    if (local) {
-      fl.shadow.mapSize.set(game.quality.shadow, game.quality.shadow);
+    if (Q.spotMap) fl.map = tex('tex/flashlight.webp');
+    fl.castShadow = local && Q.spotShadow;
+    if (fl.castShadow) {
+      fl.shadow.mapSize.set(Q.spotShadowSize, Q.spotShadowSize);
       fl.shadow.bias = -0.0004;
       fl.shadow.normalBias = 0.03;
       fl.shadow.camera.near = 0.3;
@@ -96,8 +98,9 @@ export class Player {
     game.scene.add(fl, fl.target);
     this.light = fl;
     // a faint lantern so anything right next to you is always readable
-    this.lantern = new THREE.PointLight(0xa9bddb, local ? 16 : 9, 9, 1.3);
-    game.scene.add(this.lantern);
+    // (only your own: a point light is paid for on every lit pixel, a friend's flashlight is enough)
+    this.lantern = local ? new THREE.PointLight(0xa9bddb, 16, 9, 1.3) : null;
+    if (this.lantern) game.scene.add(this.lantern);
     // laser sight: a thin red line that only shows while aiming
     const lg = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, -1)]);
     this.laser = new THREE.Line(lg, new THREE.LineBasicMaterial({ color: 0xff2a1a, transparent: true, opacity: 0.0, blending: THREE.AdditiveBlending, depthWrite: false }));
@@ -280,9 +283,8 @@ export class Player {
   }
 
   muzzle() {
-    const p = new THREE.Vector3();
-    this.gunTip.getWorldPosition(p);
-    return p;
+    this.gunTip.getWorldPosition(_mz);
+    return _mz;
   }
 
   // a remote player's shot, drawn here
@@ -335,7 +337,7 @@ export class Player {
     const c = Math.cos(this.face), s = Math.sin(this.face);
     const vx = this.vx, vz = this.vz;
     // velocity in the character's frame (x = its left, z = its forward)
-    const local = new THREE.Vector3(vx * c - vz * s, 0, vx * s + vz * c);
+    const local = _loc.set(vx * c - vz * s, 0, vx * s + vz * c);
     this.anim.down += ((this.down ? 1 : 0) - this.anim.down) * Math.min(1, dt * 6);
     this.anim.update(dt, local, this.aiming || this.down);
     // the gun is held in BOTH hands: the animation decides where it is
@@ -345,17 +347,20 @@ export class Player {
     this.updateGunParts(dt);
     // a weapon light: it rides the muzzle, so the arms never shadow it
     const fx = Math.sin(this.face), fz = Math.cos(this.face);
-    const tip = this.gunTip.getWorldPosition(new THREE.Vector3());
+    const tip = this.gunTip.getWorldPosition(_tip);
     this.light.position.set(tip.x + fx * 0.08, Math.max(1.0, tip.y), tip.z + fz * 0.08);
     this.light.target.position.set(this.x + fx * 9, 0, this.z + fz * 9);
     this.light.intensity = this.dead ? 0 : (this.local ? 560 : 400) * (this.flick ? 0.2 : 1);
-    this.lantern.position.set(this.x, 2.2 + this.gy, this.z);
+    if (this.lantern) {
+      const fl = this.game.fx.flash;
+      if (fl.t < 0.06) { this.lantern.position.set(fl.x, fl.y, fl.z); this.lantern.intensity = 16 + 26 * (1 - fl.t / 0.06); }
+      else { this.lantern.position.set(this.x, 2.2 + this.gy, this.z); this.lantern.intensity = 16; }
+    }
     // laser
     const showLaser = this.aiming && !this.dead && this.reloadT <= 0;
     this.laser.material.opacity += ((showLaser ? 0.55 : 0) - this.laser.material.opacity) * Math.min(1, dt * 12);
     if (this.gunTip) {
-      const p = new THREE.Vector3();
-      this.gunTip.getWorldPosition(p);
+      const p = _tip;
       const d = this.game.world.col.ray(p.x, p.z, fx, fz, 14).d;
       const pos = this.laser.geometry.attributes.position;
       pos.setXYZ(0, p.x, p.y, p.z);
@@ -436,7 +441,8 @@ export class Player {
     const s = this.game.scene;
     if (this.magFall) s.remove(this.magFall.m);
     s.remove(this.magProp);
-    s.remove(this.char.root, this.gun, this.light, this.light.target, this.lantern, this.laser);
+    s.remove(this.char.root, this.gun, this.light, this.light.target, this.laser);
+    if (this.lantern) s.remove(this.lantern);
     this.light.dispose?.();
   }
 }

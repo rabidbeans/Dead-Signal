@@ -171,3 +171,30 @@ not wave style ... go through the level and get to the end ... about five min".
 - QA tools (all in /home/user/tools/pw, not in the repo): `pose.mjs` (hands close-ups), `states.mjs` (aim/ready/run/fire/reload
   frames), `over.mjs` (overviews and play-camera shots with draw-call counts, `EXTRA=` js), `run_bot.mjs [secs] [&cp=N]`,
   `coop.mjs` (also checks the hold/gate sync), `boot.mjs`.
+
+## Round 4 (2026-10-11): phone performance (Sam: "feels like 20 fps, I want 60, and it is played on a PHONE")
+
+Nobody has measured a real phone. Everything here is judged with `/home/user/tools/pw/perf.mjs` (Chromium + SwiftShader: relative
+numbers only; `?q=mid` etc.), `scale.mjs` (fixed vs per-pixel cost), `tris.mjs` (what is on screen), `prof.mjs` (CPU profile),
+`phone.mjs` (touch + DPR 3 emulation: confirms tier and buffer size). Same scene, 640x360: render **560-630 ms before, ~135-190 now (mid)**,
+nav flood 4.8 ms -> 0.6, draw calls 408 -> ~290, triangles 555k -> ~240k.
+
+- **Quality tiers** (`src/game/quality.js`): `high` (desktop), `mid` (any touch device, default), `low` (automatic fallback). `?q=` forces one,
+  `?o=key:value,...` overrides a single setting. mid: render scale 1.0 (it was 1.5 x a 3x screen), no MSAA, basic shadow filter, moon shadow
+  1024 over +-13 m, NO flashlight shadow, no flashlight cookie, no environment map, no chromatic aberration, plain (not clear-coat)
+  paint, half-size textures, 8 fog sheets, 220 rain streaks, anisotropy 2, only the 6 nearest zombies cast shadows.
+- **Governor** (`Engine.budget`): 60 fps target; drops the render scale in 0.1-0.2 steps after ~0.7 s of slow frames, climbs back only after
+  12 s of good ones and never above a size that failed (every change reallocates the render targets = a hitch); at the floor and still
+  >22 ms it goes to the low tier (shadows and fog off, floor 0.45). The main loop skips refreshes so a 90/120 Hz phone renders an even 60.
+- **Lights are paid for on every lit pixel**: 2 lamp lights + 2 event lights (fires, flares, police cars share them; police win ties) + the
+  local lantern (which also IS the muzzle-flash light now) + the flashlight. Remote players have no lantern.
+- **Hitches** (the "glitchy" part): `Game.warmUp()` draws the whole level (frustum culling off) plus one of every zombie behind the loading
+  screen, so no mesh, texture or shader is first-used mid-game; the nav flood is incremental (`startBuild`/`step`), bounded to 35 m and only
+  restarted when someone moved or a gate opened; collision queries use 8 m strips (`Colliders.index`); IK, the player and the HUD allocate nothing
+  per frame; zombies are posed every frame only within ~18 m (every 2nd/6th frame farther, never once settled dead); bone quaternions skip Euler sync.
+- **Memory**: `public/assets/m/` holds half-size textures for phones (`tools/mobile_textures.py`; zombies 512, survivors 1024, big surfaces 512):
+  ~170 MB -> ~45 MB of character textures. `tex()` picks them when `Q.lowTex`.
+- **Geometry**: roof props, parapets, awnings, fire escapes and street furniture no longer cast shadows; cornice, window-AC, boarded-window and sandbag
+  modules were simplified (street_kit.py, props.py -> rebuild with the bpy venv).
+- Known/not done: no LOD meshes for zombies (9.5k tris); the window/cornice instancing is chunked per 36 m, so a chunk is drawn whole when any part is
+  visible; GPU time on a real phone is unmeasured - if a phone still struggles, the next knobs are `Q.moonShadow` (0 = off), `startDpr`, `zombieShadows`.

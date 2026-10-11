@@ -12,8 +12,9 @@ import {
   ChromaticAberrationEffect,
 } from 'postprocessing';
 import { setAnisotropy } from './assets.js';
+import { Q, isTouch } from './quality.js';
 
-export const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
+export { isTouch };
 
 export class Engine {
   constructor(canvas) {
@@ -24,19 +25,19 @@ export class Engine {
     r.outputColorSpace = THREE.SRGBColorSpace;
     r.toneMapping = THREE.NoToneMapping;   // tone mapping is a post effect
     r.shadowMap.enabled = true;
-    r.shadowMap.type = THREE.PCFSoftShadowMap;
+    r.shadowMap.type = Q.basicShadow ? THREE.BasicShadowMap : Q.pcfSoft ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
     this.renderer = r;
     setAnisotropy(r);
-    this.maxDpr = Math.min(window.devicePixelRatio || 1, isTouch ? 1.5 : 2);
-    this.dpr = this.maxDpr;
-    this.minDpr = isTouch ? 0.75 : 1;
+    this.maxDpr = Math.min(window.devicePixelRatio || 1, Q.maxDpr);
+    this.dpr = Math.min(this.maxDpr, Q.startDpr);
+    this.minDpr = Math.min(Q.minDpr, this.maxDpr);
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(34, 1, 0.5, 120);
-    this.composer = new EffectComposer(r, { frameBufferType: THREE.HalfFloatType, multisampling: isTouch ? 0 : 4 });
+    this.composer = new EffectComposer(r, { frameBufferType: THREE.HalfFloatType, multisampling: Q.msaa });
     this.renderPass = new RenderPass(this.scene, this.camera);
     this.composer.addPass(this.renderPass);
     this.bloom = new BloomEffect({
-      luminanceThreshold: 0.82, luminanceSmoothing: 0.12, intensity: 1.15, mipmapBlur: true, radius: 0.72,
+      luminanceThreshold: 0.82, luminanceSmoothing: 0.12, intensity: 1.15, mipmapBlur: true, radius: 0.72, resolutionScale: Q.bloomScale, levels: Q.msaa ? 8 : 5,
     });
     this.vignette = new VignetteEffect({ offset: 0.35, darkness: 0.4 });
     this.noise = new NoiseEffect({ blendFunction: BlendFunction.OVERLAY, premultiply: false });
@@ -45,7 +46,7 @@ export class Engine {
     this.contrast = new BrightnessContrastEffect({ contrast: 0.14, brightness: 0.05 });
     this.tone = new ToneMappingEffect({ mode: ToneMappingMode.AGX });
     this.chroma = new ChromaticAberrationEffect({ offset: new THREE.Vector2(0.0006, 0.0004), radialModulation: true, modulationOffset: 0.4 });
-    this.composer.addPass(new EffectPass(this.camera, this.bloom, this.tone, this.grade, this.contrast, this.vignette, this.chroma, this.noise));
+    this.composer.addPass(new EffectPass(this.camera, this.bloom, this.tone, this.grade, this.contrast, this.vignette, ...(Q.chroma ? [this.chroma] : []), this.noise));
     this.frameTimes = [];
     this.lastAdjust = 0;
     this.resize();
@@ -65,22 +66,36 @@ export class Engine {
     this.w = w; this.h = h; this.longSide = longSide;
   }
 
-  // dynamic resolution
+  // Dynamic resolution, tuned for a steady 60. Frames are timed by how far apart the
+  // browser hands them to us (the loop never renders faster than 60). Going DOWN is quick
+  // (a second of bad frames), going UP is slow and remembers what failed, so the picture
+  // never flaps between two sizes (every change reallocates the render targets: a hitch).
   budget(dtMs, now) {
     this.frameTimes.push(dtMs);
-    if (this.frameTimes.length > 90) this.frameTimes.shift();
-    if (now - this.lastAdjust < 1000 || this.frameTimes.length < 60) return;
-    const avg = this.frameTimes.reduce((a, b) => a + b, 0) / this.frameTimes.length;
+    if (this.frameTimes.length > 48) this.frameTimes.shift();
+    if (now - this.lastAdjust < 700 || this.frameTimes.length < 40) return;
+    this.lastAdjust = now;
+    const ft = this.frameTimes;
+    const avg = ft.reduce((a, b) => a + b, 0) / ft.length;
     let d = this.dpr;
-    if (avg > 18.5 && d > this.minDpr) d = Math.max(this.minDpr, d - 0.125);
-    else if (avg < 13 && d < this.maxDpr) d = Math.min(this.maxDpr, d + 0.125);
-    if (d === this.minDpr && avg > 24 && !this.lowTier) { this.lowTier = true; this.onLowTier?.(); }
+    if (avg > 19.5) {
+      this.goodSince = now;
+      if (d > this.minDpr + 0.001) {
+        this.ceiling = Math.min(this.ceiling ?? 9, d);            // do not climb back to a size that failed
+        d = Math.max(this.minDpr, +(d - (avg > 26 ? 0.2 : 0.1)).toFixed(3));
+      } else if (avg > 22 && !this.lowTier) { this.lowTier = true; this.minDpr = Math.max(0.45, this.minDpr * 0.8); this.onLowTier?.(); }
+      this.lastDown = now;
+    } else if (avg < 17.6) {
+      this.goodSince ??= now;
+      const ceil = Math.min(this.maxDpr, (this.ceiling ?? 9) - 0.05);
+      if (now - this.goodSince > 12000 && now - (this.lastDown ?? -1e9) > 20000 && d < ceil - 0.001) d = Math.min(ceil, +(d + 0.05).toFixed(3));
+    } else this.goodSince = now;
     if (d !== this.dpr) {
       this.dpr = d;
       this.resize();
       this.frameTimes.length = 0;
+      this.goodSince = now;
     }
-    this.lastAdjust = now;
   }
 
   render(dt) {

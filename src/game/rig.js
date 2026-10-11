@@ -46,7 +46,11 @@ export class Rig {
       const wq = new THREE.Quaternion();
       bone.getWorldQuaternion(wq);
       wq.premultiply(rootInv);
-      this.rest[n] = { local: bone.quaternion.clone(), world: wq, inv: wq.clone().invert(), pos: bone.position.clone() };
+      const inv = wq.clone().invert();
+      // the three canonical axes expressed in this bone's frame, once (apply() runs for every body every frame)
+      const ax = [X, Y, Z].map((a) => a.clone().applyQuaternion(inv));
+      this.rest[n] = { local: bone.quaternion.clone(), world: wq, inv, pos: bone.position.clone(), ax };
+      bone.quaternion._onChange(() => {});    // nothing reads a bone's Euler angles: skip keeping them in sync
     }
     this.hipsY = this.b.root ? this.b.root.position.y : 0;
     this.pending = {};
@@ -68,8 +72,8 @@ export class Rig {
       _q2.identity();
       for (let i = list.length - 1; i >= 0; i--) {
         const [axis, ang] = list[i];
-        _v.copy(axis).applyQuaternion(r.inv);
-        _q.setFromAxisAngle(_v, ang);
+        const ci = axis === X ? 0 : axis === Y ? 1 : axis === Z ? 2 : -1;
+        _q.setFromAxisAngle(ci >= 0 ? r.ax[ci] : _v.copy(axis).applyQuaternion(r.inv), ang);
         _q2.multiply(_q);
       }
       // the list is in application order (first applied first)
@@ -309,6 +313,7 @@ function rollBone(bone, child, ang) {
   bone.updateMatrixWorld(true);
 }
 
+const AXIS = new THREE.Vector3();
 const sm = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
 
 // grip offsets in the GUN's frame (x forward, y up, z the shooter's right)
@@ -388,7 +393,7 @@ export class SurvivorAnim {
     let axis = X;
     if (speed > 0.05) {
       const dx = moveLocal.x / speed, dz = moveLocal.z / speed;
-      axis = new THREE.Vector3(dz, 0, -dx);      // perpendicular to travel, in the ground plane
+      axis = AXIS.set(dz, 0, -dx);      // perpendicular to travel, in the ground plane
     }
     const o = { stride: (0.3 + run * 0.35) * walk, knee: (0.7 + run * 0.6) * walk, bend: 0.08 + run * 0.1, lean: 0, axis };
     legCycle(rig, 'L', this.phase, o);
@@ -426,22 +431,25 @@ export class SurvivorAnim {
   holdGun(dt, run, lean) {
     const rig = this.rig, b = rig.b, root = rig.c.root;
     root.updateMatrixWorld(true);
-    const L = new THREE.Vector3(), R = new THREE.Vector3();
-    b.upperarm_L.getWorldPosition(L); b.upperarm_R.getWorldPosition(R);
-    root.worldToLocal(L); root.worldToLocal(R);
-    const M = L.clone().add(R).multiplyScalar(0.5);
+    const Lw = S_L, Rw = S_R, M = S_M;
+    b.upperarm_L.getWorldPosition(Lw); b.upperarm_R.getWorldPosition(Rw);
+    root.worldToLocal(Lw); root.worldToLocal(Rw);
+    M.copy(Lw).add(Rw).multiplyScalar(0.5);
     const a = this.aim;
     // ---- the gun's pose, in the body's frame
-    const st = (k) => ({ p: new THREE.Vector3().fromArray(STANCE[k].p), pitch: STANCE[k].pitch, roll: STANCE[k].roll });
-    const A = st('aimed'), D = st('ready');
-    let pose = { p: D.p.clone().lerp(A.p, a), pitch: D.pitch + (A.pitch - D.pitch) * a, roll: 0 };
+    const A = STANCE.aimed, D = STANCE.ready;
+    let px = D.p[0] + (A.p[0] - D.p[0]) * a, py = D.p[1] + (A.p[1] - D.p[1]) * a, pz = D.p[2] + (A.p[2] - D.p[2]) * a;
+    let pitch = D.pitch + (A.pitch - D.pitch) * a, roll = 0;
     const u = this.reload > 0 ? Math.min(1, this.reload) : 0;
     if (u > 0) {
-      pose = this._track(R_GUN, u, (k0, k1, t) => {
-        const g0 = k0.p ? { p: new THREE.Vector3().fromArray(k0.p), pitch: k0.pitch, roll: k0.roll } : pose;
-        const g1 = k1.p ? { p: new THREE.Vector3().fromArray(k1.p), pitch: k1.pitch, roll: k1.roll } : pose;
-        return { p: g0.p.clone().lerp(g1.p, t), pitch: g0.pitch + (g1.pitch - g0.pitch) * t, roll: g0.roll + (g1.roll - g0.roll) * t };
-      });
+      const keys = R_GUN;
+      let i = 0;
+      while (i < keys.length - 2 && u > keys[i + 1].u) i++;
+      const k0 = keys[i], k1 = keys[i + 1], t = sm((u - k0.u) / Math.max(1e-4, k1.u - k0.u));
+      const g = (k, f, d) => (k.p ? f(k) : d);
+      const x0 = g(k0, (k) => k.p[0], px), y0 = g(k0, (k) => k.p[1], py), z0 = g(k0, (k) => k.p[2], pz), pi0 = g(k0, (k) => k.pitch, pitch), r0 = g(k0, (k) => k.roll, roll);
+      const x1 = g(k1, (k) => k.p[0], px), y1 = g(k1, (k) => k.p[1], py), z1 = g(k1, (k) => k.p[2], pz), pi1 = g(k1, (k) => k.pitch, pitch), r1 = g(k1, (k) => k.roll, roll);
+      px = x0 + (x1 - x0) * t; py = y0 + (y1 - y0) * t; pz = z0 + (z1 - z0) * t; pitch = pi0 + (pi1 - pi0) * t; roll = r0 + (r1 - r0) * t;
     }
     // events (sounds are the player's business)
     if (this.reload > 0) {
@@ -450,74 +458,82 @@ export class SurvivorAnim {
     this._ru = this.reload > 0 ? u : -1;
     // recoil and gait
     const rec = this.recoil.x;
-    const bobY = Math.sin(this.phase * TAU * 2) * 0.012 * run;
-    const pos = M.clone().add(pose.p);
-    pos.y += bobY;
-    const pitch = pose.pitch + rec * 0.12 + this.hurt.x * 0.01;
-    pos.z -= rec * 0.03;
+    const pos = S_POS.set(M.x + px, M.y + py + Math.sin(this.phase * TAU * 2) * 0.012 * run, M.z + pz - rec * 0.03);
+    pitch += rec * 0.12 + this.hurt.x * 0.01;
     // the gun's frame: x forward (pitched), y up, z the shooter's right
-    const fwd = new THREE.Vector3(0, Math.sin(pitch), Math.cos(pitch));
-    const zr = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0)).normalize();
-    const yu = new THREE.Vector3().crossVectors(zr, fwd).normalize();
-    const mat = new THREE.Matrix4().makeBasis(fwd, yu, zr);
-    const q0 = new THREE.Quaternion().setFromRotationMatrix(mat);
-    q0.multiply(new THREE.Quaternion().setFromAxisAngle(X, pose.roll));
-    const toChar = (g, q = q0, p = pos) => new THREE.Vector3(g[0], g[1], g[2]).applyQuaternion(q).add(p);
+    S_FWD.set(0, Math.sin(pitch), Math.cos(pitch));
+    S_ZR.crossVectors(S_FWD, Y).normalize();
+    S_YU.crossVectors(S_ZR, S_FWD).normalize();
+    S_MAT.makeBasis(S_FWD, S_YU, S_ZR);
+    const q0 = S_Q0.setFromRotationMatrix(S_MAT);
+    q0.multiply(S_QR.setFromAxisAngle(X, roll));
     // reach: the gun hand must be able to get there
-    const wR = toChar(GRIP_R);
-    const sR = R;
+    const wR = S_WR.set(GRIP_R[0], GRIP_R[1], GRIP_R[2]).applyQuaternion(q0).add(pos);
+    const v = S_V.copy(wR).sub(Rw);
     const reach = (this.len.R[0] + this.len.R[1]) * 0.985;
-    const v = wR.clone().sub(sR);
-    if (v.length() > reach) { const fix = v.clone().multiplyScalar(reach / v.length()).sub(v); pos.add(fix); wR.add(fix); }
+    const vl = v.length();
+    if (vl > reach) { v.multiplyScalar(reach / vl - 1); pos.add(v); wR.add(v); }
     // the world pose of the gun
     root.getWorldQuaternion(_wq);
     this.gunQuat.copy(_wq).multiply(q0);
     this.gunPos.copy(pos); root.localToWorld(this.gunPos);
     // ---- the support hand's target
-    let wL;
+    const wL = S_WL;
     if (u > 0) {
-      wL = this._track(R_HAND, u, (k0, k1, t) => {
-        const at = (k) => (k.g ? toChar(k.g, q0, pos) : M.clone().add(new THREE.Vector3().fromArray(k.c)));
-        return at(k0).lerp(at(k1), t);
-      });
-    } else wL = toChar(GRIP_L, q0, pos);
+      const keys = R_HAND;
+      let i = 0;
+      while (i < keys.length - 2 && u > keys[i + 1].u) i++;
+      const k0 = keys[i], k1 = keys[i + 1], t = sm((u - k0.u) / Math.max(1e-4, k1.u - k0.u));
+      const at = (k, out) => (k.g ? out.set(k.g[0], k.g[1], k.g[2]).applyQuaternion(q0).add(pos) : out.set(M.x + k.c[0], M.y + k.c[1], M.z + k.c[2]));
+      at(k0, S_A); at(k1, S_B);
+      wL.copy(S_A).lerp(S_B, t);
+    } else wL.set(GRIP_L[0], GRIP_L[1], GRIP_L[2]).applyQuaternion(q0).add(pos);
     // the mag leaves the gun at 'magout' and a fresh one rides the hand until it seats
     this.magOut = u <= 0 ? 0 : u < 0.2 ? 0 : u < 0.5 ? 1 : u < 0.58 ? 1 - sm((u - 0.5) / 0.08) : 0;
     this.magHand = u >= 0.2 && u < 0.58 ? 1 : 0;
     // ---- solve both arms
-    this._arm('R', wR, M, q0, pos, HAND_R, 0.0, pose.roll);
-    this._arm('L', wL, M, q0, pos, HAND_L, 0.0, pose.roll);
+    this._arm('R', wR, q0, HAND_R, roll);
+    this._arm('L', wL, q0, HAND_L, roll);
     this.handL.copy(wL); root.localToWorld(this.handL);
   }
 
-  _arm(side, targetChar, M, q0, pos, hand, rollAdd, gunRoll) {
+  _arm(side, targetChar, q0, hand, gunRoll) {
     const rig = this.rig, b = rig.b, root = rig.c.root;
     const sg = side === 'L' ? 1 : -1;
     const up = b['upperarm_' + side], fo = b['forearm_' + side], ha = b['hand_' + side], fi = b['fingers_' + side];
     const [l1, l2, l3] = this.len[side];
-    const S = up.getWorldPosition(new THREE.Vector3());
-    const T = root.localToWorld(targetChar.clone());
-    const Sd = T.clone().sub(S);
+    const S = up.getWorldPosition(S_S);
+    const T = S_T.copy(targetChar); root.localToWorld(T);
+    const Sd = S_SD.copy(T).sub(S);
     const dist = Math.min(Sd.length(), (l1 + l2) * 0.995);
     const dir = Sd.normalize();
     // the elbow: down and out
-    const rq = root.getWorldQuaternion(new THREE.Quaternion());
-    const pole = new THREE.Vector3(sg * 0.55, -1, -0.15).applyQuaternion(rq);
-    pole.sub(dir.clone().multiplyScalar(pole.dot(dir))).normalize();
+    const rq = root.getWorldQuaternion(S_RQ);
+    const pole = S_POLE.set(sg * 0.55, -1, -0.15).applyQuaternion(rq);
+    pole.sub(S_D2.copy(dir).multiplyScalar(pole.dot(dir))).normalize();
     const aL = (l1 * l1 - l2 * l2 + dist * dist) / (2 * dist);
     const h = Math.sqrt(Math.max(0, l1 * l1 - aL * aL));
-    const E = S.clone().add(dir.clone().multiplyScalar(aL)).add(pole.multiplyScalar(h));
-    const Tw = S.clone().add(dir.clone().multiplyScalar(dist));
+    const E = S_E.copy(S).addScaledVector(dir, aL).addScaledVector(pole, h);
+    const Tw = S_TW.copy(S).addScaledVector(dir, dist);
     aimBone(up, fo, E);
     aimBone(fo, ha, Tw);
     // the hand points along the gun, a little down (and a little in for the support hand)
-    const hd = new THREE.Vector3(Math.cos(hand.down) * Math.cos(hand.yaw), -Math.sin(hand.down), Math.sin(hand.yaw));
+    const hd = S_HD.set(Math.cos(hand.down) * Math.cos(hand.yaw), -Math.sin(hand.down), Math.sin(hand.yaw));
     hd.applyQuaternion(q0).applyQuaternion(rq).normalize();
-    const look = Tw.clone().add(hd.multiplyScalar(l3));
+    const look = S_LK.copy(Tw).addScaledVector(hd, l3);
     aimBone(ha, fi, look);
-    rollBone(ha, fi, (side === 'R' ? this.rollR : this.rollL) + gunRoll * 0.0);
+    rollBone(ha, fi, (side === 'R' ? this.rollR : this.rollL));
   }
 }
+
+// scratch for holdGun/_arm: this runs for every survivor every frame, and a phone's garbage
+// collector turns a few dozen short-lived objects a frame into a visible hitch
+const S_L = new THREE.Vector3(), S_R = new THREE.Vector3(), S_M = new THREE.Vector3(), S_POS = new THREE.Vector3();
+const S_FWD = new THREE.Vector3(), S_ZR = new THREE.Vector3(), S_YU = new THREE.Vector3(), S_V = new THREE.Vector3();
+const S_WR = new THREE.Vector3(), S_WL = new THREE.Vector3(), S_A = new THREE.Vector3(), S_B = new THREE.Vector3();
+const S_S = new THREE.Vector3(), S_T = new THREE.Vector3(), S_SD = new THREE.Vector3(), S_POLE = new THREE.Vector3();
+const S_D2 = new THREE.Vector3(), S_E = new THREE.Vector3(), S_TW = new THREE.Vector3(), S_HD = new THREE.Vector3(), S_LK = new THREE.Vector3();
+const S_MAT = new THREE.Matrix4(), S_Q0 = new THREE.Quaternion(), S_QR = new THREE.Quaternion(), S_RQ = new THREE.Quaternion();
 
 export function mulberry(seed) {
   let a = (seed * 2654435761) >>> 0;

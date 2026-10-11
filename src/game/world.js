@@ -7,6 +7,7 @@ import { prop, surface, tex, propMaterial, instanced, awningMaterial, dirtify } 
 import { populate } from './dress.js';
 import { L, blockRanges, buildLots, lampSites } from './level.js';
 import { mulberry } from './rng.js';
+import { Q } from './quality.js';
 
 // ---------------------------------------------------------------- shapes --
 // Colliders are 2D in the ground plane: oriented boxes and circles.
@@ -20,6 +21,7 @@ export class Colliders {
   }
   circle(x, z, r, h = 1, tag = 'solid') { const rec = { x, z, r, h, tag }; this.circles.push(rec); return rec; }
   remove(rec) {
+    this._unindex(rec);
     let i = this.boxes.indexOf(rec);
     if (i >= 0) { this.boxes.splice(i, 1); return; }
     i = this.circles.indexOf(rec);
@@ -38,9 +40,45 @@ export class Colliders {
     return dx * dx + dz * dz < (r + c.r) ** 2;
   }
 
+  // A broad phase for a 300 m street: colliders are filed into 8 m strips along z, and a query looks
+  // only at the strips it touches (a zombie used to test every box and barrel in the level).
+  index() {
+    const SZ = 8;
+    this.SZ = SZ;
+    this.strips = new Map();
+    const put = (rec, z0, z1, kind) => {
+      for (let k = Math.floor(z0 / SZ); k <= Math.floor(z1 / SZ); k++) {
+        let st = this.strips.get(k);
+        if (!st) this.strips.set(k, st = { boxes: [], circles: [] });
+        st[kind].push(rec);
+      }
+    };
+    for (const b of this.boxes) { const e = Math.abs(b.s) * b.hw + Math.abs(b.c) * b.hd; put(b, b.cz - e, b.cz + e, 'boxes'); }
+    for (const c of this.circles) put(c, c.z - c.r, c.z + c.r, 'circles');
+  }
+
+  _unindex(rec) {
+    if (!this.strips) return;
+    for (const st of this.strips.values()) {
+      let i = st.boxes.indexOf(rec); if (i >= 0) st.boxes.splice(i, 1);
+      i = st.circles.indexOf(rec); if (i >= 0) st.circles.splice(i, 1);
+    }
+  }
+
   // push a circle (x, z, r) out of everything; returns corrected {x, z}
   resolve(x, z, r) {
-    for (const b of this.boxes) {
+    if (!this.strips) return this._resolve(this.boxes, this.circles, x, z, r);
+    const k0 = Math.floor((z - r - 0.5) / this.SZ), k1 = Math.floor((z + r + 0.5) / this.SZ);
+    let o = { x, z };
+    for (let k = k0; k <= k1; k++) {
+      const st = this.strips.get(k);
+      if (st) o = this._resolve(st.boxes, st.circles, o.x, o.z, r);
+    }
+    return o;
+  }
+
+  _resolve(boxes, circles, x, z, r) {
+    for (const b of boxes) {
       const dx = x - b.cx, dz = z - b.cz;
       const lx = dx * b.c + dz * b.s, lz = -dx * b.s + dz * b.c;
       const qx = Math.max(-b.hw, Math.min(b.hw, lx)), qz = Math.max(-b.hd, Math.min(b.hd, lz));
@@ -59,7 +97,7 @@ export class Colliders {
         z += ex * b.s + ez * b.c;
       }
     }
-    for (const c of this.circles) {
+    for (const c of circles) {
       const dx = x - c.x, dz = z - c.z, rr = r + c.r;
       const d2 = dx * dx + dz * dz;
       if (d2 < rr * rr && d2 > 1e-8) {
@@ -72,15 +110,29 @@ export class Colliders {
 
   // nearest hit of a 2D ray against the world (bullets); returns distance
   ray(ox, oz, dx, dz, maxD) {
+    if (!this.strips) return this._ray(this.boxes, this.circles, ox, oz, dx, dz, maxD);
+    const za = oz, zb = oz + dz * maxD;
+    const k0 = Math.floor((Math.min(za, zb) - 0.3) / this.SZ), k1 = Math.floor((Math.max(za, zb) + 0.3) / this.SZ);
+    let best = { d: maxD, nx: 0, nz: 0 };
+    for (let k = k0; k <= k1; k++) {
+      const st = this.strips.get(k);
+      if (!st) continue;
+      const h = this._ray(st.boxes, st.circles, ox, oz, dx, dz, best.d);
+      if (h.d < best.d) best = h;
+    }
+    return best;
+  }
+
+  _ray(boxes, circles, ox, oz, dx, dz, maxD) {
     let best = maxD, nx = 0, nz = 0;
-    for (const b of this.boxes) {
+    for (const b of boxes) {
       if (b.h < 0.9) continue;    // bullets fly over curbs, sandbags and barriers
       const rx = ox - b.cx, rz = oz - b.cz;
       const lox = rx * b.c + rz * b.s, loz = -rx * b.s + rz * b.c;
       const ldx = dx * b.c + dz * b.s, ldz = -dx * b.s + dz * b.c;
       let tmin = -Infinity, tmax = Infinity, axis = -1, sgn = 0, miss = false;
-      const slabs = [[lox, ldx, b.hw, 0], [loz, ldz, b.hd, 1]];
-      for (const [o, d, h, a] of slabs) {
+      for (let a = 0; a < 2; a++) {
+        const o = a ? loz : lox, d = a ? ldz : ldx, h = a ? b.hd : b.hw;
         if (Math.abs(d) < 1e-9) { if (o < -h || o > h) { miss = true; break; } continue; }
         let t1 = (-h - o) / d, t2 = (h - o) / d, n = -1;
         if (t1 > t2) { const tt = t1; t1 = t2; t2 = tt; n = 1; }
@@ -93,7 +145,7 @@ export class Colliders {
         nx = lnx * b.c - lnz * b.s; nz = lnx * b.s + lnz * b.c;
       }
     }
-    for (const c of this.circles) {
+    for (const c of circles) {
       if (c.h < 0.9) continue;
       const fx = ox - c.x, fz = oz - c.z;
       const bq = fx * dx + fz * dz, cq = fx * fx + fz * fz - c.r * c.r;
@@ -106,6 +158,8 @@ export class Colliders {
   }
 }
 
+const NB = [[1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1], [1, 1, 1.414], [-1, 1, 1.414], [1, -1, 1.414], [-1, -1, 1.414]];
+
 // ------------------------------------------------------- navigation grid --
 // A distance field from the players over a 0.5 m grid; zombies walk down
 // its gradient, so they path around cars and barricades as a horde.
@@ -115,6 +169,8 @@ export class NavField {
     this.w = Math.ceil((maxX - minX) / cell); this.h = Math.ceil((maxZ - minZ) / cell);
     this.block = new Uint8Array(this.w * this.h);
     this.dist = new Float32Array(this.w * this.h).fill(1e9);
+    this.distB = new Float32Array(this.w * this.h).fill(1e9);
+    this.job = null;
     this.colliders = colliders;
     this.markAll();
     this.queue = new Int32Array(this.w * this.h * 4);
@@ -153,6 +209,7 @@ export class NavField {
     } else { x0 = c.x - c.r - 1; x1 = c.x + c.r + 1; z0 = c.z - c.r - 1; z1 = c.z + c.r + 1; }
     const i0 = Math.max(0, Math.floor((x0 - this.minX) / this.cell)), i1 = Math.min(this.w - 1, Math.floor((x1 - this.minX) / this.cell));
     const j0 = Math.max(0, Math.floor((z0 - this.minZ) / this.cell)), j1 = Math.min(this.h - 1, Math.floor((z1 - this.minZ) / this.cell));
+    this.dirty = true;
     for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
       const x = this.minX + (i + 0.5) * this.cell, z = this.minZ + (j + 0.5) * this.cell;
       const p = this.colliders.resolve(x, z, r);
@@ -166,32 +223,57 @@ export class NavField {
     return j * this.w + i;
   }
 
-  // Dijkstra-lite (two-pass BFS with diagonals approximated by a deque)
-  build(targets, maxD = 120) {
-    const D = this.dist, W = this.w, H = this.h, B = this.block, Q = this.queue;
+  // The flood fill is INCREMENTAL: it fills a second buffer a few thousand cells a frame and swaps
+  // when done, so a phone never pays for the whole thing in one frame (that was a hitch every 0.3 s).
+  // Distances are in cells (0.5 m), diagonals 1.414, and stop at maxD (70 cells = 35 m): the dead
+  // beyond that walk straight at you until they are close enough to be on the map.
+  startBuild(targets, maxD = 70) {
+    const D = this.distB, W = this.w, Q = this.queue;
     D.fill(1e9);
-    let head = 0, tail = 0;
+    let tail = 0;
     for (const t of targets) {
       const k = this.idx(t.x, t.z);
       if (k >= 0) { D[k] = 0; Q[tail++] = k; }
     }
-    const nb = [[1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1], [1, 1, 1.414], [-1, 1, 1.414], [1, -1, 1.414], [-1, -1, 1.414]];
-    while (head < tail) {
+    this.job = { head: 0, tail, maxD };
+  }
+
+  // process up to `ops` queue entries; true when the field has just been swapped in
+  step(ops = 1800) {
+    const j = this.job;
+    if (!j) return false;
+    const D = this.distB, W = this.w, H = this.h, B = this.block, Q = this.queue, maxD = j.maxD, qn = Q.length;
+    let head = j.head, tail = j.tail;
+    const end = head + ops;
+    while (head < tail && head < end) {
       const k = Q[head++];
-      if (head >= Q.length) break;
-      const i = k % W, j = (k / W) | 0;
+      const i = k % W, jj = (k / W) | 0;
       const d0 = D[k];
-      for (const [di, dj, c] of nb) {
-        const ni = i + di, nj = j + dj;
+      for (let n = 0; n < 8; n++) {
+        const di = NB[n][0], dj = NB[n][1], c = NB[n][2];
+        const ni = i + di, nj = jj + dj;
         if (ni < 0 || nj < 0 || ni >= W || nj >= H) continue;
         const nk = nj * W + ni;
         if (B[nk]) continue;
-        if (di && dj && (B[j * W + ni] || B[nj * W + i])) continue;   // no corner cutting
+        if (di && dj && (B[jj * W + ni] || B[nj * W + i])) continue;   // no corner cutting
         const nd = d0 + c;
         if (nd > maxD) continue;
-        if (nd < D[nk] - 1e-3) { D[nk] = nd; if (tail < Q.length) Q[tail++] = nk; }
+        if (nd < D[nk] - 1e-3) { D[nk] = nd; if (tail < qn) Q[tail++] = nk; }
       }
     }
+    j.head = head; j.tail = tail;
+    if (head >= tail) {
+      const t = this.dist; this.dist = this.distB; this.distB = t;
+      this.job = null;
+      return true;
+    }
+    return false;
+  }
+
+  // the whole thing at once (level start)
+  build(targets, maxD = 70) {
+    this.startBuild(targets, maxD);
+    while (!this.step(1e9));
   }
 
   // steepest-descent direction at (x, z); null if unreachable
@@ -253,16 +335,15 @@ function withCutaway(m) {
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
 uniform vec4 uPlayers[4]; uniform vec2 uRes;
-float bayer4(vec2 p){ ivec2 q = ivec2(mod(p, 4.0)); int i = q.x + q.y * 4;
-  float m[16] = float[16](0.,8.,2.,10.,12.,4.,14.,6.,3.,11.,1.,9.,15.,7.,13.,5.); return m[i] / 16.; }`)
+float ign(vec2 p){ return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }`)
       .replace('void main() {', `void main() {
   for (int i = 0; i < 4; i++) {
     vec4 P = uPlayers[i];
     if (P.w <= 0.0) continue;
     vec2 d = (gl_FragCoord.xy - P.xy) / uRes.y;
     float r = length(d) / P.w;
-    if (gl_FragCoord.z < P.z && r < 1.0) {
-      if (smoothstep(0.6, 1.0, r) < bayer4(gl_FragCoord.xy)) discard;
+    if (r < 1.0 && gl_FragCoord.z < P.z) {
+      if (smoothstep(0.6, 1.0, r) < ign(gl_FragCoord.xy)) discard;
     }
   }`);
   };
@@ -286,6 +367,7 @@ export function signTexture(text, color, bg = '#060606', w = 512, h = 128) {
 }
 
 // ---------------------------------------------------------------- level --
+const _wc = new THREE.Color();
 const CH = 36;                                   // batching / culling chunk (m of street)
 export const chunkOf = (z) => Math.floor(z / CH);
 const faceTo = (nx, nz) => Math.atan2(nx, nz);
@@ -316,7 +398,9 @@ export class World {
     this.streetFurniture();
     this.edges();
     populate(this);
+    this.col.index();
     this.lights();
+    this.events = [...this.fires, ...this.police.map((q) => ({ x: q.x, z: q.z, police: true }))];   // everything that wants one of the two event lights
     const b = this.bounds;
     this.nav = new NavField(b.minX - 6, b.minZ - 8, b.maxX + 6, b.maxZ + 8, 0.5, this.col);
     this.bake();
@@ -324,7 +408,7 @@ export class World {
 
   // ------------------------------------------------------------ ground --
   ground() {
-    const asphalt = withCutaway(surface('asphalt'));
+    const asphalt = surface('asphalt');          // (never between the camera and a survivor: no cut-away, no discard)
     asphalt.name = 'asphalt';
     this.wetMaterial(asphalt, 0.75);
     const len = L.zMax - L.zMin + 60;
@@ -410,7 +494,7 @@ float wetMask(vec2 uv) {
         .replace('#include <roughnessmap_fragment>', `
 float roughnessFactor = roughness;
 vec4 ormS = texture2D( roughnessMap, vRoughnessMapUv );
-float wetP = smoothstep(0.25, 0.7, wetMask(vRoughnessMapUv)) * ${amount.toFixed(2)};
+float wetP = wetG;
 roughnessFactor = max(0.3, roughnessFactor * mix(ormS.g * 0.92, 0.3, wetP));
 `)
         .replace('#include <normal_fragment_maps>', `
@@ -418,8 +502,8 @@ vec3 mapN = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;
 mapN.xy *= normalScale * (1.0 - min(1.0, wetP * 1.4));
 normal = normalize( tbn * mapN );`)
         .replace('#include <map_fragment>', `#include <map_fragment>
-{ float w = smoothstep(0.25, 0.7, wetMask(vRoughnessMapUv)) * ${amount.toFixed(2)};
-  diffuseColor.rgb *= mix(0.88, 0.72, w); }`);
+float wetG = smoothstep(0.25, 0.7, wetMask(vRoughnessMapUv)) * ${amount.toFixed(2)};
+  diffuseColor.rgb *= mix(0.88, 0.72, wetG);`);
     };
     m.envMapIntensity = 0.4;
     return m;
@@ -466,7 +550,6 @@ normal = normalize( tbn * mapN );`)
       for (const [px, pz, pw, pd] of [[cx, z0 + 0.15, w, 0.3], [cx, z1 - 0.15, w, 0.3], [x0 + 0.15, cz, 0.3, d], [x1 - 0.15, cz, 0.3, d]]) {
         const p = new THREE.Mesh(worldBox(pw, 0.7, pd, 1.5), concrete);
         p.position.set(px, h + 0.35, pz);
-        p.castShadow = true;
         this.add(p);
       }
       // the roof: air-conditioning, vents, a chimney, sometimes a water tower
@@ -476,12 +559,14 @@ normal = normalize( tbn * mapN );`)
         const o = prop(kind < 0.55 ? 'ac_unit' : kind < 0.8 ? 'roof_vent' : 'chimney');
         o.position.set(x0 + 2 + rng() * (w - 4), h, z0 + 2 + rng() * (d - 4));
         o.rotation.y = Math.floor(rng() * 4) * Math.PI / 2;
+        o.traverse((c) => { if (c.isMesh) c.castShadow = false; });       // roofs are never seen from the street: nothing to shadow
         this.add(o);
       }
       if (h >= 9 && rng() < 0.7) {
         const t = prop('water_tank');
         t.position.set(x0 + 3 + rng() * (w - 6), h, z0 + 3 + rng() * (d - 6));
         t.rotation.y = rng() * 6;
+        t.traverse((c) => { if (c.isMesh) c.castShadow = false; });
         this.add(t);
       }
       // which faces look at a street
@@ -508,7 +593,7 @@ normal = normalize( tbn * mapN );`)
   }
 
   windowColor(wn, t) {
-    const c = new THREE.Color();
+    const c = _wc;
     if (wn.lit === 'warm') {
       const f = wn.flick > 0.7 ? (Math.sin(t * 13 + wn.flick * 40) > 0.85 ? 0.3 : 1) : 1;
       return c.setRGB(1.0 * f, 0.62 * f, 0.32 * f).multiplyScalar(0.85);
@@ -635,7 +720,7 @@ normal = normalize( tbn * mapN );`)
           a.position.set(x, 0.15, z);
           a.rotation.y = ry;
           const am = awningMaterial(awnCols[(rng() * awnCols.length) | 0]);
-          a.traverse((c) => { if (c.isMesh) { c.material = am; c.castShadow = true; } });
+          a.traverse((c) => { if (c.isMesh) { c.material = am; c.castShadow = false; } });
           this.add(a);
         }
       }
@@ -647,6 +732,7 @@ normal = normalize( tbn * mapN );`)
         const g = prop('fire_escape');
         g.position.set(x, 0.15, z);
         g.rotation.y = ry;
+        g.traverse((c) => { if (c.isMesh) c.castShadow = false; });
         this.add(g);
       }
     }
@@ -681,6 +767,7 @@ normal = normalize( tbn * mapN );`)
       const o = prop(name);
       o.position.set(x, this.groundY(x, z), z);
       o.rotation.y = ry;
+      if (name !== 'street_tree') o.traverse((c) => { if (c.isMesh) c.castShadow = false; });
       this.add(o);
       if (colR) this.col.circle(x, z, colR, h);
       if (colBox) this.col.box(x, z, colBox[0], colBox[1], -ry, h);
@@ -744,32 +831,32 @@ normal = normalize( tbn * mapN );`)
     s.add(hemi);
     const moon = new THREE.DirectionalLight(0x9db6dc, 1.5);
     this.moonBase = 1.5;
-    moon.castShadow = true;
-    moon.shadow.mapSize.set(1024, 1024);
+    moon.castShadow = Q.moonShadow > 0;
+    if (Q.moonShadow > 0) moon.shadow.mapSize.set(Q.moonShadow, Q.moonShadow);
     const msc = moon.shadow.camera;
-    msc.left = -17; msc.right = 17; msc.top = 17; msc.bottom = -17; msc.near = 1; msc.far = 90;
+    const R = Q.moonRange;
+    msc.left = -R; msc.right = R; msc.top = R; msc.bottom = -R; msc.near = 1; msc.far = 70;
     moon.shadow.bias = -0.0006;
     moon.shadow.normalBias = 0.05;
     s.add(moon.target);
     moon.position.set(-20, 40, -10);
     s.add(moon);
     this.moon = moon;
-    // a fixed pool of point lights handed to whatever is nearest the camera
-    // (never add or remove lights at runtime: that recompiles shaders)
+    // A FIXED pool of point lights handed to whatever is nearest the camera (never add or remove
+    // lights at runtime: that recompiles every shader). Every light is paid for on every lit pixel,
+    // so there are few: two lamps, and two "event" lights shared by fires, flares and police cars.
     this.lampPool = [];
-    for (let i = 0; i < 3; i++) {
-      const l = new THREE.PointLight(0xffa860, 0, 20, 1.5);
+    for (let i = 0; i < 2; i++) {
+      const l = new THREE.PointLight(0xffa860, 0, 18, 1.5);
       s.add(l);
       this.lampPool.push(l);
     }
     this.firePool = [];
     for (let i = 0; i < 2; i++) {
-      const l = new THREE.PointLight(0xff7a2a, 0, 15, 1.5);
+      const l = new THREE.PointLight(0xff7a2a, 0, 14, 1.5);
       s.add(l);
       this.firePool.push(l);
     }
-    this.policeLight = new THREE.PointLight(0xff2020, 0, 14, 1.5);
-    s.add(this.policeLight);
     // fake volumetrics: lamp cones and ground pools (cheap, everywhere)
     const coneMat = new THREE.MeshBasicMaterial({ map: tex('tex/cone.webp'), color: 0xffb070, transparent: true, opacity: 0.09, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
     const poolMat = new THREE.MeshBasicMaterial({ map: tex('tex/soft.webp'), color: 0xffa050, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false });
@@ -792,16 +879,28 @@ normal = normalize( tbn * mapN );`)
     // the moon's shadow map rides with the survivors
     this.moon.position.set(focus.x - 22, 30, focus.z - 12);
     this.moon.target.position.set(focus.x, 0, focus.z);
-    // street lamps: the nearest three get real light; broken ones stutter
-    const near = this.lampSpots.map((Lm, i) => ({ L: Lm, i, d: (Lm.x - focus.x) ** 2 + (Lm.z - focus.z) ** 2 })).sort((a, b) => a.d - b.d);
+    // street lamps: the nearest ones get real light; broken ones stutter
+    const nearest = (list, k, out) => {
+      out.length = 0;
+      for (const it of list) {
+        const d = ((it.x - focus.x) ** 2 + (it.z - focus.z) ** 2) * (it.police ? 0.4 : 1);   // a police car's lights win over a barrel at the same distance
+        let i = out.length;
+        if (i === k && d >= out[i - 1].d) continue;
+        if (i < k) out.push(null); else i = k - 1;
+        while (i > 0 && out[i - 1].d > d) { out[i] = out[i - 1]; i--; }
+        out[i] = { it, d };
+      }
+      return out;
+    };
+    const nl = nearest(this.lampSpots, this.lampPool.length, this._nl ??= []);
     this.lampPool.forEach((l, k) => {
-      const n = near[k];
+      const n = nl[k];
       if (!n) { l.intensity = 0; return; }
-      l.position.set(n.L.x, n.L.y - 0.3, n.L.z);
-      l.intensity = 85 * (n.L.power ?? 1) * this.lampLevel(n.L, t);
+      l.position.set(n.it.x, n.it.y - 0.3, n.it.z);
+      l.intensity = 85 * (n.it.power ?? 1) * this.lampLevel(n.it, t);
     });
     for (const { cone, pool, L: Lm } of this.lampFx) {
-      const far = Math.abs(Lm.z - focus.z) > 48;
+      const far = Math.abs(Lm.z - focus.z) > 40;
       cone.visible = pool.visible = !far;
       if (far) continue;
       const k = this.lampLevel(Lm, t);
@@ -810,27 +909,26 @@ normal = normalize( tbn * mapN );`)
     }
     const lampMat = propMaterial('lamp');
     if (lampMat) lampMat.emissiveIntensity = 5;
-    // fires (and flares): the two nearest light the street
-    const fn = this.fires.map((f) => ({ f, d: (f.x - focus.x) ** 2 + (f.z - focus.z) ** 2 })).sort((a, b) => a.d - b.d);
-    this.firePool.forEach((l, k) => {
-      const f = fn[k]?.f;
-      if (!f) { l.intensity = 0; return; }
-      const fl = 0.75 + 0.15 * Math.sin(t * 17 + f.phase) + 0.1 * Math.sin(t * 31.7 + f.phase * 2) + 0.08 * Math.sin(t * 5.3);
-      l.position.set(f.x + Math.sin(t * 9) * 0.08, f.y + 0.6, f.z + Math.cos(t * 7) * 0.08);
-      l.color.set(f.color ?? 0xff7a2a);
-      l.intensity = 42 * fl * f.size;
-    });
-    // police lightbar: alternating red / blue, the light follows the nearest car
+    // fires, flares and police cars: the two nearest light the street
     const ph = (t * 2.2) % 1;
     const red = ph < 0.5;
     const flash = (ph % 0.5) < 0.12 || ((ph % 0.5) > 0.2 && (ph % 0.5) < 0.3) ? 1 : 0.15;
-    let p = null, pd = 1e9;
-    for (const q of this.police) { const d = (q.x - focus.x) ** 2 + (q.z - focus.z) ** 2; if (d < pd) { pd = d; p = q; } }
-    if (p && pd < 26 * 26) {
-      this.policeLight.position.set(p.x, 2.2, p.z);
-      this.policeLight.color.set(red ? 0xff1a14 : 0x1f4dff);
-      this.policeLight.intensity = 30 * flash;
-    } else this.policeLight.intensity = 0;
+    const nf = nearest(this.events, this.firePool.length, this._nf ??= []);
+    this.firePool.forEach((l, k) => {
+      const n = nf[k];
+      if (!n) { l.intensity = 0; return; }
+      const f = n.it;
+      if (f.police) {
+        l.position.set(f.x, 2.2, f.z);
+        l.color.set(red ? 0xff1a14 : 0x1f4dff);
+        l.intensity = 30 * flash;
+      } else {
+        const fl = 0.75 + 0.15 * Math.sin(t * 17 + f.phase) + 0.1 * Math.sin(t * 31.7 + f.phase * 2) + 0.08 * Math.sin(t * 5.3);
+        l.position.set(f.x + Math.sin(t * 9) * 0.08, f.y + 0.6, f.z + Math.cos(t * 7) * 0.08);
+        l.color.set(f.color ?? 0xff7a2a);
+        l.intensity = 42 * fl * f.size;
+      }
+    });
     const r = propMaterial('lightbar_red'), b = propMaterial('lightbar_blue');
     if (r) r.emissiveIntensity = red ? 8 * flash : 0.2;
     if (b) b.emissiveIntensity = red ? 0.2 : 8 * flash;
@@ -840,8 +938,8 @@ normal = normalize( tbn * mapN );`)
       f.mat.color.setScalar(glitch ? 0.15 : f.base);
     }
     // windows: only the chunks near the survivors are re-coloured
-    if (Math.floor(t * 10) !== this._wt) {
-      this._wt = Math.floor(t * 10);
+    if (Math.floor(t * 6) !== this._wt) {
+      this._wt = Math.floor(t * 6);
       for (const w of this.windows) {
         if (Math.abs(w.z - focus.z) > CH * 2.2 || !w.lit.length) continue;
         for (const k of w.lit) w.mesh.setColorAt(k, this.windowColor(w.list[k], t));

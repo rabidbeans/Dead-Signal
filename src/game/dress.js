@@ -10,6 +10,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { prop, instanced, tex, surface } from './assets.js';
 import { mulberry } from './rng.js';
 import { L } from './level.js';
+import { Q } from './quality.js';
 import { signTexture } from './world.js';
 
 const _q = new THREE.Quaternion();
@@ -369,7 +370,7 @@ export function dressGround(game) {
   }
 
   // ---- ground fog: big soft sheets that drift in the wind, always around the survivors
-  const N = 36;
+  const N = Q.fogSheets;
   const pos = new Float32Array(N * 3);
   for (let i = 0; i < N; i++) { pos[i * 3] = (rng() - 0.5) * 70; pos[i * 3 + 1] = 0.5 + rng() * 0.9; pos[i * 3 + 2] = (rng() - 0.5) * 70; }
   const g = new THREE.BufferGeometry();
@@ -377,6 +378,7 @@ export function dressGround(game) {
   const pm = new THREE.PointsMaterial({ map: tex('tex/smoke.webp'), size: 15, sizeAttenuation: true, transparent: true, opacity: 0.1, depthWrite: false, color: 0x8da0b8, fog: false });
   const fog = new THREE.Points(g, pm);
   fog.frustumCulled = false;
+  fog.visible = N > 0;
   scene.add(fog);
   game.groundFog = { pts: fog, pos, n: N };
 }

@@ -86,6 +86,9 @@ async function attract() {
 let last = performance.now();
 const FAST = new URLSearchParams(location.search).has('fast');   // QA on slow software GL
 function loop(now) {
+  // a 90/120 Hz phone: render every second or third refresh so the pace is an even 60/45/40 instead of
+  // a GPU that is asked for twice the work and ends up stuttering
+  if (now - last < 15.2 && !FAST) { requestAnimationFrame(loop); return; }
   const dtMs = Math.min(100, now - last);
   last = now;
   const dt = dtMs / 1000;

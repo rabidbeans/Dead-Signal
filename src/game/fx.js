@@ -2,12 +2,14 @@
 // after start-up, and each system is one draw call.
 import * as THREE from 'three';
 import { tex } from './assets.js';
+import { Q } from './quality.js';
 
 const _v = new THREE.Vector3();
 const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _s = new THREE.Vector3();
 const UP = new THREE.Vector3(0, 1, 0);
+const _eu = new THREE.Euler();
 
 // ------------------------------------------------------------ particles --
 class Particles {
@@ -232,7 +234,7 @@ export class FX {
     this.glow = new Particles(scene, { map: soft, max: 64, additive: true });
     this.sparks = new Streaks(scene, 160);
     this.tracers = new Streaks(scene, 32, { color: 0xffd9a0 });
-    this.rain = new Streaks(scene, 520, { additive: false, color: 0xa9b8cc });
+    this.rain = new Streaks(scene, Q.rain + 40, { additive: false, color: 0xa9b8cc });
     this.sparkList = [];
     this.tracerList = [];
     const gy = (x, z) => world.groundY(x, z);
@@ -269,8 +271,9 @@ export class FX {
       scene.add(g);
       this.flashes.push({ g, t: 0 });
     }
-    this.muzzleLights = [0, 1].map(() => { const l = new THREE.PointLight(0xffb070, 0, 9, 1.6); scene.add(l); return l; });
-    this.mlCursor = 0;
+    // (a muzzle flash lights the street through the local player's lantern: see Player.update; a light of
+    // its own would be paid for on every lit pixel of every frame, shots or not)
+    this.flash = { x: 0, y: 0, z: 0, t: 1 };
     this.time = 0;
   }
 
@@ -289,11 +292,7 @@ export class FX {
     f.g.scale.set(s, s, s);
     f.g.children[0].rotation.y = Math.random() * 6.28;
     f.g.children[1].rotation.x = Math.random() * 6.28;
-    const l = this.muzzleLights[this.mlCursor];
-    this.mlCursor = (this.mlCursor + 1) % this.muzzleLights.length;
-    l.position.set(x + dirx * 0.3, y + 0.15, z + dirz * 0.3);
-    l.intensity = 26;
-    l.userData.t = 0;
+    this.flash.x = x + dirx * 0.3; this.flash.y = y + 0.15; this.flash.z = z + dirz * 0.3; this.flash.t = 0;
     // a puff of gun smoke that lingers in the rain
     for (let i = 0; i < 2; i++) {
       this.smoke.emit({ x: x + dirx * 0.2, y, z: z + dirz * 0.2, vx: dirx * (1.2 + Math.random()), vy: 0.3, vz: dirz * (1.2 + Math.random()), life: 0.9, s0: 0.15, s1: 0.7, r: 0.6, g: 0.6, b: 0.62, a0: 0.16, a1: 0, drag: 3 });
@@ -370,11 +369,7 @@ export class FX {
       f.t += dt;
       if (f.t > 0.034) f.g.visible = false;
     }
-    for (const l of this.muzzleLights) {
-      if (l.intensity <= 0) continue;
-      l.userData.t += dt;
-      l.intensity = Math.max(0, 26 * (1 - l.userData.t / 0.06));
-    }
+    this.flash.t += dt;
     // tracers: 2 m streaks moving at 140 m/s
     this.tracers.list.length = 0;
     this.tracerList = this.tracerList.filter((t) => {
@@ -416,7 +411,7 @@ export class FX {
           } else { s.rest = true; s.rx = Math.round(s.rx / Math.PI) * Math.PI; }
         }
       }
-      _q.setFromEuler(new THREE.Euler(s.rx, s.ry, 0));
+      _q.setFromEuler(_eu.set(s.rx, s.ry, 0));
       _m.compose(_v.set(s.x, s.y, s.z), _q, _s.set(1, 1, 1));
       this.shells.setMatrixAt(i, _m);
     }
@@ -446,7 +441,7 @@ export class FX {
     this.rain.list.length = 0;
     if (!this.rainDrops) {
       this.rainDrops = [];
-      for (let i = 0; i < 480; i++) this.rainDrops.push({ x: (Math.random() - 0.5) * 34, y: Math.random() * 14, z: (Math.random() - 0.5) * 26, v: 13 + Math.random() * 5 });
+      for (let i = 0; i < Q.rain; i++) this.rainDrops.push({ x: (Math.random() - 0.5) * 34, y: Math.random() * 14, z: (Math.random() - 0.5) * 26, v: 13 + Math.random() * 5 });
     }
     for (const r of this.rainDrops) {
       r.y -= r.v * dt;

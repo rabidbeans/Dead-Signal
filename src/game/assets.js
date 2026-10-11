@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
+import { Q } from './quality.js';
 
 const BASE = import.meta.env.BASE_URL + 'assets/';
 const gltf = new GLTFLoader();
@@ -15,13 +16,17 @@ export const SURVIVORS = ['survivor_a', 'survivor_b'];
 
 let maxAniso = 4;
 export function setAnisotropy(renderer) {
-  maxAniso = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  maxAniso = Math.min(Q.aniso, renderer.capabilities.getMaxAnisotropy());
 }
+
+// A phone gets half-size copies (public/assets/m/, made by tools/mobile_textures.py): a quarter of the
+// texture memory and bandwidth, and nothing on screen is big enough to show the difference.
+const MOBILE = /^(chars\/|tex\/(asphalt|brick|roof|sidewalk|concrete|metal|shutter|wood)_)/;
 
 export function tex(path, { srgb = true, repeat = null } = {}) {
   const key = path + (srgb ? ':s' : ':l');
   if (cache.has(key)) return cache.get(key);
-  const t = texLoader.load(BASE + path);
+  const t = texLoader.load(BASE + (Q.lowTex && MOBILE.test(path) ? 'm/' : '') + path);
   t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
   t.anisotropy = maxAniso;
   if (repeat) {
@@ -134,14 +139,17 @@ function upgrade(mat) {
   switch (key) {
     case 'concrete': m = surface('concrete'); break;
     case 'metal': m = surface('metal', 1, 0x26392c); m.metalness = 0.35; break;
-    case 'paint':
-      m = dirtify(new THREE.MeshPhysicalMaterial({ color: 0x4a4f55, metalness: 0.55, roughness: 0.42, clearcoat: 0.7, clearcoatRoughness: 0.25 }));
+    case 'paint':      // (a clear-coat doubles the cost of every light: phones get plain standard paint)
+      m = dirtify(Q.physicalPaint ? new THREE.MeshPhysicalMaterial({ color: 0x4a4f55, metalness: 0.55, roughness: 0.42, clearcoat: 0.7, clearcoatRoughness: 0.25 })
+        : new THREE.MeshStandardMaterial({ color: 0x4a4f55, metalness: Q.env ? 0.55 : 0.2, roughness: 0.5 }));
       break;
     case 'paint_white':
-      m = dirtify(new THREE.MeshPhysicalMaterial({ color: 0xb5b5b0, metalness: 0.2, roughness: 0.45, clearcoat: 0.6, clearcoatRoughness: 0.3 }));
+      m = dirtify(Q.physicalPaint ? new THREE.MeshPhysicalMaterial({ color: 0xb5b5b0, metalness: 0.2, roughness: 0.45, clearcoat: 0.6, clearcoatRoughness: 0.3 })
+        : new THREE.MeshStandardMaterial({ color: 0xb5b5b0, metalness: 0.1, roughness: 0.5 }));
       break;
     case 'glass':
-      m = new THREE.MeshPhysicalMaterial({ color: 0x0b0d10, metalness: 0.1, roughness: 0.14, clearcoat: 1, clearcoatRoughness: 0.12, envMapIntensity: 1.4 });
+      m = Q.physicalPaint ? new THREE.MeshPhysicalMaterial({ color: 0x0b0d10, metalness: 0.1, roughness: 0.14, clearcoat: 1, clearcoatRoughness: 0.12, envMapIntensity: 1.4 })
+        : new THREE.MeshStandardMaterial({ color: 0x0b0d10, metalness: 0.1, roughness: 0.2 });
       break;
     case 'lamp':
       m = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0xffb36a, emissiveIntensity: 6 });

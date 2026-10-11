@@ -6,12 +6,15 @@ import { FX } from './fx.js';
 import { Player, PISTOL } from './player.js';
 import { Zombie } from './zombie.js';
 import { audio, buzz } from './audio.js';
-import { loadWeapon, tex } from './assets.js';
+import { loadWeapon, tex, makeCharacter, ZOMBIES } from './assets.js';
 import { nightEnvironment, isTouch } from './engine.js';
 import { perlin1 } from './noise.js';
 import { dressGround, tickFog } from './dress.js';
 import { L, HOLDS, HOLD_TRIGGER, HOLD_RADIUS, MEDKITS } from './level.js';
 import { mulberry } from './rng.js';
+import { Q } from './quality.js';
+
+const _v2 = new THREE.Vector2(), _v3 = new THREE.Vector3();
 
 // ------------------------------------------------------------- camera --
 class CameraRig {
@@ -78,7 +81,6 @@ export class Game {
     this.scene = engine.scene;
     this.camera = engine.camera;
     this.touch = isTouch;
-    this.quality = { shadow: isTouch ? 1024 : 2048 };
     this.zombies = new Map();
     this.players = new Map();
     this.nextZid = 1;
@@ -115,15 +117,14 @@ export class Game {
     const s = this.scene;
     s.background = new THREE.Color(0x0a0f16);
     s.fog = new THREE.FogExp2(0x101822, 0.019);
-    s.environment = nightEnvironment(this.engine.renderer);
-    s.environmentIntensity = 1.0;
+    if (Q.env) { s.environment = nightEnvironment(this.engine.renderer); s.environmentIntensity = 1.0; }
     this.world = new World(s);
     this.fx = new FX(s, this.world);
     this.corpses = [];
     this.pistolModel = await loadWeapon('pistol');
     this.cam = new CameraRig(this.camera);
     dressGround(this);
-    this.engine.onLowTier = () => { this.world.moon.castShadow = false; this.hud.toast?.('Performance mode'); };
+    this.engine.onLowTier = () => { this.world.moon.castShadow = false; if (this.groundFog) this.groundFog.pts.visible = false; this.hud.toast?.('Performance mode'); };
     const cp = this.opts.attract ? 0 : (this.opts.checkpoint || 0);
     if (cp > 0) this.openGateTo(cp, true);                      // restart from a checkpoint: the gates behind us are already open
     const baseZ = this.opts.attract ? ATTRACT_Z : cp > 0 ? L.gate[cp - 1] - 5 : L.start.z;
@@ -146,6 +147,39 @@ export class Game {
     // (main.js routes network messages here once the level is running)
     // warm up shaders while the title card shows
     this.engine.renderer.compile(s, this.camera);
+    if (!this.opts.attract) this.warmUp();       // (the menu backdrop is thrown away on PLAY: its warm-up would be wasted)
+  }
+
+  // Draw everything once, behind the loading screen. A GPU only gets a texture, a mesh or a shader
+  // the first time something using it is drawn, and on a phone each of those is a stall of 5-50 ms:
+  // a new zombie model, or the next block of street, showed up as a stutter while moving around.
+  // This pays all of it up front: every chunk of the street, one of each zombie, every effect.
+  warmUp() {
+    const scene = this.scene, extra = [];
+    const me = this.me;
+    if (!this.opts.attract) {
+      ZOMBIES.forEach((name, i) => {
+        try {
+          const c = makeCharacter(name);
+          c.root.position.set(me.x - 2.5 + i * 0.55, 0, me.z - 3);
+          scene.add(c.root);
+          extra.push(c);
+        } catch (e) { /* a model that did not load is not worth stopping for */ }
+      });
+    }
+    const saved = [];
+    scene.traverse((o) => {
+      if (o.isLight) return;
+      if (o.isMesh || o.isPoints || o.isLine || o.isGroup) saved.push([o, o.visible, o.frustumCulled]);
+      if (o.isMesh || o.isPoints || o.isLine) o.frustumCulled = false;
+      if (o.isMesh || o.isPoints || o.isLine || o.isGroup) o.visible = true;
+    });
+    try {
+      this.engine.composer.render(0.016);
+      this.engine.composer.render(0.016);
+    } catch (e) { console.warn('warm-up', e); }
+    for (const [o, v, f] of saved) { o.visible = v; o.frustumCulled = f; }
+    for (const c of extra) { scene.remove(c.root); c.mesh.skeleton?.dispose?.(); c.material.dispose(); }
   }
 
   start() {
@@ -162,7 +196,7 @@ export class Game {
     me.char.root.visible = false;
     me.gun.visible = false;
     me.light.visible = false;
-    me.lantern.intensity = 0;
+    if (me.lantern) me.lantern.intensity = 0;
     me.laser.visible = false;
     for (let i = 0; i < 9; i++) {
       const a = Math.random() * 6.28, r = 6 + Math.random() * 14;
@@ -803,15 +837,40 @@ export class Game {
     for (const p of this.players.values()) if (!p.local) this.interp(p);
     // the dead
     if (this.isHost) {
+      // the chase map: restarted when someone has moved (or a gate opened), filled a little every frame
+      const nav = this.world.nav;
       this.navT -= dt;
-      if (this.navT <= 0) { this.navT = 0.3; this.world.nav.build([...this.players.values()].filter((p) => p.alive)); }
-      for (const z of this.zombies.values()) z.think(dt, [...this.players.values()]);
+      if (!nav.job && this.navT <= 0) {
+        let moved = nav.dirty;
+        const last = this.navAt || (this.navAt = new Map());
+        for (const p of this.players.values()) {
+          const l = last.get(p.id);
+          if (!l || (l.x - p.x) ** 2 + (l.z - p.z) ** 2 > 0.5 || l.alive !== p.alive) moved = true;
+        }
+        if (moved) {
+          nav.dirty = false;
+          this.navT = 0.3;
+          const tg = [];
+          for (const p of this.players.values()) { if (p.alive) tg.push(p); last.set(p.id, { x: p.x, z: p.z, alive: p.alive }); }
+          nav.startBuild(tg);
+        }
+      }
+      nav.step(1800);
+      const plist = this._plist || (this._plist = []);
+      plist.length = 0;
+      for (const p of this.players.values()) plist.push(p);
+      for (const z of this.zombies.values()) z.think(dt, plist);
       this.director(dt);
       this.revives(dt);
     } else {
       for (const z of this.zombies.values()) if (z.alive) this.interp(z, 120);
     }
-    for (const z of this.zombies.values()) z.update(dt, this.camera);
+    const zr2 = (Q.zombieShadows * 1.6) ** 2;
+    for (const z of this.zombies.values()) {
+      z.update(dt, this.camera);
+      // only the dead close to you are worth a shadow-map draw each
+      z.char.mesh.castShadow = zr2 > 0 && z.alive && (z.x - me.x) ** 2 + (z.z - me.z) ** 2 < zr2;
+    }
     for (const p of this.players.values()) {
       if (p.remoteReload > 0) { p.remoteReload -= dt; p.anim.reload = 1 - p.remoteReload / PISTOL.reload; if (p.remoteReload <= 0) p.anim.reload = 0; }
       p.update(dt);
@@ -856,6 +915,11 @@ export class Game {
       const c = this.holdCentre(this.hold) + 10;
       mx = -me.x * 0.3; my = Math.max(-0.4, Math.min(0.4, (c - me.z) * 0.2));
     } else { mx = -me.x * 0.35; my = -1; }
+    // stuck on something (a sandbag arc dead ahead)? step round it
+    const bp = this._bot || (this._bot = { x: me.x, z: me.z, t: 0, side: 0, until: 0 });
+    bp.t += dt;
+    if (bp.t > 1.2) { if (Math.hypot(me.x - bp.x, me.z - bp.z) < 0.5 && !(best && bd < 6.5) && this.hold < 0) { bp.side = Math.random() < 0.5 ? -1 : 1; bp.until = this.time + 1.6; } bp.x = me.x; bp.z = me.z; bp.t = 0; }
+    if (this.time < bp.until) { mx = bp.side * 1.0; my = -0.5; }
     const move = { x: Math.max(-1, Math.min(1, mx)), y: Math.max(-1, Math.min(1, my)) };
     let aim = null;
     if (best && bd < 13) aim = { x: (best.x - me.x) / bd, y: (best.z - me.z) / bd, mag: 1 };
@@ -881,9 +945,9 @@ export class Game {
 
   updateCutaway() {
     const r = this.engine.renderer;
-    const size = r.getDrawingBufferSize(new THREE.Vector2());
+    const size = r.getDrawingBufferSize(_v2);
     cutaway.uRes.value.copy(size);
-    const v = new THREE.Vector3();
+    const v = _v3;
     let i = 0;
     for (const p of this.players.values()) {
       if (i >= 4) break;

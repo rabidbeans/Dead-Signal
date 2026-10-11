@@ -228,7 +228,18 @@ export class Zombie {
     const speed = dt > 0 ? moved / dt : 0;
     this.px = this.x; this.pz = this.z;
     this.anim.attack += ((this.state === 'windup' ? 1 : 0) - this.anim.attack) * Math.min(1, dt * 10);
-    this.anim.update(dt, Math.min(moved, 0.2), speed);
+    // Posing 27 bones is the single biggest cost of the horde, so only what you can see is posed every
+    // frame: the dead beyond the screen edge every few frames, the long-dead not at all.
+    const me = this.game.me;
+    const d2 = me ? (this.x - me.x) ** 2 + (this.z - me.z) ** 2 : 0;
+    this.adt = (this.adt || 0) + dt; this.amv = (this.amv || 0) + moved;
+    this.lodN = (this.lodN || 0) + 1;
+    const settled = this.state === 'dead' && this.deadT > 1.8;
+    const pose = !settled && (d2 < 324 || this.lodN % (d2 > 676 ? 6 : 2) === 0);
+    if (pose) {
+      this.anim.update(this.adt, Math.min(this.amv, 0.2 * (this.adt / Math.max(dt, 1e-3))), this.adt > 0 ? this.amv / this.adt : 0);
+      this.adt = 0; this.amv = 0;
+    }
     this.flash = Math.max(0, this.flash - dt / 0.08);
     this.char.material.userData.uniforms.uFlash.value = this.flash;
     // the fall: pivot at the feet, onto the ground over ~0.6 s
