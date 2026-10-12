@@ -172,6 +172,8 @@ async function startGame(players, localId, opts = {}) {
   document.querySelector('.load-text').textContent = `LEVEL ${level} — ${levelInfo(level).name}`;
   if (game) game.dispose();
   hud.reset();
+  input.reset();
+  document.activeElement?.blur?.();            // the join-code box must not keep the keyboard (or its keys)
   await loadCharacters([...new Set(players.map((p) => p.model))]);   // survivors load when chosen
   shop.el.classList.add('hidden');
   game = new Game(engine, hud, input, net, { players, localId, checkpoint: opts.checkpoint || 0, level });

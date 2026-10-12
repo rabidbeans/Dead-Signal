@@ -28,7 +28,12 @@ export class Input {
     el.addEventListener('pointerup', (e) => this.up(e));
     el.addEventListener('pointercancel', (e) => this.up(e));
     el.addEventListener('contextmenu', (e) => e.preventDefault());
+    // The keyboard is for desktop testing. Keys typed into a text box (your name, a join code) are not moves: on a phone
+    // the soft keyboard often never sends the key-up, and a join code with an A, S, W or D in it left that key "held" for
+    // the whole game, walking the survivor one way and overriding the thumb stick.
+    const typing = (e) => { const t = e.target; return t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable); };
     addEventListener('keydown', (e) => {
+      if (typing(e) || e.repeat && this.keys.has(e.code)) return;
       this.keys.add(e.code);
       if (e.code === 'KeyR') this.reloadPressed = true;
       if (e.code === 'Digit1') this.slotPressed = 0;
@@ -36,7 +41,16 @@ export class Input {
       if (e.code === 'KeyQ') this.swapPressed = true;
     });
     addEventListener('keyup', (e) => this.keys.delete(e.code));
+    addEventListener('blur', () => this.reset());
+    document.addEventListener('visibilitychange', () => { if (document.hidden) this.reset(); });
     this.mouseAim = null;   // for desktop: the cursor in screen px
+  }
+
+  // forget every held key and stick (a new level starts, the tab was hidden, the window lost focus)
+  reset() {
+    this.keys.clear();
+    this.mouseDown = false;
+    this.reloadPressed = false; this.slotPressed = null; this.swapPressed = false; this.tapShot = false;
   }
 
   side(e) { return e.clientX < innerWidth * 0.5 ? 'move' : 'aim'; }
@@ -104,7 +118,9 @@ export class Input {
     const k = this.keys;
     const kx = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
     const ky = (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0) - (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0);
-    if (kx || ky) { const l = Math.hypot(kx, ky); mv = { x: kx / l, y: ky / l }; }
+    // a thumb on the move stick always wins over the keyboard
+    const thumb = Object.values(this.sticks).some((st) => st.kind === 'move');
+    if ((kx || ky) && !thumb) { const l = Math.hypot(kx, ky); mv = { x: kx / l, y: ky / l }; }
     this.move = mv;
     this.aim = aim;
     this.firing = firing;

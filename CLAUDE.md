@@ -255,3 +255,11 @@ Sam: "twice as many zombies and they are 10% faster … a boss at the end of eac
 - **The final hold is the boss fight**: `startHold` spawns the boss at the north end of the pad (host); the hold ends only when it is dead (and
   8 s have passed), the dead keep trickling in meanwhile; then `extract` (heli) -> win as before. The HUD shows a boss bar (`.bossbar`, from
   `game.bossZ()`); snapshots carry `B: [id, hp]` so a client's bar moves.
+
+## 2026-10-12: the joiner "only walks forward"
+⚠️ The desktop keyboard listener used to take keys typed INTO the name / join-code boxes; a phone's soft keyboard often never sends the
+key-up, so a code like LLAX left KeyA "held" for the whole game and keyboard movement overrides the thumb stick. Now: keys from INPUT/
+TEXTAREA are ignored, `Input.reset()` clears held keys on blur / hidden tab / every `startGame`, the focused field is blurred on start, and a
+thumb on the move stick always beats the keyboard. Repro: `/home/user/tools/pw/stuck_test.mjs` (old code: walked 3.8 m on its own).
+The lobby no longer uses the Firestore SDK at all (`net.js` talks to the Firestore REST API with fetch + polling): the SDK's listener
+took ~30 s to hear a knock on iPhones.
