@@ -81,7 +81,7 @@ const LEVELS = {
       { secs: 58, n: 115, lurch: 0.24, runner: 0.22, cap: 34, title: 'THE JUNCTION', brutes: 2 },
       { secs: 40, n: 58, lurch: 0.25, runner: 0.22, cap: 21, title: 'THE FOREMAN', final: true, boss: 'foreman', brutes: 2 },
     ],
-    zHp: 1.3, zSpd: 1.09, brutePop: 0.08, sleepGap: [3.8, 3.8],
+    zHp: 1.25, zSpd: 1.08, brutePop: 0.07, sleepGap: [4, 4],
     rowGap: [10.5, 3], rowKinds: ['containers', 'containers', 'jersey', 'cars', 'containers'],
     heights: [7, 3, 8, 7],
     signs: [['PIER 9', '#ffb030', 4], ['CUSTOMS', '#4ad8ff', 5], ['FREIGHT', '#ff6a3a', 5], ['BAIT', '#7aff5a', 3], ['CRANE 3', '#ffd34a', 5]],
@@ -97,7 +97,7 @@ const LEVELS = {
       { secs: 62, n: 130, lurch: 0.25, runner: 0.26, cap: 36, title: 'THE JUNCTION', brutes: 3 },
       { secs: 40, n: 60, lurch: 0.25, runner: 0.26, cap: 22, title: 'SUBJECT OMEGA', final: true, boss: 'omega', brutes: 2 },
     ],
-    zHp: 1.4, zSpd: 1.12, brutePop: 0.1, sleepGap: [3.6, 3.6],
+    zHp: 1.32, zSpd: 1.1, brutePop: 0.08, sleepGap: [3.9, 3.9],
     rowGap: [10, 3], rowKinds: ['hesco', 'jersey', 'hesco', 'cars', 'fence'],
     heights: [6, 3, 7, 6],
     signs: [['RESTRICTED', '#ff3030', 6], ['MEDICAL', '#4affb0', 5], ['ARMORY', '#ffd34a', 5], ['GATE B', '#4ad8ff', 4], ['DECON', '#ff8a3a', 4.5]],
@@ -137,8 +137,8 @@ export function setLevel(n) {
   kz.forEach((z, i) => { let zz = z; while (MAZE.some((r) => Math.abs(r.z - zz) < 2.2)) zz -= 1.5; kits.push([(i % 2 ? 3.3 : -3.3), +zz.toFixed(1)]); });
   MEDKITS.splice(0, MEDKITS.length, ...kits);
   // ambushes: one a little way into each stretch, bigger every level
-  AMBUSH.splice(0, AMBUSH.length, { z: d.L.start.z - 30, n: 6 + 2 * d.id }, { z: d.L.cross[0] + 30, n: 8 + 2 * d.id, brutes: d.id >= 3 ? 1 : 0 },
-    { z: d.L.gate[0] - 30, n: 10 + 2 * d.id, brutes: d.id >= 2 ? 1 : 0 }, { z: d.L.lz.z + 30, n: 10 + 2 * d.id, brutes: d.id >= 4 ? 1 : 0 });
+  AMBUSH.splice(0, AMBUSH.length, { z: d.L.start.z - 30, n: 6 + Math.round(1.5 * d.id) }, { z: d.L.cross[0] + 30, n: 8 + Math.round(1.5 * d.id), brutes: d.id >= 3 ? 1 : 0 },
+    { z: d.L.gate[0] - 30, n: 9 + Math.round(1.5 * d.id), brutes: d.id >= 2 ? 1 : 0 }, { z: d.L.lz.z + 30, n: 9 + Math.round(1.5 * d.id), brutes: d.id >= 4 ? 1 : 0 });
   for (const k of Object.keys(LV)) delete LV[k];
   Object.assign(LV, d, { short: d.name });
   return d;

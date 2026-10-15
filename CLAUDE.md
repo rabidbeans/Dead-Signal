@@ -263,3 +263,38 @@ TEXTAREA are ignored, `Input.reset()` clears held keys on blur / hidden tab / ev
 thumb on the move stick always beats the keyboard. Repro: `/home/user/tools/pw/stuck_test.mjs` (old code: walked 3.8 m on its own).
 The lobby no longer uses the Firestore SDK at all (`net.js` talks to the Firestore REST API with fetch + polling): the SDK's listener
 took ~30 s to hear a knock on iPhones.
+
+## Round 7 (2026-10-15): one hold, a maze, five levels, five bosses, five guns
+
+Sam: "only one time per level where you need to defend an area ... the rest of the level will be like a maze ... linear ...
+the gate at 50% ... then killing the boss ... each boss has a unique special ability ... level three, four, five ... one big
+continuous level ... boss guarding the safe room ... run past enemies and they chase you ... a new gun for each level you beat ...
+more color ... 10% more cartoony but still scary ... the player's legs are too wide."
+
+⚠️ SUPERSEDES Round 6's three junctions and Round 3's four gates: each level is now ONE gate and ONE boss.
+
+- **Layout** (`level.js`): `geo(zc, lz)` = one junction `cross[0]` with its gate `gate[0] = zc - 14` (about half way), then the
+  boss arena `lz`. Lengths grow: L1 (-78, -188) … L5 (-102, -236). `HOLDS` = [junction hold, boss hold (`final`, `boss`)].
+  Between start → junction and gate → arena the street is a LINEAR MAZE: `MAZE` rows of barricades (cars, containers, stalls,
+  hesco, fences, jersey barriers; `fillSpan` in dress.js) across the street with one 3.2 m gap, alternating sides (`genMaze`,
+  seeded per level). Colliders under 0.9 m are 'low' (bullets pass). The levels are one push across the city: the story is in
+  each level's `kicker`/`blurb`; every level starts in an open safe room (`kit.safeRoom`) and L1-4 end at a CLOSED safe room
+  the boss guards (`finale: 'saferoom'`: the door opens when the boss dies, everyone alive inside → win). L5 ends at the
+  helicopter pad (`finale: 'heli'`).
+- **Difficulty ramp** per level: `zHp` 1.0/1.1/1.2/1.25/1.32, `zSpd` 1.0/1.03/1.06/1.08/1.1, `brutePop`, `sleepGap`, hold
+  size, AMBUSH size (6/8/9/9 + 1.5 x level). Bot (weak): L1 wins; L4 boss from cp=1 wins; L2/L3/L5 bot dies at the boss.
+- **Bosses** (`boss.js`, all `anim: 'brute'`, scaled up, hp x1.6 per extra player): host `BossBrain` decides, every machine draws
+  `BossFX.event` ({k:'boss', a:...}): THE WARDEN (L1) telegraphed CHARGE down a lane; PATIENT ZERO (L2) lobs BILE globs that
+  leave burning puddles; THE BUTCHER (L3) throws a fan of CLEAVERS; THE FOREMAN (L4) LEAPS onto a marked ring and slams; SUBJECT
+  OMEGA (L5) SCREAMS up runners, charges, and ENRAGES under half health (faster, harder). `game.hurtPlayer(p, dmg, src, kb)`;
+  the `hurt` net message carries `kb` (knock-back).
+- **Chase**: sleepers wake at 11-15 m; an awake zombie keeps following (not culled until 85 m behind) and hurries when far
+  (capped 3.1 m/s), so racing through means a tail.
+- **Guns** (`weapons.js`, `unlock` = the level you must beat): pistol, SMG (1), BREACHER 12 pump shotgun (2: 8 pellets, falloff,
+  pumps), AR-7 rifle (3), M-60 HAILSTORM LMG (4: 100 belt, 14% slower walk, `moveK`). Models `tools/blender/guns.py`, sounds
+  `tools/sfx_guns.py`; `WEAPON_RIG` in rig.js has their grips (shoulder stance). Each player can carry them all, cycle with Q/swap.
+- **Look**: every level has a `theme` (sky, fog, moon, lamps, wall tints, accent, character rim colour, L3 paper lanterns via
+  `kit.lanternStrings`). Characters get a coloured rim, +18% saturation and soft toon banding (assets.js), heads x1.12 and hands
+  x1.08 (rig.js) — the "10% more cartoony". Bloom/contrast up a touch (engine.js). The survivor's stance was narrowed.
+- QA: `?play&fast&lvl=N&cp=1&kit=lmg&perks=...` ; tools in /home/user/tools/pw: `run_bot.mjs`, `lvl_shots.mjs`, `dmglog.mjs`,
+  `states.mjs`. Not verified: phone frame rate on L3-L5, co-op with the bosses on two devices, sounds by ear.
