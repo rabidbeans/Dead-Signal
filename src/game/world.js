@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { prop, surface, tex, propMaterial, instanced, awningMaterial, dirtify } from './assets.js';
 import { populate } from './dress.js';
-import { L, LV, blockRanges, buildLots, lampSites } from './level.js';
+import { L, LV, MAZE, blockRanges, buildLots, lampSites } from './level.js';
 import { mulberry } from './rng.js';
 import { Q } from './quality.js';
 
@@ -227,7 +227,7 @@ export class NavField {
   // when done, so a phone never pays for the whole thing in one frame (that was a hitch every 0.3 s).
   // Distances are in cells (0.5 m), diagonals 1.414, and stop at maxD (70 cells = 35 m): the dead
   // beyond that walk straight at you until they are close enough to be on the map.
-  startBuild(targets, maxD = 70) {
+  startBuild(targets, maxD = 100) {
     const D = this.distB, W = this.w, Q = this.queue;
     D.fill(1e9);
     let tail = 0;
@@ -271,7 +271,7 @@ export class NavField {
   }
 
   // the whole thing at once (level start)
-  build(targets, maxD = 70) {
+  build(targets, maxD = 100) {
     this.startBuild(targets, maxD);
     while (!this.step(1e9));
   }
@@ -511,11 +511,12 @@ float wetG = smoothstep(0.25, 0.7, wetMask(vRoughnessMapUv)) * ${amount.toFixed(
 
   // ---------------------------------------------------------- buildings --
   buildings() {
-    const brick = withCutaway(dirtify(surface('brick'), 0.9));
+    const WC = LV.theme.walls || [0xffffff, 0x8a8f96, 0x9a968c];
+    const brick = withCutaway(dirtify(surface('brick', 1, WC[0]), 0.9));
     brick.name = 'brick';
-    const brick2 = withCutaway(dirtify(surface('brick', 1, 0x8a8f96), 0.9));   // painted brick, grey
+    const brick2 = withCutaway(dirtify(surface('brick', 1, WC[1]), 0.9));   // painted brick, grey
     brick2.name = 'brick2';
-    const concrete = withCutaway(dirtify(surface('concrete', 1, 0x9a968c), 0.9));
+    const concrete = withCutaway(dirtify(surface('concrete', 1, WC[2]), 0.9));
     concrete.name = 'concrete_b';
     const roof = withCutaway(surface('roof'));
     roof.name = 'roof';
@@ -579,7 +580,7 @@ float wetG = smoothstep(0.25, 0.7, wetMask(vRoughnessMapUv)) * ${amount.toFixed(
         this.faceList.push({ f, p, x0, x1, z0, z1, w, d, h, len, rng, alley: false });
       }
       // a neon sign on some of the fronts
-      if (lot.r < 0.32 && h >= 8) {
+      if (lot.r < 0.55 && h >= 7) {
         const words = LV.signs;
         const [txt, col, sw] = words[Math.floor(lot.r * 1000) % words.length];
         const mm = new THREE.MeshBasicMaterial({ map: signTexture(txt, col), toneMapped: false, color: 0xffffff });
@@ -784,7 +785,7 @@ float wetG = smoothstep(0.25, 0.7, wetMask(vRoughnessMapUv)) * ${amount.toFixed(
     const nearLamp = (z) => lamps.some((l) => Math.abs(l.z - z) < 2.5);
     for (const [zN, zS] of blockRanges()) {
       for (let z = zS - 3; z > zN + 2; z -= 5 + rng() * 5) {
-        if (nearLamp(z) || L.gate.some((g) => Math.abs(g - z) < 6)) continue;
+        if (nearLamp(z) || L.gate.some((g) => Math.abs(g - z) < 6) || MAZE.some((r) => Math.abs(r.z - z) < 3.5) || z < L.zMin + 9 || z > 31) continue;
         for (const side of [-1, 1]) {
           const r = rng();
           if (r > 0.55) continue;
@@ -859,8 +860,8 @@ float wetG = smoothstep(0.25, 0.7, wetMask(vRoughnessMapUv)) * ${amount.toFixed(
       this.firePool.push(l);
     }
     // fake volumetrics: lamp cones and ground pools (cheap, everywhere)
-    const coneMat = new THREE.MeshBasicMaterial({ map: tex('tex/cone.webp'), color: 0xffb070, transparent: true, opacity: 0.09, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
-    const poolMat = new THREE.MeshBasicMaterial({ map: tex('tex/soft.webp'), color: 0xffa050, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false });
+    const coneMat = new THREE.MeshBasicMaterial({ map: tex('tex/cone.webp'), color: LV.theme.lamp ?? 0xffb070, transparent: true, opacity: 0.09, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+    const poolMat = new THREE.MeshBasicMaterial({ map: tex('tex/soft.webp'), color: LV.theme.lamp ?? 0xffa050, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false });
     this.lampFx = [];
     for (const Lm of this.lampSpots) {
       if (Lm.nofx) continue;
@@ -898,6 +899,7 @@ float wetG = smoothstep(0.25, 0.7, wetMask(vRoughnessMapUv)) * ${amount.toFixed(
       const n = nl[k];
       if (!n) { l.intensity = 0; return; }
       l.position.set(n.it.x, n.it.y - 0.3, n.it.z);
+      l.color.set(n.it.color ?? LV.theme.lamp ?? 0xffa860);
       l.intensity = 85 * (n.it.power ?? 1) * this.lampLevel(n.it, t);
     });
     for (const { cone, pool, L: Lm } of this.lampFx) {

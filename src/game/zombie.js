@@ -4,6 +4,8 @@ import * as THREE from 'three';
 import { makeCharacter, ZOMBIES } from './assets.js';
 import { Rig, ZombieAnim, mulberry } from './rig.js';
 import { audio } from './audio.js';
+import { LV } from './level.js';
+import { BossBrain, dressBoss } from './boss.js';
 
 export const TYPES = {
   // research: shamblers 0.6-1.0 m/s turning 90-150°/s; lurchers burst to ~3 m/s for 0.4-0.8 s every 3-6 s
@@ -13,9 +15,12 @@ export const TYPES = {
   // the brute (level 2): a hulking, slow, hard-hitting body that shrugs off a stagger. A long wind-up tells you the blow
   // is coming, and it is a big one.
   brute: { hp: 380, speed: [0.85, 1.05], turn: 2.0, dmg: 28, scale: 1.32, rad: 0.5, reach: 1.55, windup: 0.8, recover: 1.2, stagger: 0.12, knock: 0.22, models: ['z_trucker', 'z_burned', 'z_worker'] },
-  // the bosses: one at the landing zone of each level. Huge, they charge in bursts, and they do not flinch.
-  warden: { boss: true, name: 'THE WARDEN', hp: 1500, speed: [0.95, 1.05], turn: 2.2, dmg: 34, scale: 1.75, rad: 0.85, reach: 2.1, windup: 0.85, recover: 1.3, stagger: 0.03, knock: 0.06, burst: 3.6, burstEvery: [5, 4], models: ['z_cop'], anim: 'brute', tint: [1, 0.95, 0.95] },
-  patientzero: { boss: true, name: 'PATIENT ZERO', hp: 2400, speed: [1.0, 1.1], turn: 2.4, dmg: 40, scale: 1.85, rad: 0.9, reach: 2.2, windup: 0.8, recover: 1.2, stagger: 0.02, knock: 0.05, burst: 4.2, burstEvery: [4, 3], models: ['z_patient'], anim: 'brute', tint: [0.8, 1.0, 0.8] },
+  // the bosses: one guarding the end of each level, each with its own special move (boss.js). Huge, and they barely flinch.
+  warden: { boss: true, name: 'THE WARDEN', hp: 2200, speed: [0.95, 1.05], turn: 2.2, dmg: 30, scale: 1.75, rad: 0.85, reach: 2.1, windup: 0.85, recover: 1.3, stagger: 0.03, knock: 0.06, models: ['z_cop'], anim: 'brute', tint: [1, 0.95, 0.95], gear: 'helmet' },
+  patientzero: { boss: true, name: 'PATIENT ZERO', hp: 3000, speed: [1.0, 1.1], turn: 2.4, dmg: 32, scale: 1.85, rad: 0.9, reach: 2.2, windup: 0.8, recover: 1.2, stagger: 0.02, knock: 0.05, models: ['z_patient'], anim: 'brute', tint: [0.75, 1.05, 0.75] },
+  butcher: { boss: true, name: 'THE BUTCHER', hp: 3800, speed: [1.0, 1.12], turn: 2.6, dmg: 34, scale: 1.85, rad: 0.9, reach: 2.2, windup: 0.75, recover: 1.1, stagger: 0.02, knock: 0.05, models: ['z_worker'], anim: 'brute', tint: [1.1, 0.85, 0.85], gear: 'cleaver' },
+  foreman: { boss: true, name: 'THE FOREMAN', hp: 4600, speed: [0.95, 1.05], turn: 2.3, dmg: 38, scale: 1.95, rad: 0.95, reach: 2.3, windup: 0.85, recover: 1.2, stagger: 0.02, knock: 0.04, models: ['z_trucker'], anim: 'brute', tint: [1.0, 0.95, 0.85], gear: 'hardhat' },
+  omega: { boss: true, name: 'SUBJECT OMEGA', hp: 5600, speed: [1.05, 1.15], turn: 2.6, dmg: 40, scale: 2.05, rad: 1.0, reach: 2.4, windup: 0.75, recover: 1.0, stagger: 0.01, knock: 0.03, models: ['z_burned'], anim: 'brute', tint: [0.9, 0.82, 1.05], gear: 'eyes' },
 };
 
 export const SPEED_K = 1.1;      // everything walks 10% faster than the numbers below
@@ -45,8 +50,9 @@ export class Zombie {
     this.px = x; this.pz = z;
     this.face = Math.atan2(-x, -z);
     // a boss has more health with every extra player
-    this.maxHp = this.hp = this.def.hp * (this.def.boss ? 1 + 0.6 * (game.players.size - 1) : 1);
-    this.speed = (this.def.speed[0] + r() * (this.def.speed[1] - this.def.speed[0])) * SPEED_K;
+    // later levels: the ordinary dead are tougher and faster (LV.zHp / zSpd)
+    this.maxHp = this.hp = this.def.hp * (this.def.boss ? 1 + 0.6 * (game.players.size - 1) : (LV.zHp || 1));
+    this.speed = (this.def.speed[0] + r() * (this.def.speed[1] - this.def.speed[0])) * SPEED_K * (this.def.boss ? 1 : (LV.zSpd || 1));
     this.state = 'walk';      // walk | windup | recover | stagger | dead
     this.stateT = 0;
     this.burstT = 2 + r() * 4;
@@ -60,11 +66,12 @@ export class Zombie {
     this.target = null;
     this.sunk = 0;
     this.idle = idle;               // asleep on its feet until someone comes near
-    this.wakeR = 9 + r() * 3;
+    this.wakeR = 11 + r() * 4;
     if (idle && home) { this.home = { x, z }; this.wander = { x: x + (r() - 0.5) * 5, z: z + (r() - 0.5) * 5 }; }
     // client interpolation buffer
     this.buf = [];
     this.place();
+    if (this.def.gear) dressBoss(this);
   }
 
   place() {
@@ -94,6 +101,11 @@ export class Zombie {
       if (dist < this.wakeR || noisy || this.state !== 'walk') this.wake();
       else best = null;
     }
+    // a boss's special move takes over while it runs (boss.js)
+    if (this.boss && best) {
+      this.brain ??= new BossBrain(this);
+      if (this.brain.think(dt, best, dist)) return;
+    }
     // rescue: a body that has not got anywhere for 3 s is put back on the road
     this.stuckT = (this.stuckT || 0) + dt;
     if (this.stuckT > 3) {
@@ -112,7 +124,10 @@ export class Zombie {
         const f = this.game.world.nav.dir(this.x, this.z);
         if (f) { dirx = f.x; dirz = f.z; } else { dirx = tx / dist; dirz = tz / dist; }
       }
-      want = this.speed;
+      want = this.speed * (this.enraged ? 1.45 : 1);
+      // a long way behind its prey (someone ran past it): it hurries, so a horde builds up on your heels
+      // (but the hurry never makes it faster than a survivor can jog: it catches up at the gates, not in the open)
+      if (dist > 12 && !this.boss) want = Math.max(want, Math.min(want * 1.3, 3.1));
     } else if (this.wander) {
       // nobody to chase (the menu): drift between points
       const tx = this.wander.x - this.x, tz = this.wander.z - this.z, d = Math.hypot(tx, tz);
@@ -143,7 +158,7 @@ export class Zombie {
     if (this.state === 'windup') {
       want = 0.3;
       if (this.stateT > windup) {
-        if (best && dist < reach + 0.35) this.game.hurtPlayer(best, this.def.dmg, this);
+        if (best && dist < reach + 0.35) this.game.hurtPlayer(best, this.def.dmg * (this.enraged ? 1.25 : 1), this);
         this.setState('recover');
       }
     }
@@ -268,7 +283,16 @@ export class Zombie {
       if (this.deadT > 30) { this.sunk += dt * 0.05; root.position.y -= this.sunk; }
       return;
     }
-    root.position.set(this.x, this.game.world.groundY(this.x, this.z), this.z);
+    let y = this.game.world.groundY(this.x, this.z);
+    if (this.leap) {
+      // the Foreman's leap: every machine flies the same arc (the host moves him along the ground)
+      const lp = this.leap;
+      lp.t += dt;
+      const u = Math.min(1, lp.t / lp.dur);
+      y += 4 * 2.6 * u * (1 - u);
+      if (u >= 1) this.leap = null;
+    }
+    root.position.set(this.x, y, this.z);
     root.rotation.set(0, this.face, 0);
   }
 

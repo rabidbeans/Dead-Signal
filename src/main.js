@@ -15,6 +15,7 @@ import { Net } from './net/net.js';
 import { Shop } from './ui/shop.js';
 import { save } from './game/save.js';
 import { LEVEL_IDS, levelInfo } from './game/level.js';
+import * as LEVELDATA from './game/level.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('view');
@@ -47,16 +48,16 @@ function show(screen) {
 async function boot() {
   const bar = document.querySelector('.load-bar i');
   let done = 0;
-  const steps = [loadCharacters(ZOMBIES), loadProps(), loadWeapon('pistol'), loadWeapon('smg')];
+  const steps = [loadCharacters(ZOMBIES), loadProps(), ...['pistol', 'smg', 'shotgun', 'rifle', 'lmg'].map(loadWeapon)];
   steps.forEach((p) => p.then(() => { done++; bar.style.width = (done / steps.length * 100) + '%'; }));
   await Promise.all(steps);
   $('name').value = store.get('name', '');
-  document.querySelectorAll('.chip').forEach((c) => {
+  document.querySelectorAll('.chip[data-model]').forEach((c) => {
     c.classList.toggle('on', c.dataset.model === me.model);
     c.addEventListener('click', () => {
       me.model = c.dataset.model;
       store.set('model', me.model);
-      document.querySelectorAll('.chip').forEach((o) => o.classList.toggle('on', o === c));
+      document.querySelectorAll('.chip[data-model]').forEach((o) => o.classList.toggle('on', o === c));
       click();
     });
   });
@@ -66,7 +67,7 @@ async function boot() {
   if (qs.has('play')) {
     // QA: straight into level 1 (?play&bot plays itself)
     // QA: ?kit=smg starts with the SMG bought and equipped, ?cash=5000 fills the wallet, ?lvl=2 picks the level
-    if (qs.get('kit') === 'smg') { save.data.weapons.smg.owned = true; save.data.equipped = 'smg'; }
+    if (qs.get('kit')) for (const k of qs.get('kit').split(',')) if (save.data.weapons[k]) { save.data.weapons[k].owned = true; save.data.equipped = k; }
     if (qs.has('cash')) save.data.cash = +qs.get('cash');
     if (qs.get('perks')) for (const kv of qs.get('perks').split(',')) { const [k, v] = kv.split(':'); save.data.perks[k] = +v; }
     save.write();
@@ -80,6 +81,7 @@ async function boot() {
   window.__game = () => game;
   window.__THREE = THREE;
   window.__save = save;
+  window.__level = LEVELDATA;
   window.__shop = shop;
   // QA: run the simulation forward without drawing (software GL is slow)
   window.__advance = (secs, step = 1 / 30) => { for (let t = 0; t < secs; t += step) game.update(step); return game.time; };
@@ -113,7 +115,7 @@ function buildLevelPicker() {
     const b = document.createElement('button');
     b.className = 'chip';
     b.dataset.level = id;
-    b.textContent = `LEVEL ${id}`;
+    b.textContent = String(id);
     b.addEventListener('click', () => { if (id > save.unlocked) { audio.unlock(); audio.play('deny', { vol: 0.6, jitter: 0 }); hud.toast?.('Win the earlier level first'); return; } picked = id; click(); refreshMenu(); });
     box.appendChild(b);
   }

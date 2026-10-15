@@ -150,7 +150,7 @@ export class Player {
   control(dt, inp, cam) {
     const g = this.game;
     if (this.dead) return;
-    const sp = this.down ? 0.7 : this.speed * (this.reloadT > 0 ? 0.92 : 1);
+    const sp = this.down ? 0.7 : this.speed * (this.reloadT > 0 ? 0.92 : 1) * (this.W.moveK || 1);
     // screen -> world: right is +x, down the screen is +z
     let mx = inp.move.x, mz = inp.move.y;
     const ax = mx * sp, az = mz * sp;
@@ -198,6 +198,7 @@ export class Player {
     if (inp.slot !== null && inp.slot !== undefined) this.selectSlot(inp.slot);
     if (inp.swap) this.cycleWeapon();
     this.cool -= dt;
+    if (this.pumpT > 0 && (this.pumpT -= dt) <= 0) { audio.play('pump', { x: this.x, z: this.z, vol: 0.8 }); this.anim.slide = 0.085; }
     this.drawT = Math.max(0, this.drawT - dt);
     this.spread = Math.max(W.spreadBase, this.spread - W.spreadRecover * dt);
     if (this.reloadT > 0) {
@@ -256,61 +257,78 @@ export class Player {
     const g = this.game;
     const W = this.W;
     this.ammo--;
-    // aim assist: acquire inside ±10°, keep inside ±16°, bend the shot 65%
+    // aim assist: acquire inside ±10°, keep inside ±16°, bend the shot
     let t = this.assistTarget;
     if (t && (!t.alive || !this.inCone(t, dirx, dirz, W.assistHold))) t = null;
     if (!t) t = this.bestTarget(dirx, dirz, W.assistAcquire);
     this.assistTarget = t;
-    let a = Math.atan2(dirz, dirx);
+    let a0 = Math.atan2(dirz, dirx);
     if (t) {
       const ta = Math.atan2(t.z - this.z, t.x - this.x);
-      let da = ta - a;
+      let da = ta - a0;
       da = Math.atan2(Math.sin(da), Math.cos(da));
-      a += da * W.assistBend;
+      a0 += da * W.assistBend;
     }
     const moving = Math.hypot(this.vx, this.vz) > 0.5 ? W.spreadMove : 0;
-    a += (Math.random() * 2 - 1) * (this.spread + moving) * 0.5;
-    this.spread = Math.min(W.spreadMax, this.spread + W.spreadAdd);
-    const dx = Math.cos(a), dz = Math.sin(a);
     const mz = this.muzzle();
-    // hitscan on the shot frame
-    const wall = g.world.col.ray(mz.x, mz.z, dx, dz, W.range);
-    let hit = null, hd = wall.d;
-    for (const z of g.zombies.values()) {
-      if (!z.alive) continue;
-      const fx = z.x - mz.x, fz = z.z - mz.z;
-      const along = fx * dx + fz * dz;
-      if (along < 0 || along > hd) continue;
-      const perp = Math.abs(fx * dz - fz * dx);
-      const rad = (z.def.rad || 0.32) + (z === t ? W.magnet * 0.5 : 0);
-      if (perp < rad) { hd = along - Math.sqrt(Math.max(0, rad * rad - perp * perp)) * 0.5; hit = z; }
+    // one ray, or a shotgun's cloud of pellets; the hits on each body are summed into one wound
+    const pellets = W.pellets || 1;
+    const hits = new Map();
+    let first = null;
+    for (let i = 0; i < pellets; i++) {
+      let a = a0;
+      if (pellets > 1) a += ((i + Math.random()) / pellets - 0.5) * (W.spreadBase + moving);
+      else a += (Math.random() * 2 - 1) * (this.spread + moving) * 0.5;
+      const dx = Math.cos(a), dz = Math.sin(a);
+      const wall = g.world.col.ray(mz.x, mz.z, dx, dz, W.range);
+      let hit = null, hd = wall.d;
+      for (const z of g.zombies.values()) {
+        if (!z.alive) continue;
+        const fx = z.x - mz.x, fz = z.z - mz.z;
+        const along = fx * dx + fz * dz;
+        if (along < 0 || along > hd) continue;
+        const perp = Math.abs(fx * dz - fz * dx);
+        const rad = (z.def.rad || 0.32) + (z === t ? W.magnet * 0.5 : 0);
+        if (perp < rad) { hd = along - Math.sqrt(Math.max(0, rad * rad - perp * perp)) * 0.5; hit = z; }
+      }
+      const hx = mz.x + dx * hd, hz = mz.z + dz * hd;
+      g.fx.tracer(mz.x + dx * 0.4, mz.y, mz.z + dz * 0.4, hx, hz);
+      if (hit) {
+        const fall = W.falloff ? 1 - W.falloff * Math.min(1, hd / W.range) : 1;
+        const h = hits.get(hit) || { dmg: 0, dx, dz, hx, hz };
+        h.dmg += W.dmg * fall; hits.set(hit, h);
+      } else if (wall.d < W.range && (pellets === 1 || i % 2 === 0)) {
+        g.fx.hard(hx, mz.y, hz, wall.nx, wall.nz, dx, dz);
+        if (i === 0) audio.play('hard', { x: hx, z: hz, vol: 0.5 });
+      }
+      if (i === 0) first = { dx, dz, hx, hz, w: hit ? 0 : (wall.d < W.range ? 1 : 2), nx: wall.nx, nz: wall.nz };
     }
-    const crit = !!hit && (Math.random() < 0.12 || (hit === t && Math.random() < 0.1));
-    const hx = mz.x + dx * hd, hz = mz.z + dz * hd;
+    const { dx, dz } = first;
+    this.spread = Math.min(W.spreadMax, this.spread + W.spreadAdd);
     // feel: kick, shake, flash, smoke, brass, sound, haptics
     g.cam.kick(-dx * W.kick, -dz * W.kick);
     g.cam.trauma(W.trauma);
-    this.anim.fire(this.ammo === 0, W.recoil);
+    this.anim.fire(this.ammo === 0 && !W.pump, W.recoil);
+    if (W.pump) { this.pumpT = W.pump; this.anim.slide = 0; }
     g.fx.muzzle(mz.x, mz.y, mz.z, dx, dz);
-    g.fx.tracer(mz.x + dx * 0.4, mz.y, mz.z + dz * 0.4, hx, hz);
-    const sh = g.fx.shell(mz.x - dx * 0.12, mz.y + 0.05, mz.z - dz * 0.12, dx, dz);
-    sh.cb = (s) => audio.play('shell', { x: s.x, z: s.z, vol: W.shellVol });
+    if (!W.pump) {
+      const sh = g.fx.shell(mz.x - dx * 0.12, mz.y + 0.05, mz.z - dz * 0.12, dx, dz);
+      sh.cb = (s) => audio.play('shell', { x: s.x, z: s.z, vol: W.shellVol });
+    }
     audio.play(W.shot, { vol: 1, jitter: 0.035 });
     g.noise = { x: this.x, z: this.z, t: g.time };
     audio.duck(W.duck, 150);
-    buzz([12]);
+    buzz([pellets > 1 ? 30 : 12]);
     g.hud.ammo(this);
-    if (hit) {
-      g.fx.flesh(hx, 1.25, hz, dx, dz, 1, crit);
-      audio.play('flesh', { x: hx, z: hz, vol: 0.7 });
-      hit.hitFx(dx, dz, crit);
+    for (const [hit, h] of hits) {
+      const crit = Math.random() < (pellets > 1 ? 0.06 : 0.12) || (hit === t && Math.random() < 0.1);
+      g.fx.flesh(h.hx, 1.25, h.hz, h.dx, h.dz, pellets > 1 ? 1.5 : 1, crit);
+      audio.play('flesh', { x: h.hx, z: h.hz, vol: 0.7 });
+      hit.hitFx(h.dx, h.dz, crit);
       buzz([6]);
-      g.localHit(this, hit, W.dmg * (crit ? W.crit : 1) * (hit.def.armor ? 1 - hit.def.armor : 1), dx, dz, crit);
-    } else if (wall.d < W.range) {
-      g.fx.hard(hx, mz.y, hz, wall.nx, wall.nz, dx, dz);
-      audio.play('hard', { x: hx, z: hz, vol: 0.5 });
+      g.localHit(this, hit, h.dmg * (crit ? W.crit : 1), h.dx, h.dz, crit);
     }
-    g.netEvent({ k: 'shot', pid: this.id, wp: WEAPON_IDS.indexOf(W.id), x: +mz.x.toFixed(2), z: +mz.z.toFixed(2), y: +mz.y.toFixed(2), dx: +dx.toFixed(3), dz: +dz.toFixed(3), hx: +hx.toFixed(2), hz: +hz.toFixed(2), w: hit ? 0 : (wall.d < W.range ? 1 : 2), nx: +wall.nx.toFixed(2), nz: +wall.nz.toFixed(2) });
+    g.netEvent({ k: 'shot', pid: this.id, wp: WEAPON_IDS.indexOf(W.id), x: +mz.x.toFixed(2), z: +mz.z.toFixed(2), y: +mz.y.toFixed(2), dx: +dx.toFixed(3), dz: +dz.toFixed(3), hx: +first.hx.toFixed(2), hz: +first.hz.toFixed(2), w: first.w, nx: +first.nx.toFixed(2), nz: +first.nz.toFixed(2) });
   }
 
   inCone(z, dx, dz, cone) {
@@ -334,10 +352,16 @@ export class Player {
     if (this.cur.id !== id) this.setWeapon(id, true);
     audio.play(WEAPONS[id].shot, { x: e.x, z: e.z, vol: 0.9 });
     this.anim.fire(false, WEAPONS[id].recoil);
+    const P = WEAPONS[id].pellets || 1;
+    for (let i = 1; i < P; i++) {
+      const a = Math.atan2(e.dz, e.dx) + ((i + Math.random()) / P - 0.5) * WEAPONS[id].spreadBase, d = 4 + Math.random() * 8;
+      g.fx.tracer(e.x + e.dx * 0.4, e.y, e.z + e.dz * 0.4, e.x + Math.cos(a) * d, e.z + Math.sin(a) * d);
+    }
+    if (WEAPONS[id].pump) setTimeout(() => { audio.play('pump', { x: this.x, z: this.z, vol: 0.6 }); this.anim.slide = 0.085; }, WEAPONS[id].pump * 1000);
     if (e.w === 1) { g.fx.hard(e.hx, e.y, e.hz, e.nx, e.nz, e.dx, e.dz); audio.play('hard', { x: e.hx, z: e.hz, vol: 0.4 }); }
   }
 
-  hurt(dmg, fromX, fromZ) {
+  hurt(dmg, fromX, fromZ, kb = 0.35) {
     if (!this.alive) return;
     // armor takes a share of every hit until it is spent
     if (this.armor > 0) {
@@ -356,7 +380,10 @@ export class Player {
       audio.play('hurt', { vol: 0.9 });
       buzz([50]);
       // being bitten pushes you back a step
-      const res = g.world.col.resolve(this.x + dx / l * 0.35, this.z + dz / l * 0.35, 0.33);
+      // pushed in small steps so a big shove (a boss) cannot pop you through a thin barricade
+      let res = { x: this.x, z: this.z };
+      for (let k = 0, n = Math.ceil(kb / 0.3); k < n; k++) res = g.world.col.resolve(res.x + dx / l * kb / n, res.z + dz / l * kb / n, 0.33);
+      if (kb > 1) { g.cam.trauma(0.6); g.cam.kick(dx / l * 0.6, dz / l * 0.6); }
       this.x = res.x; this.z = res.z;
     }
     if (this.hp <= 0) this.goDown();
@@ -433,6 +460,7 @@ export class Player {
     if (u > 0.10 && u < 0.20) off = -0.12 * sm01((u - 0.10) / 0.10);
     else if (u >= 0.20 && u < 0.50) shown = false;
     else if (u >= 0.50 && u < 0.58) off = -0.12 * (1 - sm01((u - 0.5) / 0.08));
+    if (this.W.noDrop) { off = 0; shown = true; }
     if (this.magNode) { this.magNode.visible = shown; this.magNode.position.y = off; }
     // the spare in the support hand
     this.magProp.visible = !this.dead && u >= 0.2 && u < 0.5;
@@ -461,10 +489,12 @@ export class Player {
 
   reloadEvent(name) {
     const at = { x: this.x, z: this.z };
-    if (name === 'release') audio.play('mag_release', { ...at, vol: 0.7 });
+    const snd = this.W.snd || {};
+    const say = (k, def, vol) => { const n = snd[k] === undefined ? def : snd[k]; if (n) audio.play(n, { ...at, vol }); };
+    if (name === 'release') say('release', 'mag_release', 0.7);
     else if (name === 'magout') {
-      audio.play('mag_out', { ...at, vol: 0.6 });
-      if (this.magNode) {
+      say('magout', 'mag_out', 0.6);
+      if (this.magNode && !this.W.noDrop) {
         if (this.magFall) this.game.scene.remove(this.magFall.m);
         const m = this.magNode.clone(true);
         const hp = this.anim.handL;
@@ -474,9 +504,9 @@ export class Player {
         const a = this.face + 1.2 + Math.random() * 0.5;
         this.magFall = { m, vx: Math.sin(a) * 0.5, vz: Math.cos(a) * 0.5, vy: -0.5, sx: 4 + Math.random() * 4, sz: 3 + Math.random() * 3, hit: false, life: 3.5 };
       }
-    } else if (name === 'magin') audio.play('mag_in', { ...at, vol: 0.8 });
+    } else if (name === 'magin') say('magin', 'mag_in', 0.8);
     else if (name === 'rack') {
-      audio.play('slide', { ...at, vol: 0.85 });
+      say('rack', 'slide', 0.85);
       this.anim.slideLock = false;
       if (this.local) this.game.cam.kick(-this.aimx * 0.04, -this.aimz * 0.04);
     }

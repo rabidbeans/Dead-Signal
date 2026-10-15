@@ -2,6 +2,7 @@
 // GLB + baked WebP maps), props (named objects, materials upgraded by name)
 // and the generated surface textures.
 import * as THREE from 'three';
+import { LV } from './level.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { Q } from './quality.js';
@@ -61,20 +62,27 @@ function characterMaterial(name) {
   m.roughnessMap.flipY = false;
   m.userData.uniforms = {
     uFlash: { value: 0 },
-    uRim: { value: name.startsWith('z_') ? 0.5 : 0.35 },
-    uRimColor: { value: new THREE.Color(name.startsWith('z_') ? 0x6f8aa8 : 0x8aa0b8) },
+    // a little more cartoon than before (Sam: "10% more cartoony, but still scary"): a stronger coloured rim in the
+    // level's colour, slightly richer colour, and the light gently stepped into bands
+    uRim: { value: name.startsWith('z_') ? 0.42 : 0.4 },
+    uRimColor: { value: new THREE.Color(name.startsWith('z_') ? (LV.theme?.rim ?? 0x6f8aa8) : 0x9ad8ff) },
     uTint: { value: new THREE.Color(1, 1, 1) },
+    uToon: { value: 0.3 },
   };
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, m.userData.uniforms);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
-uniform float uFlash; uniform float uRim; uniform vec3 uRimColor; uniform vec3 uTint;`)
+uniform float uFlash; uniform float uRim; uniform vec3 uRimColor; uniform vec3 uTint; uniform float uToon;`)
       .replace('#include <map_fragment>', `#include <map_fragment>
-diffuseColor.rgb *= uTint;`)
+diffuseColor.rgb *= uTint;
+diffuseColor.rgb = max(vec3(0.0), mix(vec3(dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114))), diffuseColor.rgb, 1.18));`)
       .replace('#include <opaque_fragment>', `
-float rimF = pow(1.0 - saturate(dot(normalize(normal), normalize(vViewPosition))), 3.0);
-outgoingLight += uRimColor * rimF * uRim * 0.35;
+float rimF = pow(1.0 - saturate(dot(normalize(normal), normalize(vViewPosition))), 2.6);
+float lumC = dot(outgoingLight, vec3(0.299, 0.587, 0.114));
+float bandC = (floor(lumC * 5.0) + smoothstep(0.35, 0.65, fract(lumC * 5.0))) / 5.0;
+outgoingLight = mix(outgoingLight, outgoingLight * (bandC / max(lumC, 1e-3)), uToon);
+outgoingLight += uRimColor * rimF * uRim * 0.6;
 outgoingLight = mix(outgoingLight, vec3(0.55, 0.5, 0.48) * (0.6 + 0.4 * diffuseColor.r), uFlash * 0.8);
 #include <opaque_fragment>`);
   };

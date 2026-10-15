@@ -9,7 +9,9 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { prop, instanced, tex, surface } from './assets.js';
 import { mulberry } from './rng.js';
-import { L, LV } from './level.js';
+export { buildMaze };
+import { L, LV, MAZE } from './level.js';
+import { container, stall, hesco, lanternStrings, safeRoom } from './kit.js';
 import { Q } from './quality.js';
 import { signTexture } from './world.js';
 
@@ -81,15 +83,15 @@ export function populate(world) {
   // ---- the gates
   L.gate.forEach((gz, k) => buildGate(world, k, gz, put, floodlight, sandbags, fire));
 
-  // ---- the start: a roadblock that has already fallen behind you
-  police(-2.2, 33.5, 3.0);
-  sandbags(-3.6, 19.5, Math.PI);
-  sandbags(3.8, 20.5, Math.PI + 0.12);
-  floodlight(6.9, 22, 3.4);
-  fire(5.2, 29, { size: 1 }); put('barrel', 5.2, 29, 0, { circle: 0.32, h: 0.9 });
-  put('crate_mil', -5.2, 28.5, 0.3, { box: [0.5, 0.25], h: 0.42, tag: 'low' });
-  put('crate_mil', -5.6, 27.6, -0.2, { box: [0.5, 0.25], h: 0.42, tag: 'low' });
-  put('crate_mil', -5.4, 28.1, 0.1, { y: 0.42 });
+  // ---- the start: the safe room you came out of, its door open behind you
+  world.startRoom = safeRoom(world, 35, 1, true);
+  floodlight(6.9, 31, 3.4);
+  fire(5.4, 27, { size: 1 }); put('barrel', 5.4, 27, 0, { circle: 0.32, h: 0.9 });
+  put('crate_mil', -5.4, 30.5, 0.3, { box: [0.5, 0.25], h: 0.42, tag: 'low' });
+  put('crate_mil', -5.8, 29.6, -0.2, { box: [0.5, 0.25], h: 0.42, tag: 'low' });
+  put('crate_mil', -5.6, 30.1, 0.1, { y: 0.42 });
+  // ---- the end: the next safe room, shut until the boss is down (level 5 ends at the helicopter instead)
+  if (LV.finale === 'saferoom') world.endRoom = safeRoom(world, L.zMin + 4.5, -1, false);
 
   // ---- the junction arenas: cover to fight from, in five different arrangements. A level picks which one
   // stands at each junction (and may mirror it), so level 2 re-uses the kits in a different order.
@@ -141,6 +143,17 @@ export function populate(world) {
       A.floodlight(-6.9, zc + 0.6, 0.0);
       A.floodlight(6.9, zc - 2.6, 3.14);
     },
+    // the boss plaza: open ground to fight in, a little cover at the edges and fire to see by
+    plaza: (zc, A) => {
+      A.sandbags(-5.4, zc + 7.5, 0.2);
+      A.sandbags(5.4, zc - 6.5, Math.PI - 0.2);
+      A.put('barrel', -6.2, zc - 3, 0, { circle: 0.32, h: 0.9 }); A.fire(-6.2, zc - 3);
+      A.put('barrel', 6.2, zc + 3.5, 0, { circle: 0.32, h: 0.9 }); A.fire(6.2, zc + 3.5);
+      A.floodlight(-7.0, zc + 9, 0.1);
+      A.floodlight(7.0, zc - 10, 3.0);
+      A.wreck('car_wreck', -16, zc + 1.5, 0.15, 3, true);
+      A.wreck('car_sedan', 17, zc - 1.2, -0.2, 5, false);
+    },
     // a stalled ambulance convoy: two ambulances nose to tail either side, a burning wreck between
     5: (zc, A) => {
       A.veh('ambulance', -3.9, zc - 4.8, 0.3, 2.95, 1.05, 0xffffff, false, 2.6);
@@ -163,6 +176,7 @@ export function populate(world) {
     sandbags: (x, z, ry) => sandbags(m * x, z, m * ry),
     floodlight: (x, z, ry) => floodlight(m * x, z, m * ry),
     fire: (x, z, o) => fire(m * x, z, o),
+    wreck: (k, x, z, ry, i, burn) => wreck(k, m * x, z, m * ry, i, burn),
   });
   const zc = L.cross;
   zc.forEach((c, i) => {
@@ -170,8 +184,8 @@ export function populate(world) {
     arenas[a.k](c, mirror(a.flip ? -1 : 1));
   });
 
-  // ---- the landing zone
-  buildPad(world, put, sandbags, floodlight, fire, police);
+  // ---- the landing zone (the last level only)
+  if (LV.finale === 'heli') buildPad(world, put, sandbags, floodlight, fire, police);
 
   // ---- junction furniture: signals and stop signs at the four corners
   for (const c of zc) {
@@ -182,26 +196,133 @@ export function populate(world) {
     for (const [x, z] of [[7.6, c + 6.5], [-7.6, c - 6.5]]) put('bollard', x, z, 0, { circle: 0.15, h: 1.0 });
   }
 
-  // ---- wrecks along the avenue: one lane stays open, always
-  let i = 0;
-  const clear = (z) => L.cross.some((c) => Math.abs(z - c) < 11) || L.gate.some((g) => Math.abs(g - z) < 11) || Math.abs(z - L.start.z) < 8 || z < L.lz.z + 20 + 6 && z > L.lz.z - 14;
-  for (let z = 12; z > L.zMin + 14; z -= 14 + rng() * 9) {
-    if (clear(z)) continue;
-    const side = i % 2 ? 1 : -1;
-    const x = side * (2.0 + rng() * 1.8);
-    const ry = Math.PI / 2 + (rng() - 0.5) * 0.9 + (rng() < 0.5 ? Math.PI : 0);
-    wreck(rng() < 0.55 ? 'car_wreck' : 'car_sedan', x, z, ry, i, rng() < 0.18);
-    i++;
+  // ---- the maze: barricade rows across the street, one gap each (level.js MAZE)
+  buildMaze(world, { put, veh, wreck, sandbags, fire, rng });
+  if (LV.theme.lanterns) {
+    const zs = [];
+    for (let z = L.zMax - 8; z > L.zMin + 10; z -= 12) if (!MAZE.some((r) => Math.abs(r.z - z) < 1) && !L.gate.some((g) => Math.abs(g - z) < 4)) zs.push(z);
+    lanternStrings(world, zs);
   }
-  // one burning bus in the left lane of each stretch between junctions
-  const BUS = [0xc9a23a, 0x8b8c87, 0x3e5f7a];
-  LV.buses.forEach(([x, z, c], k) => {
-    veh('bus', x, z, Math.PI / 2 + (k % 2 ? -0.12 : 0.1), 5.85, 1.3, BUS[c], true, 3.1);
-    fire(x, z, { y: 1.8, size: 2.2 });
-  });
 
   // ---- shop awnings, boarded windows and doors along the ground floor
   world.dressFacades?.();
+}
+
+// ------------------------------------------------------------ the maze ----
+// Each row runs from building front to building front (x -9.3..9.3) except for its gap. What a row is made of depends
+// on the level: concrete jersey barriers and chain-link you can SHOOT OVER (h < 0.9) but not walk through; wrecks,
+// ambulances, containers and hesco walls that stop bullets too. Some rows get a short wing beside the gap, so the way
+// through is a little dog-leg rather than a hole.
+const CAR_TINTS = [0xc83a2a, 0x2a6ac8, 0xe8c02a, 0x2aa86a, 0xe8e4dc, 0x8a3ac0, 0xe8762a, 0x30b8c8];
+function buildMaze(world, A) {
+  const col = world.col;
+  let ci = 0;
+  for (const row of MAZE) {
+    const r = mulberry(row.seed);
+    const g0 = row.gx - row.gw / 2, g1 = row.gx + row.gw / 2;
+    const spans = [[-9.3, g0], [g1, 9.3]].filter(([a, b]) => b - a > 0.3);
+    for (const [a, b] of spans) fillSpan(world, row, a, b, r, A, () => ci++);
+    // a wing along the street beside the gap (a dog-leg), on the side away from the wall
+    if (r() < 0.55 && Math.abs(row.gx) > 1) {
+      const wx = row.gx > 0 ? g0 - 0.3 : g1 + 0.3;
+      const dz = (r() < 0.5 ? -1 : 1) * 2.4;
+      const kind = row.kind === 'containers' || row.kind === 'hesco' ? row.kind : 'jersey';
+      if (kind === 'containers') {
+        const m = container(ci++);
+        m.position.set(wx + (row.gx > 0 ? -1.22 : 1.22), 0, row.z + dz * 1.3);
+        m.rotation.y = Math.PI / 2;
+        world.add(m);
+        col.box(m.position.x, m.position.z, 1.22, 3.03, 0, 2.6);
+      } else if (kind === 'hesco') {
+        for (let k = 0; k < 3; k++) { const h = hesco(); h.position.set(wx, 0, row.z + Math.sign(dz) * (0.8 + k * 1.1)); world.add(h); }
+        col.box(wx, row.z + Math.sign(dz) * 1.9, 0.55, 1.65, 0, 1.05);
+      } else {
+        A.put('barrier', wx, row.z + dz * 0.7, Math.PI / 2 + (r() - 0.5) * 0.06, { box: [1.5, 0.3], h: 0.82, tag: 'low' });
+      }
+    }
+  }
+}
+
+function fillSpan(world, row, a, b, r, A, nextColor) {
+  const col = world.col;
+  const z = row.z;
+  let x = a;
+  const len = b - a;
+  const jitter = () => (r() - 0.5) * 0.3;
+  // n pieces spread evenly over [x0, x1] (they overlap a little rather than leave a crack)
+  const run = (x0, x1, piece, fn) => {
+    const n = Math.max(1, Math.ceil((x1 - x0) / piece - 0.15));
+    for (let i = 0; i < n; i++) fn(x0 + (i + 0.5) * (x1 - x0) / n);
+  };
+  const barrierRun = (x0, x1) => run(x0, x1, 3, (cx) => A.put('barrier', cx, z + jitter() * 0.4, (r() - 0.5) * 0.08, { box: [Math.max(1.5, (x1 - x0) / 2 / Math.ceil((x1 - x0) / 3)), 0.3], h: 0.82, tag: 'low' }));
+  const fenceRun = (x0, x1) => run(x0, x1, 3.06, (cx) => {
+    A.put('fence_chain', cx, z, 0, { box: [1.53, 0.1], h: 0.85, tag: 'low' });
+    if (r() < 0.35) A.put('plywood_barrier', cx + (r() - 0.5), z + 0.35, (r() - 0.5) * 0.2);
+  });
+  if (len < 2.6) {
+    // a sliver between the gap and a wall: barrels, exactly as wide as it is
+    for (let xx = a + 0.3; xx < b; xx += 0.62) A.put(r() < 0.5 ? 'barrel' : 'barrel_blue', Math.min(xx, b - 0.3), z + jitter() * 0.3, r() * 6);
+    col.box((a + b) / 2, z, len / 2, 0.32, 0, 0.85, 'low');
+    return;
+  }
+  switch (row.kind) {
+    case 'cars':
+    case 'ambulance': {
+      // vehicles nose to tail across the street; a barrier closes what is left
+      while (b - x > 4.4) {
+        const big = row.kind === 'ambulance' && r() < 0.6;
+        const name = big ? (r() < 0.6 ? 'ambulance' : 'van') : (r() < 0.5 ? 'car_wreck' : r() < 0.5 ? 'car_sedan' : 'pickup');
+        const hw = big ? 3.04 : name === 'pickup' ? 2.79 : 2.47;
+        if (b - x < hw * 2) break;
+        const ry = (r() < 0.5 ? 0 : Math.PI) + (r() - 0.5) * 0.25;
+        const tint = big && name === 'ambulance' ? 0xffffff : CAR_TINTS[nextColor() % CAR_TINTS.length];
+        A.veh(name, x + hw, z + jitter(), ry, hw, big ? 1.3 : 1.0, tint, name === 'car_wreck', big ? 2.4 : 1.6);
+        if (r() < 0.12) A.fire(x + hw, z, { y: 1.1, size: 1.2 });
+        x += hw * 2 + 0.05;
+      }
+      if (b - x > 0.4) barrierRun(x, b);
+      break;
+    }
+    case 'containers': {
+      // steel shipping containers, sometimes stacked two high
+      while (b - x > 2.0) {
+        const w = Math.min(6.06, b - x + 1.2);
+        const m = container(nextColor());
+        const cx = x + w / 2;
+        m.position.set(cx, 0, z + jitter() * 0.5);
+        m.rotation.y = (r() - 0.5) * 0.06 + (r() < 0.5 ? Math.PI : 0);
+        world.add(m);
+        col.box(cx, z, w / 2, 1.22, 0, 2.6);
+        if (r() < 0.35) { const t = container(nextColor()); t.position.set(cx + (r() - 0.5) * 0.4, 2.6, z + (r() - 0.5) * 0.3); t.rotation.y = (r() - 0.5) * 0.1; world.add(t); }
+        x += 6.1;
+      }
+      if (b - x > 0.4) barrierRun(x, b);
+      break;
+    }
+    case 'stalls': {
+      // market stalls back to back with the gap between them; crates and a barrier fill the ends
+      while (b - x > 3.0) {
+        const g = stall(nextColor(), r);
+        g.position.set(x + 1.5, world.groundY(x + 1.5, z), z);
+        if (r() < 0.5) g.rotation.y += Math.PI;
+        world.add(g);
+        col.box(x + 1.5, z, 1.5, 0.65, 0, 0.88, 'low');
+        x += 3.05;
+      }
+      if (b - x > 0.4) { A.put('crate_wood', (x + b) / 2, z, r(), { box: [Math.max(0.3, (b - x) / 2), 0.45], h: 0.85 }); }
+      break;
+    }
+    case 'hesco': {
+      for (let xx = x; xx < b - 0.2; xx += 1.1) { const h = hesco(); h.position.set(Math.min(xx + 0.55, b - 0.55), 0, z); world.add(h); }
+      col.box((a + b) / 2, z, (b - a) / 2, 0.55, 0, 1.05);
+      break;
+    }
+    case 'fence':
+      fenceRun(a, b);
+      break;
+    default:
+      barrierRun(a, b);
+  }
 }
 
 // ------------------------------------------------------------ the gates ----

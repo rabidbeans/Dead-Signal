@@ -87,15 +87,17 @@ export class Shop {
       const st = weaponStats(id, owned ? d.weapons[id].lv : {});
       const rof = 1 / st.autoInterval;
       const stats = `
-        ${this.bar('DAMAGE', st.dmg, 60, Math.round(st.dmg))}
+        ${this.bar('DAMAGE', st.dmg * (st.pellets || 1), 140, st.pellets ? `${Math.round(st.dmg)}×${st.pellets}` : Math.round(st.dmg))}
         ${this.bar('FIRE RATE', rof, 14, rof.toFixed(1) + '/s')}
-        ${this.bar('MAGAZINE', st.mag, 40, st.mag)}
-        ${this.bar('RELOAD', 3 - st.reload, 3, st.reload.toFixed(1) + ' s')}`;
+        ${this.bar('MAGAZINE', st.mag, 100, st.mag)}
+        ${this.bar('RELOAD', 4.2 - st.reload, 3.7, st.reload.toFixed(1) + ' s')}`;
       let head;
-      if (!owned) head = `<button class="btn primary buy" data-buy="${id}" ${save.cash < W.price ? 'disabled' : ''}>BUY · ${money(W.price)}</button>`;
+      const locked = !owned && save.unlocked <= (W.unlock || 0);
+      if (locked) head = `<span class="tag dim">BEAT LEVEL ${W.unlock}</span>`;
+      else if (!owned) head = `<button class="btn primary buy" data-buy="${id}" ${save.cash < W.price ? 'disabled' : ''}>BUY · ${money(W.price)}</button>`;
       else if (d.equipped === id) head = '<span class="tag">EQUIPPED</span>';
       else head = `<button class="btn" data-equip="${id}">EQUIP</button>`;
-      const ups = !owned ? '<div class="locked">Buy it to upgrade it.</div>' : WEAPON_UPGRADES.map((u) => {
+      const ups = !owned ? `<div class="locked">${locked ? `Opens in the safehouse when you beat level ${W.unlock}.` : 'Buy it to upgrade it.'}</div>` : WEAPON_UPGRADES.map((u) => {
         const lv = save.weaponLevel(id, u.key), maxed = lv >= u.max;
         const c = maxed ? 0 : upgradeCost(id, u.key, lv);
         return `<div class="up"><div class="up-name"><b>${u.name}</b><small>${u.desc}</small></div><div class="pips">${this.pips(lv, u.max)}</div>${maxed ? '<span class="tag dim">MAX</span>' : `<button class="btn small" data-up="${id}:${u.key}" ${save.cash < c ? 'disabled' : ''}>${money(c)}</button>`}</div>`;

@@ -259,3 +259,5 @@ input:focus { border-color: rgba(200,64,46,.7); }
 .bossbar b { display: block; font-size: 15px; letter-spacing: .3em; color: var(--signal-hi); text-shadow: 0 1px 4px #000; margin-bottom: 3px; }
 .bossbar div { height: 9px; background: rgba(0,0,0,.65); border: 1px solid rgba(226,85,63,.55); }
 .bossbar i { display: block; height: 100%; width: 100%; background: linear-gradient(#e2553f, #8a2416); transition: width .12s; }
+#levels { flex-wrap: wrap; }
+#levels .chip { flex: 1 1 18%; min-width: 0; padding-left: 2px; padding-right: 2px; font-size: 14px; letter-spacing: .06em; }

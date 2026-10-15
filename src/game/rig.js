@@ -53,6 +53,9 @@ export class Rig {
       bone.quaternion._onChange(() => {});    // nothing reads a bone's Euler angles: skip keeping them in sync
     }
     this.hipsY = this.b.root ? this.b.root.position.y : 0;
+    // a touch of cartoon in the proportions: heads and hands ~10% larger
+    if (this.b.head) this.b.head.scale.setScalar(1.12);
+    for (const h of ['hand_L', 'hand_R']) if (this.b[h]) this.b[h].scale.setScalar(1.08);
     this.pending = {};
   }
 
@@ -107,8 +110,9 @@ function legCycle(rig, side, ph, o) {
   const knee = lift * o.knee + o.bend;
   const foot = -thigh * 0.6 - knee * 0.5 + lift * 0.2;
   rig.rot(`thigh_${side}`, o.axis, thigh);
-  rig.rot(`shin_${side}`, o.axis, knee);
-  rig.rot(`foot_${side}`, o.axis, foot);
+  // the knee and ankle are hinges: they only ever bend about the body's own side-to-side axis, whichever way the leg swings
+  rig.rot(`shin_${side}`, X, knee);
+  rig.rot(`foot_${side}`, X, o.axis === X ? foot : -knee * 0.5 + lift * 0.2);
   return { lift, s };
 }
 
@@ -341,6 +345,28 @@ export const WEAPON_RIG = {
     rack: [-0.075, -0.045],
     rackBack: -0.14,
   },
+  // the long guns ride against the right shoulder (x is the body's LEFT, so the stock sits at -x)
+  shotgun: {
+    gripR: [-0.085, 0.0, 0.022], gripL: [0.36, -0.04, -0.036],
+    handL: { down: 0.35, yaw: 0.15 },
+    stance: { aimed: { p: [-0.1, -0.08, 0.24], pitch: 0, roll: 0 }, ready: { p: [-0.1, -0.26, 0.2], pitch: -0.5, roll: 0 } },
+    well: [0.165, -0.004],          // the loading port: shells go in from underneath
+    rack: [0.36, -0.036], rackY: -0.04, rackBack: 0.27,     // "racking" a pump gun is the pump itself
+  },
+  rifle: {
+    gripR: [-0.075, 0.0, 0.022], gripL: [0.245, -0.012, -0.04],
+    handL: { down: 0.9, yaw: 0.1 },
+    stance: { aimed: { p: [-0.1, -0.08, 0.26], pitch: 0, roll: 0 }, ready: { p: [-0.1, -0.26, 0.21], pitch: -0.5, roll: 0 } },
+    well: [0.103, -0.012],
+    rack: [-0.073, -0.045], rackY: 0.081, rackBack: -0.15,
+  },
+  lmg: {
+    gripR: [-0.075, -0.005, 0.022], gripL: [0.335, -0.035, -0.04],
+    handL: { down: 0.35, yaw: 0.15 },
+    stance: { aimed: { p: [-0.1, -0.1, 0.22], pitch: 0, roll: 0 }, ready: { p: [-0.1, -0.28, 0.19], pitch: -0.45, roll: 0 } },
+    well: [0.145, -0.012],
+    rack: [0.218, 0.04], rackY: 0.028, rackBack: 0.12,
+  },
 };
 // A reload, as fractions of its length. Poses are relative to the shoulders.
 export const RELOAD_EVENTS = [
@@ -358,7 +384,7 @@ function handKeys(W) {
     { u: 0.00, g: gl }, { u: 0.09, g: [wx, -0.085, wz] }, { u: 0.20, g: [wx, -0.20, wz] },
     { u: 0.34, c: [0.20, -0.52, 0.16] }, { u: 0.43, c: [0.17, -0.47, 0.22] },
     { u: 0.52, g: [wx, -0.17, wz + 0.002] }, { u: 0.58, g: [wx, -0.075, wz + 0.008] }, { u: 0.64, g: [wx, -0.085, wz - 0.002] },
-    { u: 0.71, g: [rx, 0.085, rz] }, { u: 0.80, g: [W.rackBack, 0.085, rz] }, { u: 0.84, g: [rx, 0.085, rz] },
+    { u: 0.71, g: [rx, W.rackY ?? 0.085, rz] }, { u: 0.80, g: [W.rackBack, W.rackY ?? 0.085, rz] }, { u: 0.84, g: [rx, W.rackY ?? 0.085, rz] },
     { u: 0.93, g: gl }, { u: 1.0, g: gl },
   ];
 }
@@ -420,9 +446,15 @@ export class SurvivorAnim {
       const dx = moveLocal.x / speed, dz = moveLocal.z / speed;
       axis = AXIS.set(dz, 0, -dx);      // perpendicular to travel, in the ground plane
     }
-    const o = { stride: (0.3 + run * 0.35) * walk, knee: (0.7 + run * 0.6) * walk, bend: 0.08 + run * 0.1, lean: 0, axis };
+    // a side-step is a shorter step than a stride forward (full-length swings sideways read as a jumping jack)
+    const fwdK = speed > 0.05 ? Math.abs(moveLocal.z) / speed : 1;
+    const o = { stride: (0.3 + run * 0.35) * walk * (0.5 + 0.5 * fwdK), knee: (0.7 + run * 0.6) * walk, bend: 0.08 + run * 0.1, lean: 0, axis };
     legCycle(rig, 'L', this.phase, o);
     legCycle(rig, 'R', (this.phase + 0.5) % 1, o);
+    // the model's rest pose has its legs apart: bring the feet in under the hips (Sam: "the legs walk too wide")
+    const tuck = this.legIn ?? 0.1;
+    rig.rot('thigh_L', Z, -tuck); rig.rot('thigh_R', Z, tuck);
+    rig.rot('foot_L', Z, tuck * 0.8); rig.rot('foot_R', Z, -tuck * 0.8);
     const bob = -Math.abs(Math.cos(this.phase * TAU)) * (0.02 + run * 0.04) * walk;
     rig.setHips(0, bob - 0.02 - this.down * 0.5, 0);
     // torso: a fighting crouch, leaning into the run

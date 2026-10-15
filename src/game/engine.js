@@ -37,13 +37,13 @@ export class Engine {
     this.renderPass = new RenderPass(this.scene, this.camera);
     this.composer.addPass(this.renderPass);
     this.bloom = new BloomEffect({
-      luminanceThreshold: 0.82, luminanceSmoothing: 0.12, intensity: 1.15, mipmapBlur: true, radius: 0.72, resolutionScale: Q.bloomScale, levels: Q.msaa ? 8 : 5,
+      luminanceThreshold: 0.76, luminanceSmoothing: 0.14, intensity: 1.4, mipmapBlur: true, radius: 0.72, resolutionScale: Q.bloomScale, levels: Q.msaa ? 8 : 5,
     });
     this.vignette = new VignetteEffect({ offset: 0.35, darkness: 0.4 });
     this.noise = new NoiseEffect({ blendFunction: BlendFunction.OVERLAY, premultiply: false });
     this.noise.blendMode.opacity.value = 0.11;
     this.grade = new HueSaturationEffect({ saturation: -0.06, hue: 0 });
-    this.contrast = new BrightnessContrastEffect({ contrast: 0.14, brightness: 0.05 });
+    this.contrast = new BrightnessContrastEffect({ contrast: 0.16, brightness: 0.05 });
     this.tone = new ToneMappingEffect({ mode: ToneMappingMode.AGX });
     this.chroma = new ChromaticAberrationEffect({ offset: new THREE.Vector2(0.0006, 0.0004), radialModulation: true, modulationOffset: 0.4 });
     this.composer.addPass(new EffectPass(this.camera, this.bloom, this.tone, this.grade, this.contrast, this.vignette, ...(Q.chroma ? [this.chroma] : []), this.noise));

@@ -7,7 +7,7 @@ const blank = () => ({
   cash: 0,
   unlocked: 1,                                  // highest level you may start
   equipped: 'pistol',
-  weapons: { pistol: { owned: true, lv: {} }, smg: { owned: false, lv: {} } },
+  weapons: { pistol: { owned: true, lv: {} }, smg: { owned: false, lv: {} }, shotgun: { owned: false, lv: {} }, rifle: { owned: false, lv: {} }, lmg: { owned: false, lv: {} } },
   perks: {},
   best: {},
   runs: 0,
@@ -42,6 +42,7 @@ class Save {
   buyWeapon(id) {
     const w = WEAPONS[id];
     if (!w || this.owns(id)) return { ok: false, why: 'owned' };
+    if (this.data.unlocked <= (w.unlock || 0)) return { ok: false, why: 'locked' };
     if (this.data.cash < w.price) return { ok: false, why: 'cash' };
     this.data.cash -= w.price;
     this.data.weapons[id].owned = true;

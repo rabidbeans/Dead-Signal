@@ -148,7 +148,7 @@ export class HUD {
   }
 
   // the top plate and the objective line: the route, or a held junction
-  route({ phase, hold, title, left, secs, dist, opened, away, final, gates = 3, name = 'EVAC ROUTE', boss = null }) {
+  route({ phase, hold, title, left, secs, dist, opened, away, final, gates = 1, name = '', boss = null, finale = 'saferoom' }) {
     const box = this.el.objBox;
     box.classList.toggle('on', phase === 'run' || phase === 'hold' || phase === 'extract');
     this.el.holdbar.classList.toggle('on', hold >= 0);
@@ -156,7 +156,7 @@ export class HUD {
     if (phase === 'intro') { this.el.waveLabel.textContent = 'STAND BY'; this.el.waveLeft.textContent = ''; return; }
     if (hold >= 0 && boss) {
       this.el.holdbar.classList.remove('on');
-      this.el.obj.textContent = away ? 'GET BACK TO THE LANDING ZONE' : `KILL ${boss}`;
+      this.el.obj.textContent = away ? 'GET BACK TO THE FIGHT' : `KILL ${boss}`;
       this.el.waveLabel.textContent = title;
       this.el.waveLeft.textContent = away ? 'PAUSED' : 'BOSS';
     } else if (hold >= 0) {
@@ -166,8 +166,9 @@ export class HUD {
       this.el.waveLabel.textContent = title;
       this.el.waveLeft.textContent = away ? 'PAUSED' : `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
     } else {
-      this.el.obj.textContent = phase === 'win' ? 'EVACUATED' : phase === 'extract' ? 'GET EVERYONE ON THE PAD' : opened >= gates ? 'REACH THE LANDING ZONE' : `GET TO CHECKPOINT ${opened + 1}`;
-      this.el.waveLabel.textContent = phase === 'extract' ? 'EVAC' : name;
+      const heli = finale === 'heli';
+      this.el.obj.textContent = phase === 'win' ? (heli ? 'EVACUATED' : 'SAFE') : phase === 'extract' ? (heli ? 'GET EVERYONE ON THE PAD' : 'EVERYONE INTO THE SAFE ROOM') : opened >= gates ? (heli ? 'REACH THE LANDING ZONE' : 'REACH THE SAFE ROOM') : 'FIND A WAY THROUGH TO THE GATE';
+      this.el.waveLabel.textContent = phase === 'extract' ? (heli ? 'EVAC' : 'SAFE ROOM') : name;
       this.el.waveLeft.textContent = phase === 'win' ? '' : `${dist} M`;
     }
   }
@@ -206,7 +207,7 @@ export class HUD {
     const cp = s.checkpoint || 0;
     const next = win && !s.last;
     const note = win
-      ? (s.last ? 'The Row is behind you. More of the city is still out there.' : 'The safehouse is open: spend the cash on guns, armor and speed before you go on.')
+      ? (s.last ? 'You made it out of the city. Fort Hope is behind you, and so is the dead city.' : 'The safehouse is open: spend the cash on guns, armor and speed, then on to the next level.')
       : (cp > 0 ? `You made it past checkpoint ${cp} of ${s.gates}.` : 'You never got past the first gate.');
     $('.panel', e).innerHTML = `
       <div class="end-kicker">${win ? s.name : (why || 'THE ROUTE CLAIMED ANOTHER')}</div>

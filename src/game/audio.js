@@ -4,7 +4,7 @@
 const BASE = import.meta.env.BASE_URL + 'assets/sfx/';
 
 const LIST = [
-  'pistol0', 'pistol1', 'pistol2', 'pistol3', 'smg0', 'smg1', 'smg2', 'smg3', 'swap', 'buy', 'deny', 'dryfire', 'mag_release', 'mag_drop', 'mag_out', 'mag_in', 'slide', 'gate', 'rotor',
+  'pistol0', 'pistol1', 'pistol2', 'pistol3', 'smg0', 'smg1', 'smg2', 'smg3', 'shotgun0', 'shotgun1', 'shotgun2', 'shotgun3', 'rifle0', 'rifle1', 'rifle2', 'rifle3', 'lmg0', 'lmg1', 'lmg2', 'lmg3', 'pump', 'belt', 'swap', 'buy', 'deny', 'dryfire', 'mag_release', 'mag_drop', 'mag_out', 'mag_in', 'slide', 'gate', 'rotor',
   'shell0', 'shell1', 'shell2', 'flesh0', 'flesh1', 'flesh2', 'hard0', 'hard1',
   'step0', 'step1', 'step2', 'step3', 'groan0', 'groan1', 'groan2', 'groan3', 'groan4', 'groan5',
   'scream0', 'scream1', 'death0', 'death1', 'hurt0', 'hurt1', 'thunder0', 'thunder1',
