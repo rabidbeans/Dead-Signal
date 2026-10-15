@@ -9,6 +9,7 @@ const LIST = [
   'step0', 'step1', 'step2', 'step3', 'groan0', 'groan1', 'groan2', 'groan3', 'groan4', 'groan5',
   'scream0', 'scream1', 'death0', 'death1', 'hurt0', 'hurt1', 'thunder0', 'thunder1',
   'rain', 'wind', 'siren', 'sting', 'heart', 'click',
+  'boom0', 'boom1', 'incoming', 'power', 'zap', 'engine', 'squelch0', 'squelch1', 'burst',
 ];
 
 class Audio {

@@ -76,13 +76,32 @@ function containerGeo() {
   });
 }
 
+// the body is split into its plain faces and its two lettered sides, one material each, so World.bake() can merge
+// every container in a chunk into two draw calls (a mesh with a material ARRAY is never merged)
+function containerBody() {
+  return once('contBody2', () => {
+    const b = box(6.06, 2.59, 2.44, 0, 2.59 / 2, 0);
+    const part = (groups) => {
+      const g = new THREE.BufferGeometry();
+      for (const k of Object.keys(b.attributes)) g.setAttribute(k, b.attributes[k]);
+      const idx = [];
+      for (const gr of b.groups) if (groups.includes(gr.materialIndex)) for (let i = gr.start; i < gr.start + gr.count; i++) idx.push(b.index.getX(i));
+      g.setIndex(idx);
+      return g.toNonIndexed();
+    };
+    return [part([0, 1, 2, 3]), part([4, 5])];
+  });
+}
+
 export function container(i) {
   const color = CONTAINER_COLORS[i % CONTAINER_COLORS.length];
   const mats = containerMat(color, i);
   const g = new THREE.Group();
-  const body = new THREE.Mesh(once('contBody', () => box(6.06, 2.59, 2.44, 0, 2.59 / 2, 0)), mats);
+  const [plainG, sideG] = containerBody();
+  const body = new THREE.Mesh(plainG, mats[0]);
+  const sides = new THREE.Mesh(sideG, mats[4]);
   const trim = new THREE.Mesh(containerGeo(), mats[0]);
-  g.add(body, trim);
+  g.add(body, sides, trim);
   g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   return g;
 }
@@ -112,7 +131,7 @@ export function stall(i, rng) {
     const fm = once('fruit' + col, () => new THREE.MeshStandardMaterial({ color: col, roughness: 0.45 }));
     const fr = new THREE.Mesh(once('fruitGeo', () => {
       const parts = [];
-      for (let a = 0; a < 9; a++) { const s = new THREE.SphereGeometry(0.075, 8, 6); s.translate((a % 3 - 1) * 0.15, 0.2, (Math.floor(a / 3) - 1) * 0.11); parts.push(s); }
+      for (let a = 0; a < 6; a++) { const s = new THREE.IcosahedronGeometry(0.085, 0); s.translate((a % 3 - 1) * 0.15, 0.2 + (a === 4 ? 0.06 : 0), (Math.floor(a / 3) - 0.5) * 0.14); parts.push(s); }
       return mergeGeometries(parts);
     }), fm);
     fr.position.set(-1.0 + k * 0.66, 1.0, -0.05);

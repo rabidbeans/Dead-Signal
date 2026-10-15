@@ -38,6 +38,7 @@ export class HUD {
       <div class="vignette"></div>
       <div class="banner"><div class="banner-title"></div><div class="banner-sub"></div><div class="banner-note"></div></div>
       <div class="down-msg"><b>YOU'RE DOWN</b><span>Keep shooting. A teammate can pull you up.</span><div class="bleed"><i></i></div></div>
+      <div class="markers"><div class="mk"><i></i></div><div class="mk"><i></i></div><div class="mk"><i></i></div></div>
       <div class="toast"></div>
       <div class="hint"></div>
       <div class="pause-menu hidden">
@@ -63,6 +64,7 @@ export class HUD {
       down: $('.down-msg', root), bleed: $('.bleed i', root), toast: $('.toast', root), hint: $('.hint', root),
       pause: $('.pause', root), pauseMenu: $('.pause-menu', root), end: $('.end', root),
       reloadBtn: $('.reload-btn', root),
+      marks: [...root.querySelectorAll('.mk')],
     };
     this.vig = 0;
     this.bannerT = 0;
@@ -148,7 +150,7 @@ export class HUD {
   }
 
   // the top plate and the objective line: the route, or a held junction
-  route({ phase, hold, title, left, secs, dist, opened, away, final, gates = 1, name = '', boss = null, finale = 'saferoom' }) {
+  route({ ob = null, phase, hold, title, left, secs, dist, opened, away, final, gates = 1, name = '', boss = null, finale = 'saferoom' }) {
     const box = this.el.objBox;
     box.classList.toggle('on', phase === 'run' || phase === 'hold' || phase === 'extract');
     this.el.holdbar.classList.toggle('on', hold >= 0);
@@ -159,6 +161,12 @@ export class HUD {
       this.el.obj.textContent = away ? 'GET BACK TO THE FIGHT' : `KILL ${boss}`;
       this.el.waveLabel.textContent = title;
       this.el.waveLeft.textContent = away ? 'PAUSED' : 'BOSS';
+    } else if (hold >= 0 && ob) {
+      // the level's own objective: breakers, nests, the bulldozer
+      this.el.obj.textContent = ob.text;
+      this.el.holdfill.style.width = Math.min(100, ob.frac * 100).toFixed(1) + '%';
+      this.el.waveLabel.textContent = title;
+      this.el.waveLeft.textContent = ob.right;
     } else if (hold >= 0) {
       const t = Math.ceil(left);
       this.el.obj.textContent = away ? 'GET BACK TO THE GATE' : final ? `HOLD THE LANDING ZONE  ·  ${t} s` : `HOLD THE JUNCTION  ·  ${t} s`;
@@ -248,6 +256,23 @@ export class HUD {
       this._v.set(x, y, z).project(cam);
       return { x: (this._v.x * 0.5 + 0.5) * innerWidth, y: (-this._v.y * 0.5 + 0.5) * innerHeight };
     };
+    // objective markers: a ring over each thing to reach or destroy, pinned to the screen edge (with an arrow) when off it
+    const mks = game.objective?.markers() || [];
+    this.el.marks.forEach((el, i) => {
+      const m = mks[i];
+      if (!m) { if (el._on) { el._on = false; el.style.display = 'none'; } return; }
+      if (!el._on) { el._on = true; el.style.display = 'block'; }
+      this._v.set(m.x, 2.4, m.z).project(cam);
+      let x = this._v.x, y = this._v.y;
+      if (this._v.z > 1) { x = -x; y = -y; }
+      const pad = 0.86, off = Math.abs(x) > pad || Math.abs(y) > pad || this._v.z > 1;
+      if (off) { const k = pad / Math.max(Math.abs(x), Math.abs(y)); x *= k; y *= k; }
+      const sx = (x * 0.5 + 0.5) * innerWidth, sy = (-y * 0.5 + 0.5) * innerHeight;
+      el.style.transform = `translate(${sx.toFixed(0)}px, ${sy.toFixed(0)}px)`;
+      el.style.setProperty('--c', m.c);
+      el.classList.toggle('off', off);
+      if (off) el.firstChild.style.transform = `rotate(${(Math.atan2(-y, x) * 180 / Math.PI + 90).toFixed(0)}deg)`;
+    });
     // damage vignette fades
     this.vig = Math.max(0, this.vig - dt * 0.9);
     const low = me.alive ? Math.max(0, (0.35 - me.hp / me.maxHp) / 0.35) * (0.55 + 0.25 * Math.sin(performance.now() / 180)) : 0.7;

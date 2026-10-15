@@ -9,12 +9,33 @@ import * as THREE from 'three';
 import {
   EffectComposer, RenderPass, EffectPass, BloomEffect, VignetteEffect, NoiseEffect,
   ToneMappingEffect, ToneMappingMode, BlendFunction, BrightnessContrastEffect, HueSaturationEffect,
-  ChromaticAberrationEffect,
+  ChromaticAberrationEffect, Effect, EffectAttribute,
 } from 'postprocessing';
 import { setAnisotropy } from './assets.js';
 import { Q, isTouch } from './quality.js';
 
 export { isTouch };
+
+// Cartoon ink: a dark line wherever the depth jumps (silhouettes, the tops of walls, every car and body). It tests the
+// Laplacian of INVERSE depth, which is zero across any flat plane however steeply it is seen, so the street itself
+// never gets lines - only the edges of things standing on it.
+const INK_FRAG = `uniform float uInk; uniform vec3 uInkColor;
+void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth, out vec4 outputColor) {
+  float w = -1.0 / getViewZ(depth);
+  vec2 o = texelSize * 1.15;
+  float w1 = -1.0 / getViewZ(readDepth(uv + vec2(o.x, 0.0)));
+  float w2 = -1.0 / getViewZ(readDepth(uv - vec2(o.x, 0.0)));
+  float w3 = -1.0 / getViewZ(readDepth(uv + vec2(0.0, o.y)));
+  float w4 = -1.0 / getViewZ(readDepth(uv - vec2(0.0, o.y)));
+  float lap = abs(w1 + w2 + w3 + w4 - 4.0 * w) / max(w, 1e-4);
+  float e = smoothstep(0.018, 0.07, lap) * (1.0 - smoothstep(0.98, 1.0, depth));
+  outputColor = vec4(mix(inputColor.rgb, uInkColor, e * uInk), inputColor.a);
+}`;
+export class InkEffect extends Effect {
+  constructor() {
+    super('InkEffect', INK_FRAG, { attributes: EffectAttribute.DEPTH, uniforms: new Map([['uInk', new THREE.Uniform(0.8)], ['uInkColor', new THREE.Uniform(new THREE.Color(0x0a0612))]]) });
+  }
+}
 
 export class Engine {
   constructor(canvas) {
@@ -42,11 +63,12 @@ export class Engine {
     this.vignette = new VignetteEffect({ offset: 0.35, darkness: 0.4 });
     this.noise = new NoiseEffect({ blendFunction: BlendFunction.OVERLAY, premultiply: false });
     this.noise.blendMode.opacity.value = 0.11;
-    this.grade = new HueSaturationEffect({ saturation: -0.06, hue: 0 });
+    this.grade = new HueSaturationEffect({ saturation: 0.1, hue: 0 });
     this.contrast = new BrightnessContrastEffect({ contrast: 0.16, brightness: 0.05 });
     this.tone = new ToneMappingEffect({ mode: ToneMappingMode.AGX });
     this.chroma = new ChromaticAberrationEffect({ offset: new THREE.Vector2(0.0006, 0.0004), radialModulation: true, modulationOffset: 0.4 });
-    this.composer.addPass(new EffectPass(this.camera, this.bloom, this.tone, this.grade, this.contrast, this.vignette, ...(Q.chroma ? [this.chroma] : []), this.noise));
+    this.ink = new InkEffect();
+    this.composer.addPass(new EffectPass(this.camera, this.bloom, this.tone, ...(Q.ink === 0 ? [] : [this.ink]), this.grade, this.contrast, this.vignette, ...(Q.chroma ? [this.chroma] : []), this.noise));
     this.frameTimes = [];
     this.lastAdjust = 0;
     this.resize();

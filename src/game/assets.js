@@ -67,7 +67,7 @@ function characterMaterial(name) {
     uRim: { value: name.startsWith('z_') ? 0.42 : 0.4 },
     uRimColor: { value: new THREE.Color(name.startsWith('z_') ? (LV.theme?.rim ?? 0x6f8aa8) : 0x9ad8ff) },
     uTint: { value: new THREE.Color(1, 1, 1) },
-    uToon: { value: 0.3 },
+    uToon: { value: 0.5 },
   };
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, m.userData.uniforms);
@@ -76,7 +76,7 @@ function characterMaterial(name) {
 uniform float uFlash; uniform float uRim; uniform vec3 uRimColor; uniform vec3 uTint; uniform float uToon;`)
       .replace('#include <map_fragment>', `#include <map_fragment>
 diffuseColor.rgb *= uTint;
-diffuseColor.rgb = max(vec3(0.0), mix(vec3(dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114))), diffuseColor.rgb, 1.18));`)
+diffuseColor.rgb = max(vec3(0.0), mix(vec3(dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114))), diffuseColor.rgb, 1.34));`)
       .replace('#include <opaque_fragment>', `
 float rimF = pow(1.0 - saturate(dot(normalize(normal), normalize(vViewPosition))), 2.6);
 float lumC = dot(outgoingLight, vec3(0.299, 0.587, 0.114));

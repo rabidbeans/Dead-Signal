@@ -10,9 +10,10 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { prop, instanced, tex, surface } from './assets.js';
 import { mulberry } from './rng.js';
 export { buildMaze };
-import { L, LV, MAZE } from './level.js';
+import { L, LV, MAZE, LANES } from './level.js';
 import { container, stall, hesco, lanternStrings, safeRoom } from './kit.js';
 import { Q } from './quality.js';
+import { placeObjective } from './objective.js';
 import { signTexture } from './world.js';
 
 const _q = new THREE.Quaternion();
@@ -143,6 +144,21 @@ export function populate(world) {
       A.floodlight(-6.9, zc + 0.6, 0.0);
       A.floodlight(6.9, zc - 2.6, 3.14);
     },
+    // the docks' yard: containers along both kerbs and floodlights, the middle left clear for the bulldozer
+    yard: (zc, A) => {
+      for (const [x, z, ry] of [[-7.2, zc + 6.5, 0.04], [7.3, zc - 6.8, -0.03]]) {
+        const m = container(5 + Math.round(x));
+        m.position.set(x, 0, z); m.rotation.y = Math.PI / 2 + ry;
+        world.add(m);
+        col.box(x, z, 1.22, 3.03, -ry, 2.6);
+      }
+      A.sandbags(-4.6, zc - 4.8, 0.3);
+      A.sandbags(4.8, zc + 4.2, -0.3 + Math.PI);
+      A.put('crate_mil', -5.6, zc + 1.4, 0.2, { box: [0.5, 0.25], h: 0.42, tag: 'low' });
+      A.put('barrel', 5.6, zc - 1.2, 0, { circle: 0.32, h: 0.9 }); A.fire(5.6, zc - 1.2);
+      A.floodlight(-6.9, zc - 2.2, 0.1);
+      A.floodlight(6.9, zc + 2.6, 3.1);
+    },
     // the boss plaza: open ground to fight in, a little cover at the edges and fire to see by
     plaza: (zc, A) => {
       A.sandbags(-5.4, zc + 7.5, 0.2);
@@ -198,6 +214,8 @@ export function populate(world) {
 
   // ---- the maze: barricade rows across the street, one gap each (level.js MAZE)
   buildMaze(world, { put, veh, wreck, sandbags, fire, rng });
+  buildLanes(world, { put, veh, fire, rng });
+  placeObjective(world);           // breaker cabinets, nests and gas tanks need their colliders before the nav grid
   if (LV.theme.lanterns) {
     const zs = [];
     for (let z = L.zMax - 8; z > L.zMin + 10; z -= 12) if (!MAZE.some((r) => Math.abs(r.z - z) < 1) && !L.gate.some((g) => Math.abs(g - z) < 4)) zs.push(z);
@@ -222,8 +240,8 @@ function buildMaze(world, A) {
     const g0 = row.gx - row.gw / 2, g1 = row.gx + row.gw / 2;
     const spans = [[-9.3, g0], [g1, 9.3]].filter(([a, b]) => b - a > 0.3);
     for (const [a, b] of spans) fillSpan(world, row, a, b, r, A, () => ci++);
-    // a wing along the street beside the gap (a dog-leg), on the side away from the wall
-    if (r() < 0.55 && Math.abs(row.gx) > 1) {
+    // a wing along the street beside the gap (a dog-leg), on the side away from the wall (the open-street styles only)
+    if (r() < 0.55 && Math.abs(row.gx) > 1 && (LV.style || 'rows') === 'rows' || LV.style === 'pileup' && r() < 0.4 && Math.abs(row.gx) > 1) {
       const wx = row.gx > 0 ? g0 - 0.3 : g1 + 0.3;
       const dz = (r() < 0.5 ? -1 : 1) * 2.4;
       const kind = row.kind === 'containers' || row.kind === 'hesco' ? row.kind : 'jersey';
@@ -238,6 +256,48 @@ function buildMaze(world, A) {
         col.box(wx, row.z + Math.sign(dz) * 1.9, 0.55, 1.65, 0, 1.05);
       } else {
         A.put('barrier', wx, row.z + dz * 0.7, Math.PI / 2 + (r() - 0.5) * 0.06, { box: [1.5, 0.3], h: 0.82, tag: 'low' });
+      }
+    }
+  }
+}
+
+// walls ALONG the street (level.js LANES): the market's stall lines, the docks' container spurs
+function buildLanes(world, A) {
+  const col = world.col;
+  let ci = 3;
+  for (const l of LANES) {
+    const r = mulberry(l.seed);
+    const parts = l.brk ? [[l.z0, l.brk[0]], [l.brk[1], l.z1]] : [[l.z0, l.z1]];
+    for (const [s0, s1] of parts) {
+      const len = s0 - s1;
+      if (len < 0.8) continue;
+      if (l.kind === 'stalls') {
+        // stalls back to back down the middle of the street, canopies over both aisles
+        const n = Math.max(1, Math.round(len / 3.05));
+        for (let i = 0; i < n; i++) {
+          const z = s0 - (i + 0.5) * len / n;
+          // one stall per slot, facing the two aisles in turn, a striped tarp hung behind it (half the cost of two)
+          for (const face of [i % 2 ? 1 : -1]) {
+            const g = stall(ci++, r);
+            g.position.set(l.x + face * 0.3, world.groundY(l.x, z), z);
+            g.rotation.y = face > 0 ? -Math.PI / 2 : Math.PI / 2;
+            g.scale.set(Math.min(1, len / n / 3.05), 1, 1);
+            world.add(g);
+          }
+        }
+        col.box(l.x, (s0 + s1) / 2, 1.25, len / 2, 0, 0.88, 'low');
+      } else {
+        // a line of shipping containers end to end
+        const n = Math.max(1, Math.round(len / 6.06));
+        for (let i = 0; i < n; i++) {
+          const z = s0 - (i + 0.5) * len / n;
+          const m = container(ci++);
+          m.position.set(l.x + (r() - 0.5) * 0.2, 0, z);
+          m.rotation.y = Math.PI / 2 + (r() - 0.5) * 0.04;
+          m.scale.set(Math.min(1.02, len / n / 6.06), 1, 1);
+          world.add(m);
+        }
+        col.box(l.x, (s0 + s1) / 2, 1.22, len / 2, 0, 2.6);
       }
     }
   }
@@ -266,6 +326,28 @@ function fillSpan(world, row, a, b, r, A, nextColor) {
     return;
   }
   switch (row.kind) {
+    case 'pileup': {
+      // a crash pile-up: cars, vans and ambulances slewed at angles, shunted into each other
+      while (b - x > 3.2) {
+        const big = r() < 0.45;
+        const name = big ? (r() < 0.55 ? 'ambulance' : 'van') : (r() < 0.45 ? 'car_wreck' : r() < 0.5 ? 'car_sedan' : r() < 0.5 ? 'pickup' : 'suv');
+        const hw = big ? 3.0 : name === 'pickup' ? 2.75 : 2.45, hd = big ? 1.15 : 1.0;
+        const ang = (0.35 + r() * 0.4) * (r() < 0.5 ? -1 : 1);
+        const ex = hw * Math.cos(ang) + hd * Math.abs(Math.sin(ang));
+        if (b - x < ex * 2 - 0.3) break;
+        const ry = ang + (r() < 0.5 ? Math.PI : 0);
+        const tint = name === 'ambulance' ? 0xffffff : CAR_TINTS[nextColor() % CAR_TINTS.length];
+        const cx = Math.min(x + ex, b - ex), cz = z + (r() - 0.5) * 1.6;
+        A.veh(name, cx, cz, ry, hw, hd, tint, name === 'car_wreck' || r() < 0.3, big ? 2.4 : 1.6);
+        if (r() < 0.22) A.fire(cx, cz, { y: 1.1, size: 1.3 });
+        x = cx + ex - 0.9;
+      }
+      if (b - x > 0.4) {
+        for (let xx = x + 0.3; xx < b; xx += 0.62) A.put(r() < 0.5 ? 'barrel' : 'barrel_blue', Math.min(xx, b - 0.3), z + jitter() * 0.3, r() * 6);
+        col.box((x + b) / 2, z, (b - x) / 2, 0.32, 0, 0.85, 'low');
+      }
+      break;
+    }
     case 'cars':
     case 'ambulance': {
       // vehicles nose to tail across the street; a barrier closes what is left

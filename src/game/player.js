@@ -9,6 +9,7 @@ import { tex } from './assets.js';
 import { Q } from './quality.js';
 
 import { WEAPONS, WEAPON_IDS, weaponStats, ARMOR_ABSORB, BASE_HP, BASE_SPEED } from './weapons.js';
+const GOD = typeof location !== 'undefined' && new URLSearchParams(location.search).has('god');
 
 // what a survivor with nothing bought has (also what a friend's machine assumes about a remote player)
 export const defaultLoadout = () => ({
@@ -291,6 +292,15 @@ export class Player {
         const rad = (z.def.rad || 0.32) + (z === t ? W.magnet * 0.5 : 0);
         if (perp < rad) { hd = along - Math.sqrt(Math.max(0, rad * rad - perp * perp)) * 0.5; hit = z; }
       }
+      // the nests and the gas tanks can be shot too
+      if (g.targets) for (const tg of g.targets.values()) {
+        if (!tg.alive) continue;
+        const fx = tg.x - mz.x, fz = tg.z - mz.z;
+        const along = fx * dx + fz * dz;
+        if (along < 0 || along - tg.r > hd + 0.05) continue;        // (its own collider stops the ray at its skin)
+        const perp = Math.abs(fx * dz - fz * dx);
+        if (perp < tg.r) { hd = along - Math.sqrt(Math.max(0, tg.r * tg.r - perp * perp)); hit = tg; }
+      }
       const hx = mz.x + dx * hd, hz = mz.z + dz * hd;
       g.fx.tracer(mz.x + dx * 0.4, mz.y, mz.z + dz * 0.4, hx, hz);
       if (hit) {
@@ -321,6 +331,7 @@ export class Player {
     buzz([pellets > 1 ? 30 : 12]);
     g.hud.ammo(this);
     for (const [hit, h] of hits) {
+      if (hit.isTarget) { g.targetHit(this, hit, h.dmg, h.dx, h.dz); continue; }
       const crit = Math.random() < (pellets > 1 ? 0.06 : 0.12) || (hit === t && Math.random() < 0.1);
       g.fx.flesh(h.hx, 1.25, h.hz, h.dx, h.dz, pellets > 1 ? 1.5 : 1, crit);
       audio.play('flesh', { x: h.hx, z: h.hz, vol: 0.7 });
@@ -363,6 +374,7 @@ export class Player {
 
   hurt(dmg, fromX, fromZ, kb = 0.35) {
     if (!this.alive) return;
+    if (GOD) dmg *= 0.15;          // QA only (?god): the level flow can be walked end to end
     // armor takes a share of every hit until it is spent
     if (this.armor > 0) {
       const soak = Math.min(this.armor, dmg * ARMOR_ABSORB);

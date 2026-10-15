@@ -54,8 +54,8 @@ export class Rig {
     }
     this.hipsY = this.b.root ? this.b.root.position.y : 0;
     // a touch of cartoon in the proportions: heads and hands ~10% larger
-    if (this.b.head) this.b.head.scale.setScalar(1.12);
-    for (const h of ['hand_L', 'hand_R']) if (this.b[h]) this.b[h].scale.setScalar(1.08);
+    if (this.b.head) this.b.head.scale.setScalar(1.22);
+    for (const h of ['hand_L', 'hand_R']) if (this.b[h]) this.b[h].scale.setScalar(1.16);
     this.pending = {};
   }
 

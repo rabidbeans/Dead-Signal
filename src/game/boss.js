@@ -294,7 +294,7 @@ export class BossBrain {
     a.gone += moved;
     for (const p of g.players.values()) {
       if (!p.alive || a.hit.has(p.id)) continue;
-      if (Math.hypot(p.x - z.x, p.z - z.z) < 1.6) { a.hit.add(p.id); g.hurtPlayer(p, z.enraged ? 34 : 28, { x: z.x - a.dx, z: z.z - a.dz }, 2.6); }
+      if (Math.hypot(p.x - z.x, p.z - z.z) < 1.6) { a.hit.add(p.id); g.hurtPlayer(p, z.enraged ? 34 : z.type === 'warden' ? 20 : 28, { x: z.x - a.dx, z: z.z - a.dz }, 2.6); }
     }
     if (Math.random() < 0.6) g.fx.smoke.emit({ x: z.x, y: 0.2, z: z.z, vx: -a.dx * 2, vy: 0.4, vz: -a.dz * 2, life: 1.0, s0: 0.5, s1: 1.8, r: 0.5, g: 0.47, b: 0.43, a0: 0.35, a1: 0, drag: 1 });
     // stops at the end of the lane, or against a wall (and is dazed a moment: the time to unload on him)

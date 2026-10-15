@@ -16,7 +16,7 @@ export const TYPES = {
   // is coming, and it is a big one.
   brute: { hp: 380, speed: [0.85, 1.05], turn: 2.0, dmg: 28, scale: 1.32, rad: 0.5, reach: 1.55, windup: 0.8, recover: 1.2, stagger: 0.12, knock: 0.22, models: ['z_trucker', 'z_burned', 'z_worker'] },
   // the bosses: one guarding the end of each level, each with its own special move (boss.js). Huge, and they barely flinch.
-  warden: { boss: true, name: 'THE WARDEN', hp: 2200, speed: [0.95, 1.05], turn: 2.2, dmg: 30, scale: 1.75, rad: 0.85, reach: 2.1, windup: 0.85, recover: 1.3, stagger: 0.03, knock: 0.06, models: ['z_cop'], anim: 'brute', tint: [1, 0.95, 0.95], gear: 'helmet' },
+  warden: { boss: true, name: 'THE WARDEN', hp: 1500, speed: [0.9, 1.0], turn: 2.2, dmg: 24, scale: 1.75, rad: 0.85, reach: 2.1, windup: 0.85, recover: 1.3, stagger: 0.03, knock: 0.06, models: ['z_cop'], anim: 'brute', tint: [1, 0.95, 0.95], gear: 'helmet' },
   patientzero: { boss: true, name: 'PATIENT ZERO', hp: 3000, speed: [1.0, 1.1], turn: 2.4, dmg: 32, scale: 1.85, rad: 0.9, reach: 2.2, windup: 0.8, recover: 1.2, stagger: 0.02, knock: 0.05, models: ['z_patient'], anim: 'brute', tint: [0.75, 1.05, 0.75] },
   butcher: { boss: true, name: 'THE BUTCHER', hp: 3800, speed: [1.0, 1.12], turn: 2.6, dmg: 34, scale: 1.85, rad: 0.9, reach: 2.2, windup: 0.75, recover: 1.1, stagger: 0.02, knock: 0.05, models: ['z_worker'], anim: 'brute', tint: [1.1, 0.85, 0.85], gear: 'cleaver' },
   foreman: { boss: true, name: 'THE FOREMAN', hp: 4600, speed: [0.95, 1.05], turn: 2.3, dmg: 38, scale: 1.95, rad: 0.95, reach: 2.3, windup: 0.85, recover: 1.2, stagger: 0.02, knock: 0.04, models: ['z_trucker'], anim: 'brute', tint: [1.0, 0.95, 0.85], gear: 'hardhat' },

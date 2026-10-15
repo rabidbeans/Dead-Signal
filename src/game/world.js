@@ -12,7 +12,9 @@ import { Q } from './quality.js';
 // ---------------------------------------------------------------- shapes --
 // Colliders are 2D in the ground plane: oriented boxes and circles.
 export class Colliders {
-  constructor() { this.boxes = []; this.circles = []; }
+  constructor() { this.boxes = []; this.circles = []; this.dyn = []; }
+  // a MOVING box (the bulldozer): never indexed, always tested; move it by changing cx/cz
+  dynBox(cx, cz, hw, hd, rot = 0, h = 3) { const rec = { cx, cz, hw, hd, c: Math.cos(rot), s: Math.sin(rot), h, tag: 'solid' }; this.dyn.push(rec); return rec; }
   box(cx, cz, hw, hd, rot = 0, h = 3, tag = 'solid') {
     const c = Math.cos(rot), s = Math.sin(rot);
     const rec = { cx, cz, hw, hd, c, s, h, tag };
@@ -74,6 +76,7 @@ export class Colliders {
       const st = this.strips.get(k);
       if (st) o = this._resolve(st.boxes, st.circles, o.x, o.z, r);
     }
+    if (this.dyn.length) o = this._resolve(this.dyn, [], o.x, o.z, r);
     return o;
   }
 
@@ -120,6 +123,7 @@ export class Colliders {
       const h = this._ray(st.boxes, st.circles, ox, oz, dx, dz, best.d);
       if (h.d < best.d) best = h;
     }
+    if (this.dyn.length) { const h = this._ray(this.dyn, [], ox, oz, dx, dz, best.d); if (h.d < best.d) best = h; }
     return best;
   }
 
@@ -776,11 +780,12 @@ float wetG = smoothstep(0.25, 0.7, wetMask(vRoughnessMapUv)) * ${amount.toFixed(
     };
     this.place = place;
     const lamps = lampSites();
-    for (const { x, z, ry } of lamps) {
+    lamps.forEach(({ x, z, ry }, i) => {
       place('streetlight', x, z, ry, 0.18, null, 6);
       const hx = x + Math.cos(ry) * 1.9, hz = z - Math.sin(ry) * 1.9;
-      this.lampSpots.push({ x: hx, y: 5.95, z: hz, broken: mulberry(Math.floor(z * 7) + 3)() < 0.22, phase: (z * 1.7) % 10 });
-    }
+      // two lamp colours per level, alternating, so the street is not one flat tint
+      this.lampSpots.push({ x: hx, y: 5.95, z: hz, broken: mulberry(Math.floor(z * 7) + 3)() < 0.22, phase: (z * 1.7) % 10, color: i % 2 && LV.theme.lamp2 ? LV.theme.lamp2 : undefined });
+    });
     const rng = mulberry(909);
     const nearLamp = (z) => lamps.some((l) => Math.abs(l.z - z) < 2.5);
     for (const [zN, zS] of blockRanges()) {
@@ -831,6 +836,8 @@ float wetG = smoothstep(0.25, 0.7, wetMask(vRoughnessMapUv)) * ${amount.toFixed(
     const T = LV.theme;
     const hemi = new THREE.HemisphereLight(T.hemiSky, T.hemiGround, T.hemiI);
     s.add(hemi);
+    this.hemi = hemi;
+    this.lampDim = 1;          // level 2 starts with the power out (objective.js brings it back)
     const moon = new THREE.DirectionalLight(T.moon, T.moonI);
     this.moonBase = T.moonI;
     moon.castShadow = Q.moonShadow > 0;
@@ -866,9 +873,11 @@ float wetG = smoothstep(0.25, 0.7, wetMask(vRoughnessMapUv)) * ${amount.toFixed(
     for (const Lm of this.lampSpots) {
       if (Lm.nofx) continue;
       const cone = new THREE.Mesh(new THREE.ConeGeometry(2.6, 5.9, 20, 1, true), coneMat.clone());
+      if (Lm.color) cone.material.color.set(Lm.color);
       cone.position.set(Lm.x, Lm.y - 2.95, Lm.z);
       this.add(cone);
       const pool = new THREE.Mesh(new THREE.PlaneGeometry(7, 7), poolMat.clone());
+      if (Lm.color) pool.material.color.set(Lm.color);
       pool.rotation.x = -Math.PI / 2;
       pool.position.set(Lm.x, 0.03, Lm.z);
       this.add(pool);
@@ -900,13 +909,13 @@ float wetG = smoothstep(0.25, 0.7, wetMask(vRoughnessMapUv)) * ${amount.toFixed(
       if (!n) { l.intensity = 0; return; }
       l.position.set(n.it.x, n.it.y - 0.3, n.it.z);
       l.color.set(n.it.color ?? LV.theme.lamp ?? 0xffa860);
-      l.intensity = 85 * (n.it.power ?? 1) * this.lampLevel(n.it, t);
+      l.intensity = 85 * (n.it.power ?? 1) * this.lampLevel(n.it, t) * (n.it.nofx ? 1 : this.lampDim);
     });
     for (const { cone, pool, L: Lm } of this.lampFx) {
       const far = Math.abs(Lm.z - focus.z) > 40;
       cone.visible = pool.visible = !far;
       if (far) continue;
-      const k = this.lampLevel(Lm, t);
+      const k = this.lampLevel(Lm, t) * this.lampDim;
       cone.material.opacity = 0.075 * k;
       pool.material.opacity = 0.2 * k;
     }
