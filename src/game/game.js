@@ -166,6 +166,7 @@ export class Game {
     // warm up shaders while the title card shows
     this.engine.renderer.compile(s, this.camera);
     if (!this.opts.attract) this.warmUp();       // (the menu backdrop is thrown away on PLAY: its warm-up would be wasted)
+    this.ready = true;
   }
 
   // Draw everything once, behind the loading screen. A GPU only gets a texture, a mesh or a shader
@@ -341,7 +342,11 @@ export class Game {
 
   // where the held junction is centred: the gate, or the landing pad
   holdCentre(k) { return k < L.gate.length ? L.gate[k] : L.lz.z; }
-  holdTrigger(k) { return k < L.gate.length ? L.gate[k] + HOLD_TRIGGER : L.lz.z + 22; }
+  holdTrigger(k) {
+    // the bulldozer waits south of the junction: its job starts as you reach it, not past it
+    if (k === 0 && this.objective?.mode === 'dozer') return this.objective.dz.z0 + 7;
+    return k < L.gate.length ? L.gate[k] + HOLD_TRIGGER : L.lz.z + 22;
+  }
 
   refreshHud() {
     const me = this.me;
@@ -994,6 +999,7 @@ export class Game {
     if (!this.botNav || this.botNavKey !== key) {
       const b = this.world.bounds;
       this.botNav ??= new NavField(b.minX - 6, b.minZ - 8, b.maxX + 6, b.maxZ + 8, 0.5, this.world.col);
+      for (const d of this.world.col.dyn) this.botNav.mark(d);      // (the bulldozer: the bot walks round it)
       this.botNav.build([goal], 1e5);
       this.botNavKey = key;
     }
@@ -1020,7 +1026,8 @@ export class Game {
     const t = this.time;
     let mx, my;
     const holding = this.hold >= 0;
-    if (best && bd < 3.2) { mx = Math.cos(t * 0.9) * 0.6 + (me.x - best.x) * 0.3; my = Math.sin(t * 0.9) * 0.6 + (me.z - best.z) * 0.3; }
+    const god = this._god ??= new URLSearchParams(location.search).has('god');     // QA: walk the objectives, ignore the crowd
+    if (best && bd < 3.2 && !god) { mx = Math.cos(t * 0.9) * 0.6 + (me.x - best.x) * 0.3; my = Math.sin(t * 0.9) * 0.6 + (me.z - best.z) * 0.3; }
     else if (this.phase === 'extract') { const G = this.goal(); mx = (G.x - me.x) * 0.5; my = Math.max(-1, Math.min(1, (G.z - me.z) * 0.3)); }
     else if (holding && obGoal) {
       // the level's objective: walk to the breaker / the nest / the dozer's side
@@ -1030,6 +1037,14 @@ export class Game {
         const v = f.dir(me.x, me.z);
         if (v) { mx = v.x; my = v.z; } else { mx = (obGoal.x - me.x) * 0.3; my = (obGoal.z - me.z) * 0.3; }
       } else { mx = Math.cos(t * 0.9) * 0.3; my = Math.sin(t * 0.9) * 0.3; }
+    } else if (holding && HOLDS[this.hold].boss) {
+      // the boss fight: close on the boss along the street (never straight through a wreck)
+      const bz = this.bossZ();
+      const goal = { x: 0, z: Math.round(bz ? bz.z + 7 : L.lz.z + 6) };
+      if (Math.hypot(goal.x - me.x, goal.z - me.z) > 3) {
+        const v = this.botField(goal, 'b' + goal.z).dir(me.x, me.z);
+        if (v) { mx = v.x; my = v.z; } else { mx = -me.x * 0.3; my = (goal.z - me.z) * 0.2; }
+      } else { mx = Math.cos(t * 0.9) * 0.6; my = Math.sin(t * 0.9) * 0.4; }
     } else if (holding) {
       const c = this.holdCentre(this.hold) + 10;
       mx = -me.x * 0.3; my = Math.max(-0.4, Math.min(0.4, (c - me.z) * 0.2));
@@ -1046,7 +1061,7 @@ export class Game {
     if (this.time < bp.until) { mx = bp.side * 1.0; my = -0.5; }
     const move = { x: Math.max(-1, Math.min(1, mx)), y: Math.max(-1, Math.min(1, my)) };
     let aim = null;
-    if (best && bd < 13 && !(obShoot && bd > 2.2)) aim = { x: (best.x - me.x) / bd, y: (best.z - me.z) / bd, mag: 1 };
+    if (best && bd < 13 && !(obShoot && (bd > 2.2 || god))) aim = { x: (best.x - me.x) / bd, y: (best.z - me.z) / bd, mag: 1 };
     else if (obShoot) { const d = Math.hypot(obShoot.x - me.x, obShoot.z - me.z); if (d < 14) aim = { x: (obShoot.x - me.x) / d, y: (obShoot.z - me.z) / d, mag: 1 }; }
     return { move, aim, firing: !!aim, tap: false, reload: me.ammo === 0, mouse: null, mouseFiring: false };
   }

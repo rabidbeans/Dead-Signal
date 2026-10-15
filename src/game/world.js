@@ -816,7 +816,8 @@ float wetG = smoothstep(0.25, 0.7, wetMask(vRoughnessMapUv)) * ${amount.toFixed(
     this.col.box(b.minX - 1, midZ, 1, len, 0, 3);
     this.col.box(b.maxX + 1, midZ, 1, len, 0, 3);
     this.spawns = [{ x: -3, z: b.maxZ - 2 }, { x: 3, z: b.maxZ - 2 }];
-    for (const zc of L.cross) this.spawns.push({ x: b.minX + 1.5, z: zc - 1.5 }, { x: b.minX + 1.5, z: zc + 1.5 }, { x: b.maxX - 1.5, z: zc - 1.5 }, { x: b.maxX - 1.5, z: zc + 1.5 });
+    // (the cross streets are sealed at x ±13.2 by dress.js: the dead come out of the stub in front of the barricade)
+    for (const zc of L.cross) this.spawns.push({ x: -11.4, z: zc - 1.5 }, { x: -11.4, z: zc + 1.5 }, { x: 11.4, z: zc - 1.5 }, { x: 11.4, z: zc + 1.5 });
   }
 
   // ------------------------------------------------------------ gates --

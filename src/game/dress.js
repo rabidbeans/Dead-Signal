@@ -147,7 +147,7 @@ export function populate(world) {
     // the docks' yard: containers along both kerbs and floodlights, the middle left clear for the bulldozer
     yard: (zc, A) => {
       for (const [x, z, ry] of [[-7.2, zc + 6.5, 0.04], [7.3, zc - 6.8, -0.03]]) {
-        const m = container(5 + Math.round(x));
+        const m = container(x < 0 ? 1 : 4);
         m.position.set(x, 0, z); m.rotation.y = Math.PI / 2 + ry;
         world.add(m);
         col.box(x, z, 1.22, 3.03, -ry, 2.6);
@@ -158,6 +158,19 @@ export function populate(world) {
       A.put('barrel', 5.6, zc - 1.2, 0, { circle: 0.32, h: 0.9 }); A.fire(5.6, zc - 1.2);
       A.floodlight(-6.9, zc - 2.2, 0.1);
       A.floodlight(6.9, zc + 2.6, 3.1);
+    },
+    // the market crossing where the nests grew: stalls kicked over at the corners, the middle left to the nests
+    nest: (zc, A) => {
+      for (const [x, z, ry] of [[7.0, zc + 4.2, 0.4], [-7.0, zc - 4.4, -0.3]]) {
+        const g = stall(2 + Math.round(Math.abs(x)), rng);
+        g.position.set(x, world.groundY(x, z), z); g.rotation.set(0, ry, 1.35);
+        world.add(g);
+        col.box(x, z, 1.4, 0.7, -ry, 0.9, 'low');
+      }
+      A.put('barrel', 8.0, zc - 1.2, 0, { circle: 0.32, h: 0.9 }); A.fire(8.0, zc - 1.2);
+      A.put('barrel', -8.0, zc + 0.6, 0, { circle: 0.32, h: 0.9 }); A.fire(-8.0, zc + 0.6);
+      A.put('crate_wood', 1.4, zc + 6.4, 0.3, { box: [0.45, 0.45], h: 0.85 });
+      A.floodlight(-7.6, zc + 6.8, 0.2);
     },
     // the boss plaza: open ground to fight in, a little cover at the edges and fire to see by
     plaza: (zc, A) => {
@@ -202,6 +215,22 @@ export function populate(world) {
 
   // ---- the landing zone (the last level only)
   if (LV.finale === 'heli') buildPad(world, put, sandbags, floodlight, fire, police);
+
+  // ---- the cross streets are sealed a few metres in (Sam's levels are a linear push: before this a back alley behind
+  // the buildings let you walk round the second half of the maze)
+  for (const c of zc) for (const side of [-1, 1]) {
+    const x = side * 13.2;
+    if (LV.style === 'yard') {
+      for (const dz of [-2.6, 2.6]) { const m = container(dz > 0 ? 2 : 5); m.position.set(x, 0, c + dz); m.rotation.y = Math.PI / 2; m.scale.x = 0.86; world.add(m); }
+    } else if (LV.style === 'chicane') {
+      for (let z = c - 4.7; z <= c + 4.8; z += 1.1) { const h = hesco(); h.position.set(x, 0, z); h.rotation.y = Math.PI / 2; world.add(h); const t = hesco(); t.position.set(x, 1.05, z); t.rotation.y = Math.PI / 2; world.add(t); }
+    } else {
+      for (let z = c - 3.5; z <= c + 3.6; z += 3.06) put('fence_chain', x, z, Math.PI / 2);
+      for (let z = c - 3.4; z <= c + 3.5; z += 3.4) put('barrier', x - side * 0.5, z, Math.PI / 2 + (rng() - 0.5) * 0.06);
+      put('plywood_barrier', x - side * 0.9, c + 1.6, Math.PI / 2 + 0.1);
+    }
+    col.box(x, c, 0.7, 5.4, 0, 2.6);
+  }
 
   // ---- junction furniture: signals and stop signs at the four corners
   for (const c of zc) {
@@ -367,18 +396,20 @@ function fillSpan(world, row, a, b, r, A, nextColor) {
     }
     case 'containers': {
       // steel shipping containers, sometimes stacked two high
-      while (b - x > 2.0) {
-        const w = Math.min(6.06, b - x + 1.2);
+      // never past the span's end (that would narrow the gap): the last box is slid back to end exactly at b, and a
+      // span shorter than a container gets one squashed to fit
+      while (b - x > 0.4) {
+        const w = Math.min(6.06, b - a);
+        const cx = Math.min(x + w / 2, b - w / 2);
         const m = container(nextColor());
-        const cx = x + w / 2;
-        m.position.set(cx, 0, z + jitter() * 0.5);
-        m.rotation.y = (r() - 0.5) * 0.06 + (r() < 0.5 ? Math.PI : 0);
+        m.position.set(cx, 0, z + jitter() * 0.3);
+        m.rotation.y = (r() - 0.5) * 0.04 + (r() < 0.5 ? Math.PI : 0);
+        if (w < 6.06) m.scale.x = w / 6.06;
         world.add(m);
         col.box(cx, z, w / 2, 1.22, 0, 2.6);
-        if (r() < 0.35) { const t = container(nextColor()); t.position.set(cx + (r() - 0.5) * 0.4, 2.6, z + (r() - 0.5) * 0.3); t.rotation.y = (r() - 0.5) * 0.1; world.add(t); }
-        x += 6.1;
+        if (r() < 0.35 && w > 5) { const t = container(nextColor()); t.position.set(cx + (r() - 0.5) * 0.3, 2.6, z + (r() - 0.5) * 0.2); t.rotation.y = (r() - 0.5) * 0.06; world.add(t); }
+        x = cx + w / 2 + 0.05;
       }
-      if (b - x > 0.4) barrierRun(x, b);
       break;
     }
     case 'stalls': {

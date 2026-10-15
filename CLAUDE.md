@@ -298,3 +298,55 @@ more color ... 10% more cartoony but still scary ... the player's legs are too w
   x1.08 (rig.js) — the "10% more cartoony". Bloom/contrast up a touch (engine.js). The survivor's stance was narrowed.
 - QA: `?play&fast&lvl=N&cp=1&kit=lmg&perks=...` ; tools in /home/user/tools/pw: `run_bot.mjs`, `lvl_shots.mjs`, `dmglog.mjs`,
   `states.mjs`. Not verified: phone frame rate on L3-L5, co-op with the bosses on two devices, sounds by ear.
+
+## Round 8 (2026-10-15): 15% more cartoon, more colour, an easier level 1, every level its own
+
+Sam: "15% more cartoony, more colors. Also level one is too hard with only a pistol. Each level should be unique also,
+not just running through gates and around walls for every level."
+
+- **Cartoon**: an INK OUTLINE post effect (`InkEffect` in engine.js): the Laplacian of inverse depth, so flat ground
+  never gets lines, only the edges of things standing on it. `?o=ink:0` turns it off. Heads x1.22, hands x1.16 (rig.js),
+  character toon banding 0.5 and saturation x1.34 (assets.js).
+- **Colour**: grade saturation per level went up (`theme.sat` 0.28-0.36), wall tints are stronger, and every level has a
+  SECOND lamp colour (`theme.lamp2`) that alternates along the street (world.js lampSpots `color`).
+- **Level 1 with a pistol**: `zHp` 0.8, `zSpd` 0.92, sleepers sparser, ambushes x0.6 with few runners (`ambK`, `ambRunner`),
+  half the trickle (`trickle`), the junction hold 40 s / 42 dead / cap 16, the Warden 1500 hp, 24 per blow, 20 per charge.
+- **A different maze per level** (`style` in LEVELS, `genMaze` in level.js; `LANES` = walls along the street,
+  `inMaze(x, z)` keeps kits out of them): L1 `rows` (barricade rows, zig-zag gaps), L2 `pileup` (crashed vehicles slewed
+  at angles, fires), L3 `aisles` (two stall lines along the street make three aisles; stall rows close two of them, a break
+  in each line lets you cut across), L4 `yard` (container walls, each with a container spur back from it: an S-bend and a
+  blind pocket), L5 `chicane` (hesco chicanes every ~8 m swinging hard left and right).
+  ⚠️ A row's fill must never run past its span (that narrows the gap): the containers are slid back / squashed to fit.
+- **A different job at the junction** (`objective` in LEVELS; `src/game/objective.js`, one `Objective` per Game, built
+  on every machine; static colliders go down in populate via `placeObjective`):
+  - L1 `gate`: hold the junction (as before).
+  - L2 `power`: the district is BLACKED OUT (`world.lampDim` 0.12, sky x0.72) until three breaker cabinets are charged
+    (stand within 2.6 m: 5.5 s, x1.4 with two people). The lights stutter back on, then the gate opens.
+  - L3 `nests`: three pulsing flesh nests (520 hp x zHp x players) breed the dead (one per 4.6-6.6 s each while someone is
+    within 24 m). Shoot them out. Plus `tanks`: red gas tanks along the market aisles (25 hp) explode (r 4.2, 320 to the
+    dead, 30 to the living, chain to tanks next door).
+  - L4 `dozer`: a bulldozer (`dynBox` collider: Colliders.dyn is a list of MOVING boxes always tested by resolve and ray)
+    creeps from the junction to the gate at 0.62 m/s only while a survivor is within 8.5 m; its blade kills what stands in
+    front; at the gate it breaks through.
+  - L5 `gate` + `barrage`: hold the fort gate while artillery falls (red ring for 1.75 s, then r 3.6: 420 to the dead,
+    32 to the living); lighter shelling on the run from the gate to the plaza.
+  Shootable things are `game.targets` (player.fire tests them after the zombies; a client sends `thit`, the host sends
+  `tdie`). The snapshot carries `O` (objective state); `shell` and `tdie` are events. HUD: the objective line and bar
+  (`route({ ob })`) and screen-edge markers (`.markers`, `objective.markers()`). A checkpoint restart calls `skip()`.
+- ⚠️ **Objectives stand ON THE AVENUE or the junction, never down a cross street**: the camera is 13.4 m up and 8.5 m
+  behind, so in a cross-street arm it ends up inside the tall buildings and you look through a roof.
+- ⚠️ **The cross streets are sealed at x ±13.2** (dress.js, before "junction furniture"; fence + barriers, containers on L4,
+  double hesco on L5). Without it a back alley behind the buildings (x 30-34) let you walk round the whole second maze.
+  `world.spawns` for the cross streets are in the stub in front of the seal (x ±11.4).
+- `Game.ready` is set at the end of `init()`; main.js's loop only updates a ready game (it used to tick a level that was
+  still loading: `me` undefined errors on a joiner).
+- L4's hold starts as you reach the bulldozer (`holdTrigger`), and the bot's nav marks `col.dyn` so it walks round it.
+- Sounds (`tools/sfx_obj.py`, bpy venv python): boom0/1, incoming, power, zap, engine (loop), squelch0/1, burst.
+- QA: `?god` (QA only: the local player takes 15% damage and the bot walks the objectives ignoring the crowd);
+  `/home/user/tools/pw/obj_bot.mjs <secs> "&fast&lvl=N&kit=...&god"`, `maze_dump.mjs <lvl>` (prints which cells of each
+  row are open), `nest_test.mjs`.
+  `coop_obj.mjs` (two browsers on level 3: a friend's nest hits reach the host, a host kill and a tank blast show on both).
+- Measured (headless bot): L1 pistol-only WON on 100 hp in 156 s (it only took the Warden's hits); L2 breakers 3/3 and
+  the gate; L3 nests 3/3, the gate, the Butcher reached (bot with ?god); L4 dozer escorted to 69% before the (weak, ?god)
+  bot fell; L5 the fort hold under artillery done, Omega reached. Not verified: phone frame rate, sounds by ear, a human
+  playing L2-L5 (the bot is a poor judge of how hard they are).

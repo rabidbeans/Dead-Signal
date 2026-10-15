@@ -67,7 +67,7 @@ const LEVELS = {
     blurb: 'The night market: aisles of stalls under the lanterns, red gas tanks you can shoot, three pulsing nests breeding the dead, and the Butcher.',
     L: geo(-90, -212),
     holds: [
-      { secs: 55, n: 30, lurch: 0.22, runner: 0.15, cap: 22, title: 'THE NESTS', brutes: 1 },
+      { secs: 55, n: 24, lurch: 0.22, runner: 0.15, cap: 17, title: 'THE NESTS', brutes: 1 },
       { secs: 40, n: 52, lurch: 0.24, runner: 0.18, cap: 20, title: 'THE BUTCHER', final: true, boss: 'butcher', brutes: 1 },
     ],
     zHp: 1.2, zSpd: 1.06, brutePop: 0.06, sleepGap: [4, 4],
@@ -75,7 +75,7 @@ const LEVELS = {
     heights: [7, 4, 8, 10],
     signs: [['NOODLES', '#ff4040', 5], ['DUMPLINGS', '#ffd040', 6], ['KARAOKE', '#ff5fd0', 5.5], ['TEA', '#4affb0', 3], ['MARKET', '#ffb030', 5], ['HERBS', '#7aff5a', 4], ['LUCKY', '#ff3060', 4.5], ['BBQ', '#ff8a3a', 3.5]],
     theme: { bg: 0x1a0c0c, fog: 0x2c1414, fogD: 0.017, hemiSky: 0xe08a6a, hemiGround: 0x2a1410, hemiI: 1.8, moon: 0xffd0b0, moonI: 1.4, fogSheet: 0xd8968a, sat: 0.36, lamp: 0xff6a3a, lamp2: 0xffd040, walls: [0xffa888, 0xb8e890, 0xffd080], accent: [0xd02020, 0xffc020], rim: 0xff8a50, lanterns: true },
-    arenas: [{ k: 3, flip: true }, { k: 'plaza' }],
+    arenas: [{ k: 'nest' }, { k: 'plaza' }],
   },
   4: {
     id: 4, name: 'THE DOCKS', kicker: 'LEVEL 4 · THE DOCKS', finale: 'saferoom',
@@ -84,7 +84,7 @@ const LEVELS = {
     blurb: 'The shipping yards: a maze of container walls, a bulldozer that only pushes while you stand by it, and the Foreman, who leaps and smashes the ground.',
     L: geo(-96, -224),
     holds: [
-      { secs: 45, n: 100, lurch: 0.24, runner: 0.22, cap: 32, title: 'THE CONTAINER WALL', brutes: 2 },
+      { secs: 45, n: 85, lurch: 0.24, runner: 0.2, cap: 26, title: 'THE CONTAINER WALL', brutes: 2 },
       { secs: 40, n: 58, lurch: 0.25, runner: 0.22, cap: 21, title: 'THE FOREMAN', final: true, boss: 'foreman', brutes: 2 },
     ],
     zHp: 1.25, zSpd: 1.08, brutePop: 0.07, sleepGap: [4, 4],

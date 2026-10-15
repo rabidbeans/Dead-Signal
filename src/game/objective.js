@@ -20,8 +20,8 @@ const TAU = Math.PI * 2;
 // Pure functions of the level, so populate() can put colliders down before the nav grid is built.
 export function objectiveSites() {
   const c = L.cross[0], g = L.gate[0];
-  if (LV.objective === 'power') return [{ x: -15.5, z: c - 1.2 }, { x: 15.5, z: c + 1.2 }, { x: 5.2, z: g + 4.2 }];
-  if (LV.objective === 'nests') return [{ x: -14.5, z: c + 0.5 }, { x: 14.5, z: c - 0.5 }, { x: -4.2, z: g + 4.8 }];
+  if (LV.objective === 'power') return [{ x: -8.0, z: c + 2.5 }, { x: 8.0, z: c - 2.2 }, { x: 5.2, z: g + 4.2 }];
+  if (LV.objective === 'nests') return [{ x: -5.6, z: c + 2.6 }, { x: 5.6, z: c - 2.6 }, { x: -4.2, z: g + 4.8 }];
   return [];
 }
 export function tankSites() {
@@ -443,7 +443,7 @@ export class Objective {
     const prog = (d.z0 - d.z) / (d.z0 - d.zEnd);
     d.rg.material.uniforms.uProg.value = prog;
     d.rg.material.uniforms.uTime.value = this.t;
-    d.rg.material.uniforms.uA.value = active ? (d.moving ? 0.5 : 1) : 0.3;
+    d.rg.material.uniforms.uA.value = active ? (d.moving ? 0.3 : 0.75) : 0.18;
     d.bm.visible = active && !d.moving;
     // the engine: idling until the hold starts, labouring while it pushes
     const dist = Math.hypot(g.me.x, g.me.z - d.z);

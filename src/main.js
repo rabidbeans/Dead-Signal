@@ -155,8 +155,8 @@ function loop(now) {
   const dtMs = Math.min(100, now - last);
   last = now;
   const dt = dtMs / 1000;
-  if (game && !game.paused) {
-    // fixed-ish steps: a slow phone must not run the dead in slow motion
+  if (game && game.ready && !game.paused) {
+    // fixed-ish steps (never on a level that is still loading: Game.init is async): a slow phone must not run the dead in slow motion
     const span = Math.min(dt, FAST ? 1 / 8 : 0.1);
     const n = FAST ? 1 : Math.max(1, Math.ceil(span / (1 / 30)));
     for (let i = 0; i < n; i++) game.update(span / n);
