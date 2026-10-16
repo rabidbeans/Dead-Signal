@@ -204,16 +204,16 @@ export class Zombie {
   }
 
   // bullets (host applies; clients send hits to the host)
-  damage(dmg, dirx, dirz, crit, byId) {
+  damage(dmg, dirx, dirz, crit, byId, kmul = 1) {
     if (!this.alive) return false;
     this.wake();
     this.hp -= dmg;
-    const kk = this.def.knock ?? 1;
+    const kk = (this.def.knock ?? 1) * kmul;        // (a shotgun blast throws a body back: kmul > 1)
     this.knock.x += dirx * (crit ? 0.9 : 0.45) * 4 * kk;
     this.knock.z += dirz * (crit ? 0.9 : 0.45) * 4 * kk;
     if (this.hp <= 0) { this.die(dirx, dirz, crit); return true; }
     // a stagger meter: torso shots lose effect, but a run of hits staggers
-    const sg = this.def.stagger ?? 1;          // a brute almost never breaks stride
+    const sg = Math.min(1, (this.def.stagger ?? 1) * kmul);          // a brute almost never breaks stride
     this.staggerFor = 0.15 + Math.random() * 0.15;
     if ((this.state === 'walk' || this.state === 'recover') && Math.random() < sg) this.setState('stagger');
     if (this.state === 'windup' && Math.random() < 0.5 * sg) this.setState('stagger');

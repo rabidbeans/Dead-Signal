@@ -350,3 +350,10 @@ not just running through gates and around walls for every level."
   the gate; L3 nests 3/3, the gate, the Butcher reached (bot with ?god); L4 dozer escorted to 69% before the (weak, ?god)
   bot fell; L5 the fort hold under artillery done, Omega reached. Not verified: phone frame rate, sounds by ear, a human
   playing L2-L5 (the bot is a poor judge of how hard they are).
+
+## 2026-10-16: the shotgun (Sam: "shotgun seems weak")
+8 pellets x 17 with a steep falloff dropped about one body a blast. Now (`weapons.js` shotgun): 10 x 44, falloff 0.45,
+spread 11°, 0.6 s between shots, 0.25 s pump, reload 2.3 s. `pierce: 1`: a pellet goes on through the first body into the
+next at 60% (player.fire collects every body on the line, nearest first). `knock: 2.4`: a blast throws bodies back and
+staggers them (`Zombie.damage(..., kmul)`; the client's `hit` message carries `k`). Measured (`/home/user/tools/pw/
+shotgun_test.mjs`, five level-3 shamblers of 132 hp): ~1.6-2 drop per blast at 3-8 m, ~0.1 at 12 m (before: ~1 at 3-5 m).

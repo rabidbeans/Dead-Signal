@@ -21,13 +21,16 @@ export const WEAPONS = {
   },
   // a new gun opens in the safehouse for every level you beat (`unlock` = the level to beat)
   shotgun: {
-    id: 'shotgun', name: 'Breacher 12', model: 'shotgun', icon: 'shotgun_icon.webp', blurb: 'Pump-action. Eight pellets, close and brutal.',
-    dmg: 17, crit: 1.6, pellets: 8, falloff: 0.55, mag: 6, tapInterval: 0.72, autoInterval: 0.8, reload: 2.5,
-    spreadBase: deg(10), spreadAdd: 0, spreadMax: deg(10), spreadRecover: deg(20), spreadMove: deg(2),
-    range: 14, assistAcquire: deg(14), assistHold: deg(20), assistRange: 10, assistBend: 0.4, magnet: 0.3,
+    id: 'shotgun', name: 'Breacher 12', model: 'shotgun', icon: 'shotgun_icon.webp', blurb: 'Pump-action. Ten heavy pellets that tear through a crowd and throw the dead back.',
+    // (Sam: "shotgun seems weak": 8 x 17 with a steep falloff dropped ~1 body a blast. Now 10 x 44, pellets go on
+    // through the first body into the next at 60%, a blast knocks bodies back and staggers them, and it cycles faster.
+    // Measured into a crowd of five 132-hp dead (level 3): ~2 drop per blast at 3-8 m, ~0.2 at 12 m)
+    dmg: 44, crit: 1.6, pellets: 10, falloff: 0.45, pierce: 1, knock: 2.4, mag: 6, tapInterval: 0.6, autoInterval: 0.66, reload: 2.3,
+    spreadBase: deg(11), spreadAdd: 0, spreadMax: deg(11), spreadRecover: deg(20), spreadMove: deg(2),
+    range: 16, assistAcquire: deg(14), assistHold: deg(20), assistRange: 10, assistBend: 0.4, magnet: 0.3,
     kick: 0.5, trauma: 0.26, recoil: 42, shot: 'shotgun', shellVol: 0.35, duck: 0.3, price: 2600,
     magStep: 2, tip: [0.623, 0.03, 0], spare: [-0.116, 0.01, 0.034], unlock: 2, costK: 1.6,
-    pump: 0.3, noDrop: true, snd: { release: null, magout: 'mag_in', magin: 'mag_in', rack: 'pump' },
+    pump: 0.25, noDrop: true, snd: { release: null, magout: 'mag_in', magin: 'mag_in', rack: 'pump' },
   },
   rifle: {
     id: 'rifle', name: 'AR-7 Carbine', model: 'rifle', icon: 'rifle_icon.webp', blurb: 'Accurate full-auto. Hits hard at range.',

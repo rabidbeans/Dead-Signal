@@ -621,15 +621,15 @@ export class Game {
 
   // ---------------------------------------------------------- combat --
   // a local player's bullet hit zombie z
-  localHit(pl, z, dmg, dx, dz, crit) {
+  localHit(pl, z, dmg, dx, dz, crit, kmul = 1) {
     this.stats.hits++;
     if (crit) this.stats.crits++;
     if (this.isHost) {
-      const killed = z.damage(dmg, dx, dz, crit, pl.id);
+      const killed = z.damage(dmg, dx, dz, crit, pl.id, kmul);
       if (killed) this.onKill(z, dx, dz, crit, pl.id === this.me.id, pl.id);
       else this.netEvent({ k: 'zhit', id: z.id, dx, dz, crit: crit ? 1 : 0 });
     } else {
-      this.net.toHost({ t: 'hit', id: z.id, dmg, dx, dz, crit: crit ? 1 : 0 });
+      this.net.toHost({ t: 'hit', id: z.id, dmg, dx, dz, crit: crit ? 1 : 0, k: kmul });
     }
   }
 
@@ -690,7 +690,7 @@ export class Game {
     } else if (m.t === 'hit' && this.isHost) {
       const z = this.zombies.get(m.id);
       if (!z || !z.alive) return;
-      const killed = z.damage(m.dmg, m.dx, m.dz, !!m.crit, from);
+      const killed = z.damage(m.dmg, m.dx, m.dz, !!m.crit, from, m.k || 1);
       z.hitFx(m.dx, m.dz, !!m.crit);
       this.fx.flesh(z.x, 1.25, z.z, m.dx, m.dz, 1, !!m.crit);
       if (killed) this.onKill(z, m.dx, m.dz, !!m.crit, false, from);

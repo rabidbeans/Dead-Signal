@@ -283,15 +283,19 @@ export class Player {
       const dx = Math.cos(a), dz = Math.sin(a);
       const wall = g.world.col.ray(mz.x, mz.z, dx, dz, W.range);
       let hit = null, hd = wall.d;
+      // every body on the line, nearest first: a pellet that PIERCES goes on into the one behind (W.pierce)
+      const line = [];
       for (const z of g.zombies.values()) {
         if (!z.alive) continue;
         const fx = z.x - mz.x, fz = z.z - mz.z;
         const along = fx * dx + fz * dz;
-        if (along < 0 || along > hd) continue;
+        if (along < 0 || along > wall.d) continue;
         const perp = Math.abs(fx * dz - fz * dx);
         const rad = (z.def.rad || 0.32) + (z === t ? W.magnet * 0.5 : 0);
-        if (perp < rad) { hd = along - Math.sqrt(Math.max(0, rad * rad - perp * perp)) * 0.5; hit = z; }
+        if (perp < rad) line.push({ z, d: along - Math.sqrt(Math.max(0, rad * rad - perp * perp)) * 0.5 });
       }
+      if (line.length > 1) line.sort((p, q) => p.d - q.d);
+      if (line.length) { hit = line[0].z; hd = line[0].d; }
       // the nests and the gas tanks can be shot too
       if (g.targets) for (const tg of g.targets.values()) {
         if (!tg.alive) continue;
@@ -307,6 +311,12 @@ export class Player {
         const fall = W.falloff ? 1 - W.falloff * Math.min(1, hd / W.range) : 1;
         const h = hits.get(hit) || { dmg: 0, dx, dz, hx, hz };
         h.dmg += W.dmg * fall; hits.set(hit, h);
+        // through the first body and into the next, weaker
+        if (!hit.isTarget) for (let k = 1; k <= (W.pierce || 0) && k < line.length; k++) {
+          const b = line[k], f2 = (W.falloff ? 1 - W.falloff * Math.min(1, b.d / W.range) : 1) * 0.6;
+          const h2 = hits.get(b.z) || { dmg: 0, dx, dz, hx: mz.x + dx * b.d, hz: mz.z + dz * b.d };
+          h2.dmg += W.dmg * f2; hits.set(b.z, h2);
+        }
       } else if (wall.d < W.range && (pellets === 1 || i % 2 === 0)) {
         g.fx.hard(hx, mz.y, hz, wall.nx, wall.nz, dx, dz);
         if (i === 0) audio.play('hard', { x: hx, z: hz, vol: 0.5 });
@@ -337,7 +347,7 @@ export class Player {
       audio.play('flesh', { x: h.hx, z: h.hz, vol: 0.7 });
       hit.hitFx(h.dx, h.dz, crit);
       buzz([6]);
-      g.localHit(this, hit, h.dmg * (crit ? W.crit : 1), h.dx, h.dz, crit);
+      g.localHit(this, hit, h.dmg * (crit ? W.crit : 1), h.dx, h.dz, crit, W.knock || 1);
     }
     g.netEvent({ k: 'shot', pid: this.id, wp: WEAPON_IDS.indexOf(W.id), x: +mz.x.toFixed(2), z: +mz.z.toFixed(2), y: +mz.y.toFixed(2), dx: +dx.toFixed(3), dz: +dz.toFixed(3), hx: +first.hx.toFixed(2), hz: +first.hz.toFixed(2), w: first.w, nx: +first.nx.toFixed(2), nz: +first.nz.toFixed(2) });
   }
