@@ -528,9 +528,12 @@ export class Game {
   }
 
   cullBehind(lead) {
+    // measured from the survivor furthest BACK, so nothing vanishes next to a teammate who is lagging behind
+    let rear = lead.z;
+    for (const p of this.players.values()) if (p.alive && p.z > rear) rear = p.z;
     for (const [id, z] of this.zombies) {
       // the sleeping dead behind us are let go; the AWAKE ones keep chasing (running past them is not a way through)
-      if (!z.alive || z.boss || z.z < lead.z + (z.idle ? 48 : 85)) continue;
+      if (!z.alive || z.boss || z.z < rear + (z.idle ? 48 : 85)) continue;
       z.dispose(); this.zombies.delete(id);
       this.netEvent({ k: 'zgone', id });
     }
@@ -590,8 +593,17 @@ export class Game {
     const z = new Zombie(this, id, o);
     this.zombies.set(id, z);
     // corpses are permanent, up to a point
+    // past 26 corpses the one FURTHEST from every survivor is cleared (it used to be the oldest, even under your feet)
     const dead = [...this.zombies.values()].filter((q) => !q.alive);
-    if (dead.length > 26) { const old = dead[0]; old.dispose(); this.zombies.delete(old.id); }
+    if (dead.length > 26) {
+      let far = null, fd = -1;
+      for (const q of dead) {
+        let d = 1e9;
+        for (const p of this.players.values()) d = Math.min(d, (p.x - q.x) ** 2 + (p.z - q.z) ** 2);
+        if (d > fd) { fd = d; far = q; }
+      }
+      far.dispose(); this.zombies.delete(far.id);
+    }
     return z;
   }
 

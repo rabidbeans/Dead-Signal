@@ -375,3 +375,14 @@ can start new"; "the weapon change icon and reload icon mixed me up".
   (cash, guns, upgrades, perks, unlocked levels).
 - **Buttons**: RELOAD is a round amber button with the word on it that glows when the mag is at 25% or less; SWITCH GUN is a
   blue rectangle showing the icon of the gun you would switch TO (`hud.weapon()`), placed higher up.
+
+## 2026-10-16: zombies "randomly disappear"
+- ⚠️ **Culling**: three r170 culls a SkinnedMesh by `mesh.boundingSphere` (its own, computed ONCE from the skinned pose
+  on its first draw, before the skeleton is posed: a point at the feet), NOT by the geometry's sphere that assets.js used
+  to widen. Bodies blinked out whenever their feet left the screen. `makeCharacter` now sets
+  `o.boundingSphere = Sphere((0, 0.9, 0), 2.6)` on every skinned mesh (`/home/user/tools/pw/cull_test.mjs`: every bone
+  within 35% of it for a shambler, a brute and a boss).
+- The stuck-body rescue (`relocate`) only fires more than 18 m from every survivor (it was 4 m: bodies jammed at a maze
+  gap teleported away in plain sight).
+- `cullBehind` measures from the REARMOST living survivor, not the lead (co-op: things vanished beside a teammate behind).
+- Past 26 corpses the one furthest from every survivor is removed, not the oldest.

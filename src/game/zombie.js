@@ -111,7 +111,8 @@ export class Zombie {
     if (this.stuckT > 3) {
       const moved = Math.hypot(this.x - (this.sx ?? this.x), this.z - (this.sz ?? this.z));
       this.sx = this.x; this.sz = this.z; this.stuckT = 0;
-      if (moved < 0.35 && dist > 4 && this.state === 'walk' && !this.wander && !this.idle && !this.boss) this.game.relocate(this);
+      // (only when nobody can see it: further than any screen reaches from every survivor - it used to vanish in plain sight)
+      if (moved < 0.35 && dist > 18 && this.state === 'walk' && !this.wander && !this.idle && !this.boss) this.game.relocate(this);
     }
     let want = 0, dirx = 0, dirz = 0;
     if (best) {

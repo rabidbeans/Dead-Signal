@@ -108,12 +108,11 @@ export function makeCharacter(name) {
       o.material = mat;
       o.castShadow = true;
       o.receiveShadow = true;
-      if (!o.geometry.userData.sphereSet) {      // animated bodies swing far out of their bind pose
-        o.geometry.computeBoundingSphere();
-        o.geometry.boundingSphere.center.y = 0.9;
-        o.geometry.boundingSphere.radius = 2.4;
-        o.geometry.userData.sphereSet = true;
-      }
+      // ⚠️ three r170 culls a SkinnedMesh by its OWN boundingSphere (not the geometry's), computed ONCE from the skinned
+      // pose the first time it is drawn - before the skeleton has been posed, so it came out as a point at the feet and
+      // a body vanished whenever its feet left the screen (Sam: "zombies will just randomly disappear"). Give every
+      // body a fixed sphere big enough for any pose (an arm swing, a lunge, lying dead).
+      o.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.9, 0), 2.6);
       o.frustumCulled = true;
       mesh = o;
     }
