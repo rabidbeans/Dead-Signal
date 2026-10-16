@@ -201,6 +201,7 @@ export class HUD {
   toast(text) {
     this.el.toast.textContent = text;
     this.el.toast.classList.remove('on');
+    this.el.toast.classList.toggle('long', text.length > 40);
     void this.el.toast.offsetWidth;
     this.el.toast.classList.add('on');
   }

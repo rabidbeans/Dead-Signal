@@ -90,7 +90,23 @@ export class BossFX {
   event(e) {
     const g = this.game;
     const z = g.zombies.get(e.id);
-    if (e.a === 'lane') {
+    if (e.a === 'wind') {
+      if (z) { z.anim.move = e.m; z.anim.moveT = 0; }
+    } else if (e.a === 'overtime') {
+      if (z) { z.overtime = true; z.char.material.userData.uniforms.uTint.value.multiplyScalar(1.08); z.anim.springs.headX.kick(-20); }
+      g.hud.toast('The Foreman is on overtime: faster swings!');
+      if (z) audio.zombie('scream', z.x, z.z, 1.3);
+    } else if (e.a === 'mutate') {
+      if (z) {
+        z.mut = e.n;
+        z.char.root.scale.setScalar(z.baseScale * 1.07 ** e.n);
+        z.anim.roar = 1.2; z.flash = 1;
+        audio.zombie('scream', z.x, z.z, 1.6);
+        for (let i = 0; i < 30; i++) g.fx.glow.emit({ x: z.x + (Math.random() - 0.5) * 1.5, y: 0.5 + Math.random() * 2.5, z: z.z + (Math.random() - 0.5) * 1.5, vx: (Math.random() - 0.5) * 3, vy: 1 + Math.random() * 2, vz: (Math.random() - 0.5) * 3, life: 0.9, s0: 0.25, s1: 0.05, r: 0.6, g: 1, b: 0.2, a0: 0.9, a1: 0 });
+      }
+      g.cam.trauma(0.35);
+      g.hud.toast('Subject Omega is mutating!');
+    } else if (e.a === 'lane') {
       // the Warden's (and the berserk Omega's) charge: a red lane flashes where he is about to go
       const m = this.take('lane');
       m.position.set(e.x, 0.06, e.z);
@@ -108,7 +124,7 @@ export class BossFX {
       r.material.color.set(e.c ?? 0xff2a1a); d.material.color.set(e.c ?? 0xff2a1a);
       this.tele.push({ m: r, t: 0, dur: e.dur, pulse: true }, { m: d, t: 0, dur: e.dur, fill: e.r });
     } else if (e.a === 'bile') {
-      if (z) audio.zombie('scream', z.x, z.z, 1);
+      if (z) { audio.zombie('scream', z.x, z.z, 1); z.anim.strike = 1; }
       e.t.forEach(([tx, tz], i) => {
         const m = this.globMeshes.find((q) => !q.visible) || this.globMeshes[0];
         m.visible = true;
@@ -116,7 +132,7 @@ export class BossFX {
         this.event({ a: 'ring', x: tx, z: tz, r: 1.9, dur: e.dur + i * 0.12, c: 0x6aff2a });
       });
     } else if (e.a === 'cleaver') {
-      if (z) audio.play('slide', { x: z.x, z: z.z, vol: 0.9, rate: 0.7 });
+      if (z) { audio.play('slide', { x: z.x, z: z.z, vol: 0.9, rate: 0.7 }); z.anim.throwT = 1; }
       for (const [dx, dz] of e.d) {
         const m = this.cleaverMeshes.find((q) => !q.visible) || this.cleaverMeshes[0];
         m.visible = true;
@@ -125,6 +141,7 @@ export class BossFX {
     } else if (e.a === 'leap') {
       if (z) { z.leap = { x0: e.x0, z0: e.z0, x1: e.x1, z1: e.z1, t: 0, dur: e.dur }; audio.zombie('scream', z.x, z.z, 1.2); }
     } else if (e.a === 'slam') {
+      if (z) z.anim.strike = 1;
       this.wave(e.x, e.z, e.r, 0xffb040, 0.55);
       for (let i = 0; i < 40; i++) {
         const a = Math.random() * 6.283, r = Math.random() * 1.5;
@@ -135,12 +152,13 @@ export class BossFX {
       g.cam.trauma(Math.max(0.25, 0.8 - d * 0.04));
       buzz([60]);
     } else if (e.a === 'scream') {
+      if (z) z.anim.roar = 1.5;
       this.wave(e.x, e.z, 10, 0xb04aff, 1.2);
       audio.zombie('scream', e.x, e.z, 1.5);
       g.cam.trauma(0.35);
       g.hud.toast('It is calling the horde!');
     } else if (e.a === 'enrage') {
-      if (z) { z.enraged = true; z.char.material.userData.uniforms.uTint.value.setRGB(1.5, 0.55, 0.5); }
+      if (z) { z.enraged = true; z.anim.roar = 1.5; z.char.material.userData.uniforms.uTint.value.setRGB(1.5, 0.55, 0.5); }
       g.hud.banner('BERSERK', 'Subject Omega is enraged', 2.2);
       audio.zombie('scream', e.x, e.z, 1.6);
       g.cam.trauma(0.5);
@@ -255,15 +273,22 @@ export class BossBrain {
     const move = MOVES[z.type][0];
     if (z.enraged && this.cd2 <= 0 && dist > 4 && dist < 15) { this.cd2 = 5.5; return this.startCharge(best, dist); }
     if (this.cd > 0) return false;
+    const ot = z.overtime ? 0.7 : 1;      // the Foreman's overtime
     if (move === 'charge' && dist > 4.5 && dist < 16) { this.cd = 6 + Math.random() * 2; return this.startCharge(best, dist); }
     if (move === 'bile' && dist > 3 && dist < 18) { this.cd = 4.5 + Math.random(); return this.begin('bileWind', { tx: best.x, tz: best.z }); }
     if (move === 'cleaver' && dist > 2.5 && dist < 17) { this.cd = 3.2 + Math.random(); return this.begin('cleaverWind', { tx: best.x, tz: best.z }); }
-    if (move === 'leap' && dist > 3.5 && dist < 14) { this.cd = 5.5 + Math.random() * 1.5; return this.startLeap(best); }
+    if (move === 'leap' && dist > 3.5 && dist < 14) { this.cd = (5.5 + Math.random() * 1.5) * ot; return this.startLeap(best); }
     if (move === 'scream') { this.cd = 10 + Math.random() * 2; return this.begin('scream', {}); }
     return false;
   }
 
-  begin(name, o) { this.act = { name, t: 0, ...o }; this.z.setState('windup'); this.face(o.tx, o.tz); return true; }
+  begin(name, o) { this.act = { name, t: 0, ...o }; this.z.setState('windup'); this.face(o.tx, o.tz); this.wind(name); return true; }
+  // every machine poses the wind-up of the move that is coming; the boss says something about it
+  wind(name) {
+    const m = { bileWind: 'bile', cleaverWind: 'cleaver', scream: 'scream', chargeWind: 'charge', leapWind: 'leap' }[name] || name;
+    this.emit({ a: 'wind', m });
+    this.z.game.speech?.hostLine(this.z, m, 0.7);
+  }
   end(rest = 0) { this.act = rest ? { name: 'rest', t: 0, dur: rest } : null; this.z.setState(rest ? 'stagger' : 'walk'); this.z.staggerFor = rest; return true; }
   face(tx, tz) { if (tx !== undefined) this.z.face = Math.atan2(tx - this.z.x, tz - this.z.z); }
   emit(e) { const g = this.z.game; e.k = 'boss'; e.id = this.z.id; g.emit(e); g.bossFx.event(e); }
@@ -277,6 +302,7 @@ export class BossBrain {
     const len = Math.min(16, dist + 4);
     this.act = { name: 'chargeWind', t: 0, dx, dz, len };
     z.setState('windup');
+    this.wind('charge');
     z.face = Math.atan2(dx, dz);
     this.emit({ a: 'lane', x: +z.x.toFixed(2), z: +z.z.toFixed(2), dx: +dx.toFixed(3), dz: +dz.toFixed(3), len: +len.toFixed(1), dur: 0.95 });
     return true;
@@ -328,6 +354,7 @@ export class BossBrain {
     const to = g.world.col.resolve(best.x, best.z, 0.6);
     this.act = { name: 'leapWind', t: 0, x1: to.x, z1: to.z };
     z.setState('windup');
+    this.wind('leap');
     this.face(to.x, to.z);
     this.emit({ a: 'ring', x: +to.x.toFixed(2), z: +to.z.toFixed(2), r: 4.5, dur: 1.5 });
     return true;
@@ -363,55 +390,5 @@ export class BossBrain {
     }
     if (a.t > 1.2) return this.end(0);
     return true;
-  }
-}
-
-// ---------------------------------------------------------------- what they wear --
-// A little kit per boss, hung on the skeleton so it moves with them: the Warden's riot helmet, the Butcher's cleaver,
-// the Foreman's yellow hard hat, Omega's burning eyes. (Patient Zero wears his hospital gown and nothing else.)
-export function dressBoss(z) {
-  const gear = z.def.gear;
-  if (!gear) return;
-  const b = z.rig.b;
-  z.char.root.updateMatrixWorld(true);
-  const head = b.head, hand = b.hand_R || b.fingers_R;
-  const at = (bone, obj, up = 0, fwd = 0) => {
-    bone.getWorldPosition(_v);
-    const s = z.char.root.scale.x;
-    const f = new THREE.Vector3(Math.sin(z.face), 0, Math.cos(z.face));
-    obj.position.set(_v.x + f.x * fwd * s, _v.y + up * s, _v.z + f.z * fwd * s);
-    obj.rotation.y = z.face;
-    obj.scale.setScalar(s);
-    z.game.scene.add(obj);
-    bone.attach(obj);
-  };
-  if (gear === 'helmet' && head) {
-    const m = new THREE.Mesh(new THREE.SphereGeometry(0.135, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.58), new THREE.MeshStandardMaterial({ color: 0x1a2a4a, metalness: 0.3, roughness: 0.35 }));
-    const visor = new THREE.Mesh(new THREE.SphereGeometry(0.14, 16, 8, -0.9, 1.8, Math.PI * 0.42, Math.PI * 0.25), new THREE.MeshStandardMaterial({ color: 0x88aacc, transparent: true, opacity: 0.45, roughness: 0.1, metalness: 0.2 }));
-    visor.rotation.y = Math.PI / 2;
-    const g = new THREE.Group(); g.add(m, visor);
-    at(head, g, 0.07, 0.01);
-  }
-  if (gear === 'hardhat' && head) {
-    const yellow = new THREE.MeshStandardMaterial({ color: 0xffc81a, roughness: 0.4 });
-    const g = new THREE.Group();
-    g.add(new THREE.Mesh(new THREE.SphereGeometry(0.135, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.5), yellow));
-    const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.015, 20), yellow);
-    g.add(brim);
-    at(head, g, 0.085, 0.0);
-  }
-  if (gear === 'cleaver' && hand) {
-    const g = new THREE.Group();
-    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.02, 0.3).translate(0, 0, 0), new THREE.MeshStandardMaterial({ color: 0xd8dde2, metalness: 0.9, roughness: 0.3 }));
-    const bl2 = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.012, 0.3).translate(0.1, 0, 0.05), blade.material);
-    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.022, 0.16, 8).rotateX(Math.PI / 2).translate(0, 0, -0.2), new THREE.MeshStandardMaterial({ color: 0x5a3018 }));
-    g.add(bl2, handle);
-    at(hand, g, -0.05, 0.05);
-  }
-  if (gear === 'eyes' && head) {
-    const mat = new THREE.MeshBasicMaterial({ color: 0xff3a1a, toneMapped: false });
-    const g = new THREE.Group();
-    for (const sx of [-1, 1]) { const e = new THREE.Mesh(new THREE.SphereGeometry(0.018, 8, 6), mat); e.position.set(sx * 0.035, 0.035, 0.085); g.add(e); }
-    at(head, g, 0, 0);
   }
 }

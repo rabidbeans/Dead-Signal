@@ -193,7 +193,37 @@ def cloth_masks(F, spec, hard=True):
     m['shoes'] = shoes
     gl = o.get('gloves')
     m['gloves'] = ((R['hand'] > 0.5) & (F.arm_t > 1.9)).astype(float) if gl else np.zeros(n)
-    m['cloth'] = np.clip(m['shirt'] + m['pants'] + m['shoes'] + m['vest'] + m['gloves'], 0, 1)
+    # a butcher's apron: the front of the body from the chest to below the knee, a strap round the neck
+    ap = o.get('apron')
+    apron = np.zeros(n)
+    if ap:
+        sy = F.rig.head('spine03')[1]
+        front = (-(P[:, 1] - sy) > -0.02) & (-F.N[:, 1] > 0.05)
+        top = F.neckz - ap.get('top', 0.2)
+        knee = F.rig.head('shin_L')[2]
+        a = front & (F.z < top + jit) & (F.z > knee + ap.get('drop', 0.04) + jit * 2) & (F.armw < 0.35) & (R['head'] < 0.3)
+        # a narrow bib above the waist, the full skirt below it
+        half = np.where(F.z > F.waist, ap.get('bib', 0.12), ap.get('width', 0.24))
+        a &= np.abs(P[:, 0]) < half + jit
+        strap = (F.z >= top - 0.01) & (F.z < F.neckz + 0.02) & (np.abs(np.abs(P[:, 0]) - 0.075) < 0.02) & (F.armw < 0.3) & (R['head'] < 0.4)
+        tie = (np.abs(F.z - (F.waist - 0.02)) < 0.018) & (R['torso'] > 0.4) & (F.armw < 0.3)
+        apron = (a | strap | tie).astype(float)
+    m['apron'] = apron
+    # restraints: leather straps round the chest, the belly, the arms and the legs, with buckles
+    st = o.get('straps')
+    straps = np.zeros(n)
+    if st:
+        w = st.get('w', 0.022)
+        band = np.zeros(n, bool)
+        for zz in (F.waist + 0.06, F.waist + 0.24):
+            band |= (np.abs(F.z - zz) < w) & (R['torso'] > 0.4) & (F.armw < 0.4)
+        for t in (0.42, 0.85, 1.55):
+            band |= (np.abs(F.arm_t - t) < w * 1.2) & (F.armw > 0.5) & (R['hand'] < 0.3)
+        for t in (0.35, 1.25):
+            band |= (np.abs(F.leg_t - t) < w * 1.2) & (F.legw > 0.5)
+        straps = band.astype(float)
+    m['straps'] = straps
+    m['cloth'] = np.clip(m['shirt'] + m['pants'] + m['shoes'] + m['vest'] + m['gloves'] + m['apron'] + m['straps'], 0, 1)
     # hair cap
     hr = o.get('hair')
     hair = np.zeros(n)
@@ -231,7 +261,41 @@ def inflate(V, Nrm, F, spec):
     d += m['vest'] * 0.012
     d = np.maximum(d, m['shoes'] * 0.011)
     d = np.maximum(d, m['gloves'] * 0.003)
+    d += m['apron'] * 0.014 + m['straps'] * 0.009
     d += m['hair'] * spec['outfit'].get('hair', {}).get('volume', 0.006)
+    return V + Nrm * d[:, None]
+
+
+def bulk_body(V, Nrm, F, bulk):
+    """Monsters are people pushed out of shape: a bloated belly, a mutated arm, a hunched back, a bull neck.
+    Displacement along the normal (metres), weighted by the skin's region weights so the rig still fits."""
+    P, R = F.P, F.R
+    x = P[:, 0]
+    sy = F.rig.head('spine03')[1]
+    fwd = -(P[:, 1] - sy)
+    d = np.zeros(len(P))
+    g = lambda u: np.exp(-u * u)
+    for b in bulk:
+        k, amt = b['kind'], b['amt']
+        side = b.get('side')
+        sidew = np.ones(len(P)) if not side else smooth(-0.02, 0.02, x if side == 'L' else -x)
+        if k == 'belly':
+            w = (R['torso'] + 0.4 * R['uleg']) * g((F.z - (F.waist - 0.04)) / 0.16) * smooth(-0.03, 0.09, fwd) * g(x / 0.2)
+        elif k == 'arm':
+            w = F.armw * (0.55 + 0.45 * smooth(0.4, 1.3, F.arm_t)) * (1 - 0.5 * R['hand'])
+        elif k == 'shoulders':
+            w = (R['torso'] + R['uarm'] + R['neck'] * 0.5) * g((F.z - (F.neckz - 0.09)) / 0.11) * g((np.abs(x) - 0.16) / 0.11)
+        elif k == 'hump':
+            w = R['torso'] * g((F.z - (F.neckz - 0.16)) / 0.13) * smooth(0.0, -0.08, fwd) * g(x / 0.14)
+        elif k == 'neck':
+            w = R['neck'] + 0.5 * R['torso'] * g((F.z - F.neckz) / 0.06)
+        elif k == 'chest':
+            w = R['torso'] * g((F.z - (F.neckz - 0.2)) / 0.12) * smooth(-0.02, 0.08, fwd)
+        elif k == 'legs':
+            w = F.legw * (1 - smooth(1.6, 1.9, F.leg_t))
+        else:
+            continue
+        d += amt * w * sidew * (1 - R['eye'])
     return V + Nrm * d[:, None]
 
 
@@ -413,7 +477,15 @@ def sculpt(F, m, spec):
         lip = np.exp(-((dist - jag) / (r * 0.18)) ** 2)
         chunks = fbm(P * 160, 2, seed=50) * 0.0015
         d += -crater * (dep + chunks) + lip * 0.0016
-    hm = {'holes': holes.astype(float), 'rim': rim.astype(float)}
+    # pustules: swollen boils across the skin (Subject Omega)
+    pu = spec.get('pustules', 0.0)
+    pust = np.zeros(len(P))
+    if pu:
+        f1p, _ = worley(P * 16, seed=77)
+        pust = smooth(0.13, 0.0, f1p) * smooth(0.1, 0.5, fbm(P * 3, 2, seed=78)) * (1 - m['cloth'])
+        d += pust * 0.007 * pu
+    d += m['straps'] * (0.0015 + 0.001 * np.sin(F.z * 600))
+    hm = {'holes': holes.astype(float), 'rim': rim.astype(float), 'pust': pust}
     return d, hm
 
 
@@ -512,7 +584,7 @@ def paint(F, m, hm, d, cav, spec):
         # weave and wear
         k = k * (1 + perlin(P * 300, seed=seed) * 0.05 + fbm(P * 8, 3, seed=seed + 1) * 0.14)[:, None]
         return k
-    for key, sub in (('pants', 'pants'), ('shirt', 'shirt'), ('vest', 'vest'), ('shoes', 'shoes'), ('gloves', 'gloves')):
+    for key, sub in (('pants', 'pants'), ('shirt', 'shirt'), ('vest', 'vest'), ('shoes', 'shoes'), ('gloves', 'gloves'), ('apron', 'apron'), ('straps', 'straps')):
         sc = o.get(sub) or (o.get('gown') if key == 'shirt' else None)
         if sc is None or not m[key].any():
             continue
@@ -540,6 +612,13 @@ def paint(F, m, hm, d, cav, spec):
     # cloth folds darken in the creases
     shade = np.clip(1 + d * 28, 0.72, 1.1)
     clothcol *= shade[:, None]
+    if o.get('apron'):
+        # a butcher's apron is a record of the day: smears, splashes and handprints
+        st = smooth(-0.1, 0.45, fbm(P * 7, 4, seed=140)) + smooth(0.55, 0.75, fbm(P * 22, 2, seed=141)) * 0.6
+        clothcol = mix(clothcol, hexc('#3e100c'), np.clip(st * 0.8, 0, 1) * m['apron'] * o['apron'].get('blood', 0.8))
+    if o.get('straps'):
+        bk = (m['straps'] > 0.5) & (np.abs(P[:, 0]) < 0.025) & (F.fwd > 0)
+        clothcol = mix(clothcol, hexc('#8a8a84'), bk.astype(float) * 0.95)
     holes = hm['holes']
     col = mix(col, clothcol, cl * (1 - holes))
     col = mix(col, col * 0.55, hm['rim'] * cl)      # frayed rim is darker
@@ -553,12 +632,20 @@ def paint(F, m, hm, d, cav, spec):
     col = mix(col, hexc('#2b0d0b'), soak * 0.85)
     fresh = np.clip(blood_fresh, 0, 1)
     fresh = smooth(0.12, 0.55, fresh)        # blood has an edge; no pink wash
-    wet = mix(np.tile(hexc('#33100c'), (n, 1)), np.tile(hexc('#1f0806'), (n, 1)), smooth(0.0, 0.5, fbm(P * 25, 2, seed=96)))
+    b1, b2 = spec.get('bile', ('#33100c', '#1f0806'))      # (Patient Zero drools green bile, not blood)
+    wet = mix(np.tile(hexc(b1), (n, 1)), np.tile(hexc(b2), (n, 1)), smooth(0.0, 0.5, fbm(P * 25, 2, seed=96)))
     col = mix(col, wet, fresh * 0.95)
     # dirt on skin too
     col = mix(col, col * np.array([0.62, 0.56, 0.48]), np.clip(grime * (1 - cl) * 0.6, 0, 0.6))
     # cavity: creases and the gaps between fingers go dark
     col *= np.clip(1 - cav * (0.75 - 0.5 * cl * (1 - holes)), 0.35, 1)[:, None]
+    # glowing veins and boils (Subject Omega): bright enough to bloom under the street lamps
+    gl_ = sk.get('glow')
+    if gl_:
+        f1g, f2g = worley(P * 30, seed=170)
+        gv = smooth(0.07, 0.0, f2g - f1g) * smooth(-0.1, 0.4, fbm(P * 4, 2, seed=171)) * (1 - cl)
+        col = mix(col, hexc(gl_), np.clip(gv * 1.2, 0, 1))
+        col = mix(col, hexc(sk.get('boil', gl_)), np.clip(hm.get('pust', 0) * 1.4, 0, 1))
     # eyes
     eye = F.R['eye']
     if eye.any():
@@ -585,6 +672,11 @@ def paint(F, m, hm, d, cav, spec):
     rough = np.where(dt_['buttons'] > 0.5, 0.35, rough)
     rough = np.where(dt_['sole'] > 0.5, 0.75, rough)
     rough = np.where(dt_['badge'] > 0.5, 0.3, rough)
+    rough = np.where(m['straps'] > 0.5, 0.5, rough)
+    if o.get('apron'):
+        rough = np.where(m['apron'] > 0.5, 0.55, rough)
+    if spec.get('pustules'):
+        rough = np.where(hm['pust'] > 0.3, 0.2, rough)
     rough = rough * (1 - fresh * 0.75) + fresh * 0.22
     rough = rough * (1 - soak * 0.25)
     rough = np.where(eye > 0.5, 0.2, rough)
@@ -894,6 +986,12 @@ def build(name, preview=False):
     base = make_mesh(name + '_base', Vall, faces, loops_uv)
     for p in base.data.polygons:
         p.use_smooth = True
+    if spec.get('bulk'):
+        V0 = Vall.copy()
+        Vall = bulk_body(Vall, normals_of(base), Field(Vall, normals_of(base), R, rig), spec['bulk'])
+        base.data.vertices.foreach_set('co', Vall.ravel())
+        base.data.update()
+        log('bulk max', round(float(np.linalg.norm(Vall - V0, axis=1).max()), 4), 'verts moved >1cm', int((np.linalg.norm(Vall - V0, axis=1) > 0.01).sum()))
     # region weights travel with the mesh through subdivision
     RA = np.stack([R[k] for k in REG_ORDER], 1)
     for i in range(0, len(REG_ORDER), 4):

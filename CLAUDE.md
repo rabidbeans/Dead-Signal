@@ -386,3 +386,43 @@ can start new"; "the weapon change icon and reload icon mixed me up".
   gap teleported away in plain sight).
 - `cullBehind` measures from the REARMOST living survivor, not the lead (co-op: things vanished beside a teammate behind).
 - Past 26 corpses the one furthest from every survivor is removed, not the oldest.
+
+## 2026-10-16: the bosses built in Blender, a walk each, and the dead talk
+Sam: "all of the zombies, the boss zombies specifically, are designed in Blender and have unique looks and traits and
+have specific and original ways they move, act, and have funny lines that are basically zombie puns."
+- **Bodies**: `variants.py` b_warden / b_patientzero / b_butcher / b_foreman / b_omega (build_all_chars.sh's last loop:
+  11k tris, 1024 maps). build_human.py gained `bulk` (belly, arm [side], shoulders, hump, neck, chest, legs: the
+  silhouette pushed out along the normals), an `apron` and restraint `straps` garment, `pustules`, `bile` (green instead
+  of blood) and `skin.glow/boil` (Omega's glowing veins). ⚠️ The Blender preview camera frames a normal-height person: a
+  boss's head is cut off in qa/b_*_front.png. Judge them in the game (`boss_look.mjs`).
+- **Gear**: `tools/blender/boss_gear.py` -> `props/boss_gear.glb` (riot_helmet, riot_shield, baton, iv_pole, cleaver,
+  hardhat, sledgehammer, shackle, chain_link, canister; axis conventions at the top of the script). `src/game/bossgear.js`
+  `BossKit`: worn/gripped things are placed once on the rest pose and parented to a bone; the shield, the IV pole (stands
+  on the ground, leans into the hand), the sledgehammer (shoulder carry -> overhead -> slammed into the ground, blended
+  by attack/strike) and Omega's chains (a little rope sim) are placed every frame from bone world positions; dropped
+  flat on death. Loaded per level in main.js (`BOSS_MODELS`, `loadBossGear`); warmUp draws one of each piece.
+- **Walks** (`BOSS_STYLE` in rig.js, own arms, over the shared gait): Warden a stiff march, shield across the chest,
+  baton tapping it, overhead baton blow, head-down charge; Patient Zero bent double rolling his IV pole, a dragged foot,
+  violent spasms, the bile retch (arch back, heave forward); Butcher a wide waddle with a cleaver in each fist, scraping
+  them together, both-cleaver chop, sidearm throw; Foreman a stomping swagger (dust + a little shake per footfall), hammer
+  on the shoulder, two-handed overhead slam, tucked leap; Omega a gorilla knuckle-walk on the huge right arm, claw to the
+  chest, head jerks, the scream rears it up arms wide. Anim inputs: `attack`, `strike` (set when windup -> recover, or by
+  the bile/cleaver/slam events), `move` (a `wind` boss event at the start of every special), `charge`, `air`, `throwT`,
+  `roar`, `enraged`. The ordinary dead get a per-model walk tweak (`MODEL_GAIT` in zombie.js: the elder bent and
+  shuffling, the burned with seared arms out front, the hoodie head-down...).
+- **Traits** (host, zombie.js): Warden `shield: 0.3` (bullets from the front within ±70°, not while staggered or charging;
+  hp 1500 -> 1150 to pay for it; `blocks()` draws sparks + clang on every machine); Patient Zero `regen` 0.6%/s after 2.5 s
+  unshot; Butcher x1.35 speed when his target is under 40% hp, 1.6 knockback; Foreman `overtime` under 50% (wind-ups and
+  leaps 30% quicker, `overtime` event); Omega mutates at 75/50/25% (`mutate` event: x1.07 size, +8% speed each). The
+  trait is a toast 4.6 s after the boss banner (`TYPES.trait`).
+- **Speech** (`src/game/speech.js`): `LINES` (z: idle/wake/bite/die; `m`: per-model lines; each boss: spawn, each move,
+  bite, hurt (66/33%), idle taunts, die, Foreman `overtime`). Host only: `hostLine(z, cat, prob, delay)` -> `say` event
+  {id, c, i, d} -> `show()` everywhere. Horde: one line every 3.5-7 s from a body within 12 m of a survivor, never more
+  than 2 at once, 7 s per body; bosses 3 s cooldown, a taunt every 8-13 s. DOM bubbles (`.speech`, `.say`, `.say.boss`
+  with the boss's colour) projected over the head; overlapping bubbles stack.
+- QA (in /home/user/tools/pw): `boss_look.mjs <prefix> <level> [states] [views]` (spawns the boss and poses it by hand:
+  walkA, wind, strike, special, dead; views q, side, back, top, game), `speech_shot.mjs <prefix> <query> <n> <secs>`
+  (bot plays, screenshots with the HUD, prints every line said). ⚠️ Run QA against a BUILD (`npx vite build --outDir
+  /tmp/dsdist` + `python3 -m http.server 4174 -d /tmp/dsdist`; both scripts default to :4174): an edit under the dev
+  server reloads the page mid-run ("window.__game is not a function"). A one-frame black screenshot under SwiftShader
+  was traced to capture timing (no NaN anywhere in the scene).

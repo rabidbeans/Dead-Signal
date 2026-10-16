@@ -8,12 +8,14 @@ import { save } from './save.js';
 import { WEAPONS, WEAPON_IDS, BOUNTY } from './weapons.js';
 import { Zombie, TYPES } from './zombie.js';
 import { audio, buzz } from './audio.js';
-import { loadWeapon, tex, makeCharacter, ZOMBIES } from './assets.js';
+import { loadWeapon, tex, makeCharacter, ZOMBIES, BOSS_MODELS } from './assets.js';
 import { nightEnvironment, isTouch } from './engine.js';
 import { perlin1 } from './noise.js';
 import { dressGround, tickFog } from './dress.js';
 import { openSafeRoom, tickSafeRoom } from './kit.js';
 import { BossFX } from './boss.js';
+import { Speech } from './speech.js';
+import { gearPieces } from './bossgear.js';
 import { Objective, ring } from './objective.js';
 
 // picking a downed teammate back up: stand this close for this long
@@ -160,7 +162,7 @@ export class Game {
     }
     this.world.nav.build([...this.players.values()]);
     if (!this.opts.attract) {
-      this.buildHeli(); this.layMedkits(); this.bossFx = new BossFX(this); if (this.isHost) this.buildPopulation();
+      this.buildHeli(); this.layMedkits(); this.bossFx = new BossFX(this); this.speech = new Speech(this); if (this.isHost) this.buildPopulation();
       // the level's own objective at the junction (breakers, nests, the bulldozer) and its hazards (gas tanks, shells)
       this.objective = new Objective(this);
       if (cp > 0) this.objective.skip();
@@ -180,7 +182,8 @@ export class Game {
     const scene = this.scene, extra = [];
     const me = this.me;
     if (!this.opts.attract) {
-      ZOMBIES.forEach((name, i) => {
+      const boss = HOLDS.find((h) => h.boss)?.boss;
+      [...ZOMBIES, ...(boss ? [BOSS_MODELS[boss]] : [])].forEach((name, i) => {
         try {
           const c = makeCharacter(name);
           c.root.position.set(me.x - 2.5 + i * 0.55, 0, me.z - 3);
@@ -188,6 +191,7 @@ export class Game {
           extra.push(c);
         } catch (e) { /* a model that did not load is not worth stopping for */ }
       });
+      gearPieces().forEach((o, i) => { o.position.set(me.x - 2 + i * 0.4, 0, me.z - 4); scene.add(o); extra.push({ root: o, gear: true }); });
     }
     const saved = [];
     scene.traverse((o) => {
@@ -201,7 +205,7 @@ export class Game {
       this.engine.composer.render(0.016);
     } catch (e) { console.warn('warm-up', e); }
     for (const [o, v, f] of saved) { o.visible = v; o.frustumCulled = f; }
-    for (const c of extra) { scene.remove(c.root); c.mesh.skeleton?.dispose?.(); c.material.dispose(); }
+    for (const c of extra) { scene.remove(c.root); if (c.gear) continue; c.mesh.skeleton?.dispose?.(); c.material.dispose(); }
   }
 
   start() {
@@ -372,10 +376,13 @@ export class Game {
     if (H.boss && this.isHost) {
       // the boss comes down from the north end of the pad toward the survivors
       this.bossSpawned = true;
-      this.spawnZombie(H.boss, { x: 0, z: LV.finale === 'heli' ? L.lz.z - 8 : L.zMin + 9, seed: 424242 + this.level });
+      const bz = this.spawnZombie(H.boss, { x: 0, z: LV.finale === 'heli' ? L.lz.z - 8 : L.zMin + 9, seed: 424242 + this.level });
+      this.speech?.hostLine(bz, 'spawn', 1, 1.6);
     }
     const ob = !H.boss && this.objective?.custom ? this.objective.blurb() : null;
     this.hud.banner(H.boss ? TYPES[H.boss].name : H.title, H.boss ? (LV.finale === 'heli' ? 'Kill it to call in the bird' : 'Kill it to open the safe room') : ob || 'Hold the junction while the gate is cut open', 2.8);
+    // what makes this boss different, a moment after the banner
+    if (H.boss && TYPES[H.boss].trait) setTimeout(() => this.hud?.toast(TYPES[H.boss].trait), 4600);
     audio.play('sting', { vol: 0.7, jitter: 0 });
     if (this.role === 'host') this.net.broadcast({ t: 'phase', p: this.phase, hold: this.hold, opened: this.opened });
     this.refreshHud();
@@ -748,6 +755,8 @@ export class Game {
       if (z) { z.anim.doLurch(); if (!this.isHost) audio.zombie('scream', z.x, z.z, 1); }
     } else if (e.k === 'boss') {
       if (!this.isHost) this.bossFx?.event(e);
+    } else if (e.k === 'say') {
+      if (!this.isHost) this.speech?.show(e);
     } else if (e.k === 'zgone') {
       const z = this.zombies.get(e.id);
       if (z) { z.dispose(); this.zombies.delete(e.id); }
@@ -1029,6 +1038,7 @@ export class Game {
     this.heliTick(dt);
     tickSafeRoom(this.world.endRoom, dt);
     this.bossFx?.update(dt);
+    this.speech?.update(dt);
     this.objective?.update(dt);
     this.gateTick(dt);
     this.updateCutaway();
@@ -1149,6 +1159,7 @@ export class Game {
   dispose() {
     this.bank(false);          // quitting keeps what you looted
     this.objective?.dispose();
+    this.speech?.dispose();
     for (const z of this.zombies.values()) z.dispose();
     for (const p of this.players.values()) p.dispose();
     this.scene.clear();

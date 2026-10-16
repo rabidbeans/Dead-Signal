@@ -2,10 +2,11 @@
 // resulting positions, so a client's horde moves exactly like the host's.
 import * as THREE from 'three';
 import { makeCharacter, ZOMBIES } from './assets.js';
+import { BossKit } from './bossgear.js';
 import { Rig, ZombieAnim, mulberry } from './rig.js';
 import { audio } from './audio.js';
 import { LV } from './level.js';
-import { BossBrain, dressBoss } from './boss.js';
+import { BossBrain } from './boss.js';
 
 export const TYPES = {
   // research: shamblers 0.6-1.0 m/s turning 90-150°/s; lurchers burst to ~3 m/s for 0.4-0.8 s every 3-6 s
@@ -16,11 +17,25 @@ export const TYPES = {
   // is coming, and it is a big one.
   brute: { hp: 380, speed: [0.85, 1.05], turn: 2.0, dmg: 28, scale: 1.32, rad: 0.5, reach: 1.55, windup: 0.8, recover: 1.2, stagger: 0.12, knock: 0.22, models: ['z_trucker', 'z_burned', 'z_worker'] },
   // the bosses: one guarding the end of each level, each with its own special move (boss.js). Huge, and they barely flinch.
-  warden: { boss: true, name: 'THE WARDEN', hp: 1500, speed: [0.9, 1.0], turn: 2.2, dmg: 24, scale: 1.75, rad: 0.85, reach: 2.1, windup: 0.85, recover: 1.3, stagger: 0.03, knock: 0.06, models: ['z_cop'], anim: 'brute', tint: [1, 0.95, 0.95], gear: 'helmet' },
-  patientzero: { boss: true, name: 'PATIENT ZERO', hp: 3000, speed: [1.0, 1.1], turn: 2.4, dmg: 32, scale: 1.85, rad: 0.9, reach: 2.2, windup: 0.8, recover: 1.2, stagger: 0.02, knock: 0.05, models: ['z_patient'], anim: 'brute', tint: [0.75, 1.05, 0.75] },
-  butcher: { boss: true, name: 'THE BUTCHER', hp: 3800, speed: [1.0, 1.12], turn: 2.6, dmg: 34, scale: 1.85, rad: 0.9, reach: 2.2, windup: 0.75, recover: 1.1, stagger: 0.02, knock: 0.05, models: ['z_worker'], anim: 'brute', tint: [1.1, 0.85, 0.85], gear: 'cleaver' },
-  foreman: { boss: true, name: 'THE FOREMAN', hp: 4600, speed: [0.95, 1.05], turn: 2.3, dmg: 38, scale: 1.95, rad: 0.95, reach: 2.3, windup: 0.85, recover: 1.2, stagger: 0.02, knock: 0.04, models: ['z_trucker'], anim: 'brute', tint: [1.0, 0.95, 0.85], gear: 'hardhat' },
-  omega: { boss: true, name: 'SUBJECT OMEGA', hp: 5600, speed: [1.05, 1.15], turn: 2.6, dmg: 40, scale: 2.05, rad: 1.0, reach: 2.4, windup: 0.75, recover: 1.0, stagger: 0.01, knock: 0.03, models: ['z_burned'], anim: 'brute', tint: [0.9, 0.82, 1.05], gear: 'eyes' },
+  warden: { boss: true, name: 'THE WARDEN', trait: 'Riot shield: bullets from the front glance off. Flank him, or shoot him while he is dazed after a charge.', hp: 1150, speed: [0.9, 1.0], turn: 2.2, dmg: 24, scale: 1.7, rad: 0.85, reach: 2.1, windup: 0.85, recover: 1.3, stagger: 0.03, knock: 0.06, models: ['b_warden'], shield: 0.3 },
+  patientzero: { boss: true, name: 'PATIENT ZERO', trait: 'Hooked to his drip: he heals if you stop shooting. Keep the pressure on.', hp: 3000, speed: [1.0, 1.1], turn: 2.4, dmg: 32, scale: 1.7, rad: 0.9, reach: 2.2, windup: 0.8, recover: 1.2, stagger: 0.02, knock: 0.05, models: ['b_patientzero'], regen: 0.006 },
+  butcher: { boss: true, name: 'THE BUTCHER', trait: 'He smells blood: when you are hurt, he comes faster.', hp: 3800, speed: [1.0, 1.12], turn: 2.6, dmg: 34, scale: 1.8, rad: 0.9, reach: 2.2, windup: 0.75, recover: 1.1, stagger: 0.02, knock: 0.05, models: ['b_butcher'], tint: [1.04, 0.98, 0.98] },
+  foreman: { boss: true, name: 'THE FOREMAN', trait: 'Overtime: under half health he swings and leaps faster.', hp: 4600, speed: [0.95, 1.05], turn: 2.3, dmg: 38, scale: 1.85, rad: 0.95, reach: 2.3, windup: 0.85, recover: 1.2, stagger: 0.02, knock: 0.04, models: ['b_foreman'] },
+  omega: { boss: true, name: 'SUBJECT OMEGA', trait: 'It mutates as it is hurt: bigger and faster every quarter of its health.', hp: 5600, speed: [1.05, 1.15], turn: 2.6, dmg: 40, scale: 1.95, rad: 1.0, reach: 2.4, windup: 0.75, recover: 1.0, stagger: 0.01, knock: 0.03, models: ['b_omega'] },
+};
+
+// per body: how the person they were still shows in the walk (on top of the shambler/lurcher/runner/brute gait)
+const MODEL_GAIT = {
+  z_elder: (p) => { p.lean += 0.25; p.stride *= 0.8; p.headFwd += 0.15; p.limp ??= 'R'; },             // bent double, shuffling
+  z_jogger: (p, t) => { if (t !== 'runner') { p.stride *= 1.15; p.reach = 'none'; } p.sway *= 0.6; },  // still trying to jog
+  z_burned: (p) => { p.reach = 'both'; p.reachAmt = 1.1; p.jaw += 0.15; },                              // arms seared stiff out front
+  z_hoodie: (p) => { p.headFwd += 0.25; p.headTilt *= 0.4; p.shoulderDrop += 0.12; },                    // head down, slouched
+  z_nurse: (p) => { p.headTilt *= 1.6; p.reach = p.reach === 'none' ? 'R' : p.reach; },                 // head lolled right over
+  z_trucker: (p) => { p.sway *= 1.6; p.stride *= 0.9; p.lean -= 0.1; },                                  // a heavy roll
+  z_patient: (p) => { p.limp = p.limp || 'L'; p.timeScale *= 0.9; },                                    // a dragged leg
+  z_office: (p) => { p.reach = p.reach === 'none' ? 'L' : p.reach; p.shoulderDrop -= 0.1; },
+  z_cop: (p) => { p.lean -= 0.1; p.headFwd -= 0.05; },                                                   // still almost upright
+  z_worker: (p) => { p.limp = p.limp || 'R'; p.shoulderDrop += 0.15; },
 };
 
 export const SPEED_K = 1.1;      // everything walks 10% faster than the numbers below
@@ -39,8 +54,11 @@ export class Zombie {
     this.char = makeCharacter(this.model);
     const scale = (0.92 + r() * 0.16) * (this.def.scale || 1);
     this.char.root.scale.setScalar(scale);
+    this.baseScale = scale;
     this.rig = new Rig(this.char);
     this.anim = new ZombieAnim(this.rig, seed, this.def.anim || type);
+    // the ordinary dead move a little like who they were
+    if (!this.boss) MODEL_GAIT[this.model]?.(this.anim.p, type);
     // a little colour drift per body so a horde of the same model isn't clones
     const tint = 0.9 + r() * 0.16;
     const tk = this.def.tint || [1, 1, 1];
@@ -71,7 +89,10 @@ export class Zombie {
     // client interpolation buffer
     this.buf = [];
     this.place();
-    if (this.def.gear) dressBoss(this);
+    if (this.boss) { try { this.kit = new BossKit(this); } catch (e) { console.warn('boss kit', e); } }
+    this.prevState = this.state;
+    this.hitT = 99;          // seconds since it was last shot (Patient Zero's drip)
+    this.mut = 0;            // Omega's mutations so far
   }
 
   place() {
@@ -85,6 +106,9 @@ export class Zombie {
   think(dt, players) {
     if (this.state === 'dead') { this.deadT += dt; return; }
     this.stateT += dt;
+    this.hitT += dt;
+    // Patient Zero's drip: he heals while nobody is shooting him
+    if (this.def.regen && this.hitT > 2.5 && this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + this.maxHp * this.def.regen * dt);
     // nearest living player
     let best = null, bd = 1e9;
     for (const p of players) {
@@ -126,6 +150,8 @@ export class Zombie {
         if (f) { dirx = f.x; dirz = f.z; } else { dirx = tx / dist; dirz = tz / dist; }
       }
       want = this.speed * (this.enraged ? 1.45 : 1);
+      // the Butcher smells blood: a wounded survivor brings him on faster
+      if (this.type === 'butcher' && best.hp < best.maxHp * 0.4) want *= 1.35;
       // a long way behind its prey (someone ran past it): it hurries, so a horde builds up on your heels
       // (but the hurry never makes it faster than a survivor can jog: it catches up at the gates, not in the open)
       if (dist > 12 && !this.boss) want = Math.max(want, Math.min(want * 1.3, 3.1));
@@ -151,7 +177,7 @@ export class Zombie {
     if (this.bursting > 0) { this.bursting -= dt; want = this.def.burst * SPEED_K; }
     // states
     if (this.state === 'stagger') { want *= 0.15; if (this.stateT > this.staggerFor) this.setState('walk'); }
-    const reach = this.def.reach || ATTACK_RANGE, windup = this.def.windup || WINDUP;
+    const reach = this.def.reach || ATTACK_RANGE, windup = (this.def.windup || WINDUP) * (this.overtime ? 0.68 : 1);
     if (this.state === 'walk' && best && dist < reach) {
       this.setState('windup');
       this.game.emit({ k: 'windup', id: this.id });
@@ -159,7 +185,10 @@ export class Zombie {
     if (this.state === 'windup') {
       want = 0.3;
       if (this.stateT > windup) {
-        if (best && dist < reach + 0.35) this.game.hurtPlayer(best, this.def.dmg * (this.enraged ? 1.25 : 1), this);
+        if (best && dist < reach + 0.35) {
+          this.game.hurtPlayer(best, this.def.dmg * (this.enraged ? 1.25 : 1), this, this.type === 'butcher' ? 1.6 : undefined);
+          this.game.speech?.hostLine(this, 'bite', this.boss ? 0.45 : 0.1);
+        }
         this.setState('recover');
       }
     }
@@ -201,6 +230,7 @@ export class Zombie {
     if (!this.idle) return;
     this.idle = false;
     this.wander = null; this.home = null;
+    this.game.speech?.hostLine(this, 'wake', 0.1);
     this.game.wakeNear?.(this);
   }
 
@@ -208,7 +238,11 @@ export class Zombie {
   damage(dmg, dirx, dirz, crit, byId, kmul = 1) {
     if (!this.alive) return false;
     this.wake();
+    this.hitT = 0;
+    if (this.blocks(dirx, dirz)) dmg *= this.def.shield;     // the Warden's riot shield
+    const before = this.hp / this.maxHp;
     this.hp -= dmg;
+    if (this.boss && this.hp > 0) this.bossHurt(before, this.hp / this.maxHp);
     const kk = (this.def.knock ?? 1) * kmul;        // (a shotgun blast throws a body back: kmul > 1)
     this.knock.x += dirx * (crit ? 0.9 : 0.45) * 4 * kk;
     this.knock.z += dirz * (crit ? 0.9 : 0.45) * 4 * kk;
@@ -221,11 +255,46 @@ export class Zombie {
     return false;
   }
 
+  // the Warden's shield turns bullets that hit him from the front (not while he is dazed or charging)
+  blocks(dirx, dirz) {
+    if (!this.def.shield || this.state === 'stagger' || this.charging > 0 || this.state === 'dead') return false;
+    return dirx * Math.sin(this.face) + dirz * Math.cos(this.face) < -0.35;
+  }
+
+  // host: a boss crossing a health threshold
+  bossHurt(before, now) {
+    const g = this.game;
+    for (const th of [0.66, 0.33]) if (before > th && now <= th) g.speech?.hostLine(this, 'hurt', 1);
+    // the Foreman goes into overtime below half
+    if (this.type === 'foreman' && !this.overtime && now < 0.5) {
+      this.overtime = true;
+      const e = { k: 'boss', a: 'overtime', id: this.id }; g.emit(e); g.bossFx.event(e);
+      g.speech?.hostLine(this, 'overtime', 1);
+    }
+    // Omega mutates every quarter: bigger, faster
+    if (this.type === 'omega') {
+      const n = now < 0.25 ? 3 : now < 0.5 ? 2 : now < 0.75 ? 1 : 0;
+      if (n > this.mut) {
+        this.speed *= 1.08 ** (n - this.mut);
+        const e = { k: 'boss', a: 'mutate', id: this.id, n }; g.emit(e); g.bossFx.event(e);
+      }
+    }
+  }
+
   // ------------------------------------------------------------- visual --
   hitFx(dirx, dirz, crit) {
     // local frame: x = the zombie's left, z = forward
     const c = Math.cos(this.face), s = Math.sin(this.face);
     const lx = dirx * c - dirz * s, lz = dirx * s + dirz * c;
+    if (this.blocks(dirx, dirz)) {
+      // a bullet off the riot shield: sparks and a clang, no flinch
+      const g = this.game, s = this.char.root.scale.x;
+      const fx = Math.sin(this.face), fz = Math.cos(this.face);
+      g.fx.hard(this.x + fx * 0.55 * s, 1.0 * s, this.z + fz * 0.55 * s, fx, fz, dirx, dirz);
+      audio.play('hard', { x: this.x, z: this.z, vol: 0.55, rate: 1.4 + Math.random() * 0.3 });
+      this.blockedT = 0.15;
+      return;
+    }
     this.anim.hit(new THREE.Vector3(lx, 0, lz), crit ? 1.6 : 1);
     this.flash = 1;
   }
@@ -235,6 +304,7 @@ export class Zombie {
     this.state = 'dead';
     this.deadT = 0;
     this.hp = 0;
+    this.game.speech?.hostLine(this, 'die', this.boss ? 1 : 0.05);
     const c = Math.cos(this.face), s = Math.sin(this.face);
     const lz = dirx * s + dirz * c;          // + when shot from behind
     this.anim.deathDir = lz >= 0 ? 1 : -1;   // fall the way the bullet pushes
@@ -257,7 +327,15 @@ export class Zombie {
     const moved = Math.hypot(this.x - this.px, this.z - this.pz);
     const speed = dt > 0 ? moved / dt : 0;
     this.px = this.x; this.pz = this.z;
-    this.anim.attack += ((this.state === 'windup' ? 1 : 0) - this.anim.attack) * Math.min(1, dt * 10);
+    this.anim.attack += ((this.state === 'windup' ? 1 : 0) - this.anim.attack) * Math.min(1, dt * (this.boss ? 6 : 10));
+    // the blow lands: the swing follows through
+    if (this.prevState === 'windup' && this.state === 'recover') this.anim.strike = 1;
+    this.prevState = this.state;
+    if (this.state !== 'windup' && this.anim.strike < 0.05) this.anim.move = null;
+    if (this.charging > 0) this.charging -= dt;
+    this.anim.charge = Math.max(0, Math.min(1, this.charging > 0 ? 1 : this.anim.charge - dt * 3));
+    this.anim.air = this.leap ? 1 : Math.max(0, this.anim.air - dt * 4);
+    this.anim.enraged = !!this.enraged;
     // Posing 27 bones is the single biggest cost of the horde, so only what you can see is posed every
     // frame: the dead beyond the screen edge every few frames, the long-dead not at all.
     const me = this.game.me;
@@ -282,6 +360,7 @@ export class Zombie {
       root.rotation.set(d * (k * 1.45 - bounce), this.face, 0, 'YXZ');
       root.position.set(this.x, this.game.world.groundY(this.x, this.z) + 0.02 + k * 0.08, this.z);
       if (this.deadT > 30) { this.sunk += dt * 0.05; root.position.y -= this.sunk; }
+      this.kit?.update(dt);
       return;
     }
     let y = this.game.world.groundY(this.x, this.z);
@@ -295,9 +374,11 @@ export class Zombie {
     }
     root.position.set(this.x, y, this.z);
     root.rotation.set(0, this.face, 0);
+    this.kit?.update(dt);
   }
 
   dispose() {
+    this.kit?.dispose();
     this.game.scene.remove(this.char.root);
     this.char.material.dispose();
   }

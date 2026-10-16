@@ -6,7 +6,8 @@ import '@fontsource/ibm-plex-mono/500.css';
 import './style.css';
 import * as THREE from 'three';
 import { Engine, isTouch } from './game/engine.js';
-import { loadCharacters, loadProps, ZOMBIES, SURVIVORS, loadWeapon } from './game/assets.js';
+import { loadCharacters, loadProps, ZOMBIES, SURVIVORS, loadWeapon, BOSS_MODELS } from './game/assets.js';
+import { loadBossGear } from './game/bossgear.js';
 import { Game } from './game/game.js';
 import { HUD, escapeHtml } from './ui/hud.js';
 import { Input } from './game/input.js';
@@ -176,7 +177,9 @@ async function startGame(players, localId, opts = {}) {
   hud.reset();
   input.reset();
   document.activeElement?.blur?.();            // the join-code box must not keep the keyboard (or its keys)
-  await loadCharacters([...new Set(players.map((p) => p.model))]);   // survivors load when chosen
+  // survivors load when chosen, the level's boss and his kit with the level
+  const bossType = levelInfo(level)?.holds?.find((h) => h.boss)?.boss;
+  await Promise.all([loadCharacters([...new Set(players.map((p) => p.model)), ...(bossType ? [BOSS_MODELS[bossType]] : [])]), loadBossGear()]);
   shop.el.classList.add('hidden');
   game = new Game(engine, hud, input, net, { players, localId, checkpoint: opts.checkpoint || 0, level });
   await game.init();

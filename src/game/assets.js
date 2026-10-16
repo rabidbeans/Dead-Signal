@@ -14,6 +14,8 @@ const cache = new Map();
 
 export const ZOMBIES = ['z_office', 'z_patient', 'z_worker', 'z_hoodie', 'z_elder', 'z_cop', 'z_nurse', 'z_jogger', 'z_burned', 'z_trucker'];
 export const SURVIVORS = ['survivor_a', 'survivor_b'];
+// the five bosses: their own Blender bodies (tools/blender/variants.py b_*), loaded with the level that has them
+export const BOSS_MODELS = { warden: 'b_warden', patientzero: 'b_patientzero', butcher: 'b_butcher', foreman: 'b_foreman', omega: 'b_omega' };
 
 let maxAniso = 4;
 export function setAnisotropy(renderer) {
@@ -37,7 +39,7 @@ export function tex(path, { srgb = true, repeat = null } = {}) {
   return t;
 }
 
-function loadGLB(path) {
+export function loadGLB(path) {
   if (cache.has(path)) return cache.get(path);
   const p = new Promise((res, rej) => gltf.load(BASE + path, res, undefined, rej));
   cache.set(path, p);

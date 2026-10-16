@@ -8,3 +8,7 @@ done
 for v in survivor_a survivor_b; do
   LOW_TRIS=12000 BAKE=4096 FINAL=2048 $PY build_human.py $v --preview 2>&1 | grep "\[human\] wrote\|rror"
 done
+# the bosses: a little more detail (they are on screen big)
+for v in b_warden b_patientzero b_butcher b_foreman b_omega; do
+  LOW_TRIS=11000 BAKE=2048 FINAL=1024 $PY build_human.py $v --preview 2>&1 | grep "\[human\] wrote\|rror"
+done

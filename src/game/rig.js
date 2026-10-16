@@ -144,6 +144,18 @@ export class ZombieAnim {
       this.p.lean = 0.3 + r() * 0.1; this.p.stride = 0.36; this.p.reach = 'both'; this.p.reachAmt = 0.6;
       this.p.timeScale = 0.62 + r() * 0.1; this.p.limp = null; this.p.sway = 0.14; this.p.shoulderDrop = 0.1;
     }
+    // the five bosses each move their own way (BOSS_STYLE below)
+    this.style = BOSS_STYLE[kind] || null;
+    if (this.style) this.style.init(this.p, r);
+    this.strike = 0;       // 1 the moment a blow lands, decays (the follow-through of a swing)
+    this.move = null;      // a boss's special move being wound up ('bile', 'cleaver', 'leap', 'charge', 'scream')
+    this.moveT = 0;
+    this.charge = 0;       // >0 while charging
+    this.air = 0;          // >0 while leaping
+    this.throwT = 0;       // the Butcher's throw
+    this.roar = 0;         // Omega's scream
+    this.enraged = false;
+    this.stepEv = 0;       // +1 each time a foot lands (the Foreman's stomp reads it)
     this.phase = r();
     this.t = r() * 10;
     this.twitchT = 1 + r() * 4;
@@ -187,18 +199,26 @@ export class ZombieAnim {
     }
     for (const s of Object.values(S)) s.step(dt);
     this.lurch = Math.max(0, this.lurch - dt * 2.5);
+    this.strike = Math.max(0, this.strike - dt * 2.6);
+    this.throwT = Math.max(0, this.throwT - dt * 1.7);
+    this.roar = Math.max(0, this.roar - dt * 0.8);
+    this.moveT += dt;
+    if (this.style?.tick) this.style.tick(this, dt);
 
     if (this.dead > 0) { this.updateDeath(dt); return; }
 
     // gait phase advances by distance: one cycle = two steps
     const cycleLen = 1.05 * (p.stride / 0.33);
+    const ph0 = this.phase;
     this.phase = (this.phase + moved / cycleLen) % 1;
+    if (moved > 0 && (Math.floor(ph0 * 2) !== Math.floor(this.phase * 2))) this.stepEv++;
     const walk = Math.min(1, speed / 0.5);
     const ph = this.phase;
     const lean = p.lean + this.lurch * 0.35 + this.attack * 0.25;
 
     // limp: the bad leg's step is shorter and the foot drags
-    const o = { stride: p.stride * walk, knee: 0.9 * walk, bend: 0.12, lean, axis: X };
+    const sl = this.style?.legs;
+    const o = { stride: p.stride * walk, knee: 0.9 * walk * (sl?.knee ?? 1), bend: sl?.bend ?? 0.12, lean, axis: X };
     let phL = ph, phR = (ph + 0.5) % 1;
     const aL = legCycle(rig, 'L', phL, p.limp === 'L' ? { ...o, stride: o.stride * 0.55, knee: o.knee * 0.25 } : o);
     const aR = legCycle(rig, 'R', phR, p.limp === 'R' ? { ...o, stride: o.stride * 0.55, knee: o.knee * 0.25 } : o);
@@ -228,7 +248,8 @@ export class ZombieAnim {
     rig.rot('jaw', X, -(p.jaw + Math.max(0, Math.sin(this.t * 2.1)) * 0.12 + this.attack * 0.45));
     // arms
     const armSwing = (side) => Math.sin((side === 'L' ? phR : phL) * TAU) * (this.kind === 'runner' ? 0.9 : 0.25) * walk;
-    for (const side of ['L', 'R']) {
+    if (this.style) this.style.pose(this, { ph, phL, phR, walk, lean, aL, aR });
+    else for (const side of ['L', 'R']) {
       const sg = side === 'L' ? 1 : -1;
       const reaching = p.reach === 'both' || p.reach === side;
       const spring = side === 'L' ? S.armL.x : S.armR.x;
@@ -284,6 +305,162 @@ export class ZombieAnim {
     return k;
   }
 }
+
+// ------------------------------------------------------------ the bosses --
+// Each boss has its own body language on top of the shared zombie gait: what the arms do (all of it), how the legs
+// lift, how it holds its weapon, and how it winds up and lands its blows. Inputs set by the zombie (zombie.js) and the
+// boss's moves (boss.js): attack (0..1 the wind-up), strike (1 when the blow lands), move (which special is coming),
+// charge, air, throwT, roar, enraged.
+const smooth = (x) => x * x * (3 - 2 * x);
+const pulse = (t, period, width) => { const u = (t % period) / width; return u < 1 ? Math.sin(u * Math.PI) : 0; };
+
+// one arm, written as: lower it from the A-pose, swing it forward (-) or back (+), turn it in or out, bend the elbow
+function arm(rig, side, { down = 0.78, fwd = 0, twist = 0, elbow = 0, wrist = 0, fist = 0.4, elbowY = 0 }) {
+  const sg = side === 'L' ? 1 : -1;
+  rig.rot(`upperarm_${side}`, Z, -sg * down);
+  rig.rot(`upperarm_${side}`, X, fwd);
+  rig.rot(`upperarm_${side}`, Y, sg * twist);
+  rig.rot(`forearm_${side}`, X, -elbow);
+  rig.rot(`forearm_${side}`, Y, sg * elbowY);
+  rig.rot(`hand_${side}`, X, wrist);
+  rig.rot(`fingers_${side}`, X, fist);
+}
+
+// a two-handed overhead swing: raise -> hold -> chop through
+function chop(a) { return -2.7 * a.attack * (1 - a.strike) - 0.55 * a.strike; }
+
+export const BOSS_STYLE = {
+  // THE WARDEN: a riot cop who still walks the beat. Upright, a stiff measured march with the knees lifting, the
+  // shield held across the body on the left forearm, the baton low in the right hand tapping the shield as he comes.
+  // The swing is an overhead baton blow; the charge is head down behind the shield.
+  warden: {
+    legs: { knee: 1.35, bend: 0.08 },
+    init(p) { p.lean = 0.12; p.headFwd = 0.08; p.headTilt *= 0.25; p.stride = 0.36; p.timeScale = 0.72; p.limp = null; p.sway = 0.05; p.jaw = 0.08; p.shoulderDrop = 0; },
+    pose(a, g) {
+      const rig = a.rig, A = a.attack, K = a.strike, C = Math.min(1, a.charge * 3);
+      rig.rot('spine03', X, 0.25 * C);
+      rig.rot('neck', X, 0.3 * C);
+      // shield arm: forearm across the chest, raised higher in the charge
+      arm(rig, 'L', { down: 0.7, fwd: -0.75 - 0.35 * C, twist: -0.55, elbow: 1.35 + 0.1 * C, elbowY: 0.5, wrist: -0.2, fist: 1.1 });
+      // baton arm: low and forward; a tap on the shield every few seconds; an overhead blow
+      const tap = pulse(a.t, 3.6, 0.5) * (1 - A) * (1 - C);
+      arm(rig, 'R', { down: 0.75, fwd: -0.25 + Math.sin(g.phL * Math.PI * 2) * 0.12 * g.walk - 0.7 * tap + chop(a) * 0.95, twist: -0.6 * tap + 0.15 * A, elbow: 0.55 + 0.6 * tap - 0.3 * A, fist: 1.2 });
+      rig.rot('spine03', Y, -0.25 * A + 0.35 * K);
+    },
+  },
+
+  // PATIENT ZERO: tall, starved, bent nearly double. One hand on the IV pole he rolls along beside him, the other arm
+  // swinging dead, the left foot dragging, and every few seconds a violent spasm runs through him. The bile is
+  // brought up from the gut: he arches back with his mouth wide, then heaves forward.
+  patientzero: {
+    legs: { knee: 0.7, bend: 0.18 },
+    init(p, r) { p.lean = 0.72; p.headFwd = 0.5; p.headTilt = 0.38; p.stride = 0.3; p.timeScale = 0.66; p.limp = 'L'; p.sway = 0.13; p.jaw = 0.32; p.shoulderDrop = 0.2; p.spasmT = 1 + r() * 2; },
+    tick(a, dt) {
+      const p = a.p;
+      p.spasmT -= dt;
+      if (p.spasmT < 0) {
+        p.spasmT = 1.2 + a.r() * 2.6;
+        a.springs.spineY.kick((a.r() - 0.5) * 60);
+        a.springs.headZ.kick((a.r() - 0.5) * 70);
+        a.springs.shoulder.kick((a.r() - 0.5) * 50);
+        a.springs.armL.kick(30);
+      }
+    },
+    pose(a, g) {
+      const rig = a.rig, A = a.attack, K = a.strike;
+      const bile = a.move === 'bile' ? 1 : 0;
+      // the retch: arch back, head thrown back, jaw wide; then the heave forward
+      rig.rot('spine03', X, -0.7 * A * bile + 0.45 * K * bile);
+      rig.rot('spine02', X, -0.4 * A * bile);
+      rig.rot('neck', X, -0.7 * A * bile + 0.4 * K * bile);
+      rig.rot('jaw', X, -0.9 * Math.max(A * bile, K * bile));
+      // the pole hand at chest height out to the right
+      arm(rig, 'R', { down: 0.5, fwd: -0.55 + g.lean * 0.35, twist: 0.1, elbow: 1.05, wrist: 0.25, fist: 1.25 });
+      // the free arm: long and dead, a lagging pendulum, a claw swipe for the bite
+      const sw = Math.sin(g.phR * Math.PI * 2 - 0.9) * 0.35 * g.walk + a.springs.armL.x * 0.05;
+      arm(rig, 'L', { down: 0.86, fwd: sw + g.lean * 0.55 + (-1.9 * A + 0.9 * K) * (1 - bile), twist: 0.4 * A * (1 - bile), elbow: 0.1 + 0.3 * A, fist: 0.5 + 0.6 * A });
+    },
+  },
+
+  // THE BUTCHER: a heavy, rolling waddle on wide-set legs, chin up, a cleaver in each fist held out from the belly.
+  // Now and then he scrapes the blades together. The swing is both cleavers overhead and down; the throw is a
+  // sidearm whip of the right hand.
+  butcher: {
+    legs: { knee: 0.6, bend: 0.16, wide: 0.14 },
+    init(p) { p.lean = -0.06; p.headFwd = 0.02; p.headTilt *= 0.3; p.stride = 0.24; p.timeScale = 0.76; p.limp = null; p.sway = 0.24; p.jaw = 0.18; p.shoulderDrop = 0; },
+    pose(a, g) {
+      const rig = a.rig, A = a.attack, K = a.strike, T = a.throwT;
+      rig.rot('thigh_L', Z, 0.14); rig.rot('thigh_R', Z, -0.14);
+      rig.rot('foot_L', Z, -0.12); rig.rot('foot_R', Z, 0.12);
+      rig.rot('root', Y, Math.sin(g.ph * Math.PI * 2) * 0.12 * g.walk);
+      rig.rot('head', X, -0.15);
+      rig.rot('jaw', X, -Math.max(0, Math.sin(a.t * 5)) * 0.15);         // chewing
+      const sharpen = pulse(a.t + 2, 5.5, 1.1) * (1 - A) * (1 - T);
+      const scr = Math.sin(a.t * 22) * 0.12 * sharpen;
+      const throwArm = T > 0 ? -2.4 * smooth(Math.min(1, (1 - T) * 3)) * (T > 0.66 ? 1 : 0) + (T <= 0.66 ? -0.3 - 1.4 * T : 0) : 0;
+      for (const side of ['L', 'R']) {
+        const sg = side === 'L' ? 1 : -1;
+        const sw = Math.sin((side === 'L' ? g.phR : g.phL) * Math.PI * 2) * 0.1 * g.walk;
+        arm(rig, side, {
+          down: 0.5 - 0.2 * sharpen, fwd: -0.35 + sw + chop(a) - 0.4 * sharpen + (side === 'R' ? throwArm : 0),
+          twist: -0.75 * sharpen + sg * scr + (side === 'R' && T > 0 ? -0.6 * T : 0), elbow: 0.95 - 0.5 * A + 0.3 * sharpen, wrist: 0.2, fist: 1.25,
+        });
+      }
+    },
+  },
+
+  // THE FOREMAN: the swagger of a man who owns the site. Upright, chest out, a heavy stomping stride that kicks up
+  // dust, the sledgehammer resting on his right shoulder and the free arm swinging wide. The blow is a two-handed
+  // overhead slam; the leap is arms up, knees tucked.
+  foreman: {
+    legs: { knee: 1.15, bend: 0.1 },
+    init(p) { p.lean = 0.04; p.headFwd = 0.1; p.headTilt *= 0.25; p.stride = 0.42; p.timeScale = 0.68; p.limp = null; p.sway = 0.11; p.jaw = 0.06; p.shoulderDrop = 0; },
+    pose(a, g) {
+      const rig = a.rig, A = Math.max(a.attack, a.air), K = a.strike;
+      rig.rot('spine03', X, -0.14 - 0.35 * A + 0.65 * K);
+      rig.rot('spine04', X, -0.06);
+      rig.rot('head', Y, Math.sin(g.ph * Math.PI * 2) * 0.12 * g.walk);
+      // the stomp: the body drops onto each heel
+      const st = Math.pow(Math.abs(Math.cos(g.ph * Math.PI * 2)), 6) * 0.05 * g.walk;
+      rig.setHips(0, -0.035 - st - 0.08 * a.air, 0);
+      if (a.air) { rig.rot('thigh_L', X, -1.0 * a.air); rig.rot('thigh_R', X, -0.8 * a.air); rig.rot('shin_L', X, 1.5 * a.air); rig.rot('shin_R', X, 1.3 * a.air); }
+      const two = Math.max(A, K);
+      arm(rig, 'R', { down: 0.6 - 0.2 * two, fwd: -0.55 * (1 - two) + chop({ attack: A, strike: K }), twist: 0.15 * (1 - two), elbow: 2.05 * (1 - two) + 0.25 * two, wrist: -0.1, fist: 1.3 });
+      const sw = Math.sin(g.phR * Math.PI * 2) * 0.5 * g.walk;
+      arm(rig, 'L', { down: 0.72 - 0.15 * two, fwd: sw * (1 - two) + chop({ attack: A, strike: K }), twist: -0.35 * two, elbow: 0.45 + 0.2 * two, fist: 1.1 });
+    },
+  },
+
+  // SUBJECT OMEGA: an animal now. Doubled over, it lopes on its legs and the knuckles of the huge right arm like a
+  // gorilla, the left hand curled to its chest in a claw, the head jerking every second. The scream rears it up with
+  // both arms flung wide; berserk, everything twitches harder.
+  omega: {
+    legs: { knee: 1.0, bend: 0.25 },
+    init(p, r) { p.lean = 0.88; p.headFwd = 0.55; p.headTilt = 0.15; p.stride = 0.48; p.timeScale = 1.0; p.limp = null; p.sway = 0.09; p.jaw = 0.38; p.shoulderDrop = 0.25; p.jerkT = r(); },
+    tick(a, dt) {
+      const p = a.p;
+      p.jerkT -= dt * (a.enraged ? 2.2 : 1);
+      if (p.jerkT < 0) {
+        p.jerkT = 0.5 + a.r() * 1.3;
+        a.springs.headZ.kick((a.r() - 0.5) * 80);
+        a.springs.headX.kick((a.r() - 0.5) * 40);
+        if (a.r() < 0.4) a.springs.spineY.kick((a.r() - 0.5) * 40);
+      }
+    },
+    pose(a, g) {
+      const rig = a.rig, A = a.attack, K = a.strike, R = smooth(Math.min(1, a.roar * 1.6));
+      rig.rot('spine03', X, -0.85 * R);
+      rig.rot('spine02', X, -0.5 * R);
+      rig.rot('neck', X, -0.6 * R);
+      rig.rot('jaw', X, -0.8 * R - 0.3 * A);
+      // the big right arm plants with the left foot: a knuckle-walk
+      const kn = Math.sin(g.phL * Math.PI * 2) * 0.55 * g.walk;
+      arm(rig, 'R', { down: 0.62 - 1.5 * R, fwd: kn + g.lean * 0.55 + chop(a) * 1.1 - 0.5 * a.charge, twist: 0.1, elbow: 0.12 + 0.2 * A, fist: 1.5 });
+      // the small left arm: a claw against the chest
+      arm(rig, 'L', { down: 0.55 - 1.4 * R, fwd: -0.55 + g.lean * 0.2 + a.springs.armL.x * 0.04, twist: -0.45 * (1 - R), elbow: 1.5 * (1 - R), wrist: 0.5, fist: 1.2 + Math.sin(a.t * 9) * 0.25 * (a.enraged ? 1 : 0.4) });
+    },
+  },
+};
 
 // --------------------------------------------------------------- survivor --
 // Two-bone arm IK. The survivor holds a pistol with BOTH hands: the gun's pose
