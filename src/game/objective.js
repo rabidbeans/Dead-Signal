@@ -60,7 +60,7 @@ function ringMaterial(color) {
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
   });
 }
-function ring(color, r) {
+export function ring(color, r) {
   const m = new THREE.Mesh(new THREE.PlaneGeometry(r * 2, r * 2).rotateX(-Math.PI / 2), ringMaterial(color));
   m.renderOrder = 2;
   return m;
@@ -182,7 +182,7 @@ export class Objective {
       this.parts.push({ ...s, grp, lever, lampM, rg, bm, charge: 0, done: false, zapT: 0 });
     }
     // the blackout: street lamps nearly dead, the sky darker, until the power is back
-    if (!(g.opts.checkpoint > 0)) { g.world.lampDim = 0.12; this.hemiBase = g.world.hemi.intensity; g.world.hemi.intensity *= 0.72; }
+    if (!(g.opts.checkpoint > 0)) { g.world.lampDim = 0.3; this.hemiBase = g.world.hemi.intensity; g.world.hemi.intensity *= 0.85; }
   }
 
   partDone(p, quiet = false) {
@@ -236,8 +236,8 @@ export class Objective {
       // the street lights stutter back on
       this.lit = Math.min(1, this.lit + dt / 2.2);
       const fl = this.lit < 0.95 ? (Math.random() < 0.35 ? 0.15 : 1) : 1;
-      g.world.lampDim = 0.12 + 0.88 * this.lit * fl;
-      if (this.hemiBase) g.world.hemi.intensity = this.hemiBase * (0.72 + 0.28 * this.lit);
+      g.world.lampDim = 0.3 + 0.7 * this.lit * fl;
+      if (this.hemiBase) g.world.hemi.intensity = this.hemiBase * (0.85 + 0.15 * this.lit);
     }
   }
 

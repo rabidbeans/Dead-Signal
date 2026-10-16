@@ -835,12 +835,13 @@ float wetG = smoothstep(0.25, 0.7, wetMask(vRoughnessMapUv)) * ${amount.toFixed(
   lights() {
     const s = this.scene;
     const T = LV.theme;
-    const hemi = new THREE.HemisphereLight(T.hemiSky, T.hemiGround, T.hemiI);
+    // (Sam, 2026-10-16: "a bit hard to see still": the sky light and the moon are a third / a fifth brighter than the themes say)
+    const hemi = new THREE.HemisphereLight(T.hemiSky, T.hemiGround, T.hemiI * 1.32);
     s.add(hemi);
     this.hemi = hemi;
     this.lampDim = 1;          // level 2 starts with the power out (objective.js brings it back)
-    const moon = new THREE.DirectionalLight(T.moon, T.moonI);
-    this.moonBase = T.moonI;
+    const moon = new THREE.DirectionalLight(T.moon, T.moonI * 1.2);
+    this.moonBase = T.moonI * 1.2;
     moon.castShadow = Q.moonShadow > 0;
     if (Q.moonShadow > 0) moon.shadow.mapSize.set(Q.moonShadow, Q.moonShadow);
     const msc = moon.shadow.camera;
@@ -910,7 +911,7 @@ float wetG = smoothstep(0.25, 0.7, wetMask(vRoughnessMapUv)) * ${amount.toFixed(
       if (!n) { l.intensity = 0; return; }
       l.position.set(n.it.x, n.it.y - 0.3, n.it.z);
       l.color.set(n.it.color ?? LV.theme.lamp ?? 0xffa860);
-      l.intensity = 85 * (n.it.power ?? 1) * this.lampLevel(n.it, t) * (n.it.nofx ? 1 : this.lampDim);
+      l.intensity = 100 * (n.it.power ?? 1) * this.lampLevel(n.it, t) * (n.it.nofx ? 1 : this.lampDim);
     });
     for (const { cone, pool, L: Lm } of this.lampFx) {
       const far = Math.abs(Lm.z - focus.z) > 40;

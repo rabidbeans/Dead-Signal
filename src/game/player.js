@@ -76,7 +76,7 @@ export class Player {
     this.light = fl;
     // a faint lantern so anything right next to you is always readable
     // (only your own: a point light is paid for on every lit pixel, a friend's flashlight is enough)
-    this.lantern = local ? new THREE.PointLight(0xa9bddb, 16, 9, 1.3) : null;
+    this.lantern = local ? new THREE.PointLight(0xa9bddb, 30, 12, 1.3) : null;
     if (this.lantern) game.scene.add(this.lantern);
     // laser sight: a thin red line that only shows while aiming
     const lg = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, -1)]);
@@ -447,8 +447,8 @@ export class Player {
     this.light.intensity = this.dead ? 0 : (this.local ? 560 : 400) * (this.flick ? 0.2 : 1);
     if (this.lantern) {
       const fl = this.game.fx.flash;
-      if (fl.t < 0.06) { this.lantern.position.set(fl.x, fl.y, fl.z); this.lantern.intensity = 16 + 26 * (1 - fl.t / 0.06); }
-      else { this.lantern.position.set(this.x, 2.2 + this.gy, this.z); this.lantern.intensity = 16; }
+      if (fl.t < 0.06) { this.lantern.position.set(fl.x, fl.y, fl.z); this.lantern.intensity = 30 + 26 * (1 - fl.t / 0.06); }
+      else { this.lantern.position.set(this.x, 2.2 + this.gy, this.z); this.lantern.intensity = 30; }
     }
     // laser
     const showLaser = this.aiming && !this.dead && this.reloadT <= 0;

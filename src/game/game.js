@@ -14,7 +14,10 @@ import { perlin1 } from './noise.js';
 import { dressGround, tickFog } from './dress.js';
 import { openSafeRoom, tickSafeRoom } from './kit.js';
 import { BossFX } from './boss.js';
-import { Objective } from './objective.js';
+import { Objective, ring } from './objective.js';
+
+// picking a downed teammate back up: stand this close for this long
+const REVIVE_R = 2.4, REVIVE_T = 2.5;
 import { L, LV, HOLDS, AMBUSH, MAZE, HOLD_TRIGGER, HOLD_RADIUS, MEDKITS, setLevel } from './level.js';
 import { mulberry } from './rng.js';
 import { Q } from './quality.js';
@@ -124,7 +127,7 @@ export class Game {
   async init() {
     const s = this.scene;
     s.background = new THREE.Color(LV.theme.bg);
-    s.fog = new THREE.FogExp2(LV.theme.fog, LV.theme.fogD);
+    s.fog = new THREE.FogExp2(LV.theme.fog, LV.theme.fogD * 0.75);
     if (Q.env) { s.environment = nightEnvironment(this.engine.renderer); s.environmentIntensity = 1.0; }
     this.world = new World(s);
     this.fx = new FX(s, this.world);
@@ -761,9 +764,10 @@ export class Game {
     }
     if (m.O) this.objective?.apply(m.O);
     for (const r of m.p) {
-      const [id, x, z, f, ax, az, hp, fl, w, mh] = r;
-      if (id === this.me.id) continue;
+      const [id, x, z, f, ax, az, hp, fl, w, mh, rv] = r;
+      if (id === this.me.id) { this.me.reviveT = rv || 0; continue; }
       const p = this.players.get(id);
+      if (p) p.reviveT = rv || 0;
       if (p) this.applyRemote(p, { x, z, f, ax, az, hp, fl, w, mh });
     }
     if (m.B) { const bz = this.zombies.get(m.B[0]); if (bz) bz.hp = m.B[1]; }
@@ -806,7 +810,7 @@ export class Game {
       this.snapT -= dt;
       if (this.snapT <= 0) {
         this.snapT = 1 / 15;
-        const P = [...this.players.values()].map((p) => [p.id, +p.x.toFixed(2), +p.z.toFixed(2), +p.face.toFixed(3), +p.aimx.toFixed(2), +p.aimz.toFixed(2), p.hp, (p.aiming ? 1 : 0) | (p.down ? 2 : 0) | (p.dead ? 4 : 0), WEAPON_IDS.indexOf(p.cur.id), p.maxHp]);
+        const P = [...this.players.values()].map((p) => [p.id, +p.x.toFixed(2), +p.z.toFixed(2), +p.face.toFixed(3), +p.aimx.toFixed(2), +p.aimz.toFixed(2), p.hp, (p.aiming ? 1 : 0) | (p.down ? 2 : 0) | (p.dead ? 4 : 0), WEAPON_IDS.indexOf(p.cur.id), p.maxHp, +(p.reviveT || 0).toFixed(1)]);
         const Z = [];
         for (const z of this.zombies.values()) {
           if (!z.alive) continue;
@@ -833,13 +837,44 @@ export class Game {
     if (!this.isHost) return;
     for (const p of this.players.values()) {
       if (!p.down || p.dead) continue;
-      const helper = [...this.players.values()].find((o) => o !== p && o.alive && Math.hypot(o.x - p.x, o.z - p.z) < 1.6);
-      p.reviveT = helper ? p.reviveT + dt : Math.max(0, p.reviveT - dt);
-      if (p.reviveT > 3) {
+      const helper = [...this.players.values()].find((o) => o !== p && o.alive && Math.hypot(o.x - p.x, o.z - p.z) < REVIVE_R);
+      p.reviveT = helper ? p.reviveT + dt : Math.max(0, p.reviveT - dt * 0.5);
+      if (p.reviveT > REVIVE_T) {
         p.reviveT = 0;
         if (p.local) { p.revive(); this.hud.health(p.hp, p.maxHp); } else this.net.send(p.id, { t: 'revive' });
       }
     }
+  }
+
+  // every machine: a filling green ring under a downed teammate, a shout when one goes down, a line while you pick one up
+  reviveFx(dt) {
+    let helping = null;
+    for (const p of this.players.values()) {
+      const down = p.down && !p.dead;
+      if (!p.rvRing && down) { p.rvRing = ring(0x40ff70, REVIVE_R * 1.7); this.scene.add(p.rvRing); }
+      if (p.rvRing) {
+        p.rvRing.visible = down;
+        if (down) {
+          p.rvRing.position.set(p.x, this.world.groundY(p.x, p.z) + 0.07, p.z);
+          const u = p.rvRing.material.uniforms;
+          u.uProg.value = Math.min(1, (p.reviveT || 0) / REVIVE_T);
+          u.uTime.value = this.time;
+          u.uA.value = 0.75 + 0.25 * Math.sin(this.time * 6);
+        }
+      }
+      if (!p.local && down && !p._wasDown) { this.hud.toast(`${p.name || 'A teammate'} is down! Stand next to them to pick them up`); audio.play('sting', { vol: 0.5, jitter: 0 }); }
+      p._wasDown = down;
+      if (!p.local && down && this.me.alive && Math.hypot(this.me.x - p.x, this.me.z - p.z) < REVIVE_R) helping = p;
+    }
+    const h = helping ? `Picking up ${helping.name || 'your teammate'}… stay close` : '';
+    if (h !== this._rvHint) { this._rvHint = h; this.hud.hint(h); }
+  }
+
+  // the HUD's screen-edge markers: the objective's, and every downed teammate
+  markers() {
+    const out = this.objective?.markers() || [];
+    for (const p of this.players.values()) if (!p.local && p.down && !p.dead) out.push({ x: p.x, z: p.z, c: '#ff4a4a', label: 'HELP' });
+    return out;
   }
 
   finish(win, why = null) {
@@ -955,6 +990,7 @@ export class Game {
       for (const z of this.zombies.values()) z.think(dt, plist);
       this.director(dt);
       this.revives(dt);
+      this.reviveFx(dt);
     } else {
       for (const z of this.zombies.values()) if (z.alive) this.interp(z, 120);
     }

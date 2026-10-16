@@ -357,3 +357,21 @@ spread 11°, 0.6 s between shots, 0.25 s pump, reload 2.3 s. `pierce: 1`: a pell
 next at 60% (player.fire collects every body on the line, nearest first). `knock: 2.4`: a blast throws bodies back and
 staggers them (`Zombie.damage(..., kmul)`; the client's `hit` message carries `k`). Measured (`/home/user/tools/pw/
 shotgun_test.mjs`, five level-3 shamblers of 132 hp): ~1.6-2 drop per blast at 3-8 m, ~0.1 at 12 m (before: ~1 at 3-5 m).
+
+## 2026-10-16: easier to see, revive, start over, clearer buttons
+Sam: "a bit hard to see still"; "needs to be a way to revive downed teammates"; "a way to reset your character so that you
+can start new"; "the weapon change icon and reload icon mixed me up".
+- **Brighter**: sky light x1.32 and moon x1.2 over the themes (world.js `lights()`), lamps 100, the local lantern 30 / 12 m
+  (player.js), fog density x0.75 (game.js), post brightness 0.09 / contrast 0.14, vignette 0.28 at offset 0.45 (engine.js),
+  level 2's blackout 0.3 lamps / x0.85 sky (was 0.12 / x0.72). Mean frame luminance on level 1 went ~55-94 -> ~84-120.
+- **Revive**: it always existed (host-side `revives()`), but nothing showed it. Now stand within `REVIVE_R` 2.4 m for
+  `REVIVE_T` 2.5 s (was 1.6 m / 3 s; progress drains at half speed when you step away). Every machine draws a green ring
+  filling under a downed teammate (`reviveFx`, `ring()` from objective.js), the HUD marks downed teammates with a red HELP
+  marker that pins to the screen edge (`Game.markers()` = objective markers + downed teammates), a toast when one goes
+  down, a hint while you pick one up, and the downed player's text says "BEING PICKED UP". Snapshot player rows carry
+  `reviveT` as [10]. Checked with two browsers (`/home/user/tools/pw/coop_revive.mjs`): the friend goes down, the host
+  walks over, both see the progress, the friend is back up at 50% hp.
+- **Start over**: START OVER (menu, top right) -> a confirm panel (`#confirm`) -> `save.reset()` wipes this browser's save
+  (cash, guns, upgrades, perks, unlocked levels).
+- **Buttons**: RELOAD is a round amber button with the word on it that glows when the mag is at 25% or less; SWITCH GUN is a
+  blue rectangle showing the icon of the gun you would switch TO (`hud.weapon()`), placed higher up.

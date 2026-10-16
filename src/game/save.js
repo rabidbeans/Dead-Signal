@@ -27,6 +27,9 @@ class Save {
     } catch (e) { /* private mode: it just will not persist */ }
   }
 
+  // start over: everything back to a fresh survivor (Sam: "a way to reset your character so that you can start new")
+  reset() { this.data = blank(); this.write(); }
+
   write() { try { localStorage.setItem(KEY, JSON.stringify(this.data)); } catch (e) { /* ignore */ } }
 
   get cash() { return this.data.cash; }

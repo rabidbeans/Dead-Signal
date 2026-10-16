@@ -29,16 +29,16 @@ export class HUD {
         <div class="ammo"><span class="ammo-n">12</span><span class="ammo-r">/ ∞</span></div>
         <div class="weapon-name">${WEAPONS.pistol.name}</div>
       </div>
-      <button class="reload-btn" aria-label="Reload"><svg viewBox="0 0 24 24"><path d="M12 5V2L7 6l5 4V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z"/></svg></button>
-      <button class="swap-btn hidden" aria-label="Switch weapon"><svg viewBox="0 0 24 24"><path d="M7 7h11l-3-3 1.4-1.4L22 8l-5.6 5.4L15 12l3-3H7zm10 10H6l3 3-1.4 1.4L2 16l5.6-5.4L9 12l-3 3h11z"/></svg></button>
+      <button class="reload-btn" aria-label="Reload"><svg viewBox="0 0 24 24"><path d="M12 5V2L7 6l5 4V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z"/></svg><span>RELOAD</span></button>
+      <button class="swap-btn hidden" aria-label="Switch weapon"><img class="swap-icon" alt=""><span>SWITCH GUN</span></button>
       <div class="stick move"><div class="knob"></div></div>
       <div class="stick aim"><div class="knob"></div></div>
       <div class="reload-ring"><svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="17"/></svg></div>
       <div class="assist"></div>
       <div class="vignette"></div>
       <div class="banner"><div class="banner-title"></div><div class="banner-sub"></div><div class="banner-note"></div></div>
-      <div class="down-msg"><b>YOU'RE DOWN</b><span>Keep shooting. A teammate can pull you up.</span><div class="bleed"><i></i></div></div>
-      <div class="markers"><div class="mk"><i></i></div><div class="mk"><i></i></div><div class="mk"><i></i></div></div>
+      <div class="down-msg"><b>YOU'RE DOWN</b><span class="down-sub">Keep shooting. A teammate standing next to you picks you up.</span><div class="bleed"><i></i></div></div>
+      <div class="markers">${'<div class="mk"><i></i><b></b></div>'.repeat(6)}</div>
       <div class="toast"></div>
       <div class="hint"></div>
       <div class="pause-menu hidden">
@@ -54,14 +54,14 @@ export class HUD {
       name: $('.hp-name', root), fill: $('.hp-fill', root), team: $('.team', root),
       waveLabel: $('.wave-label', root), waveLeft: $('.wave-left', root), obj: $('.objective span', root), objBox: $('.objective', root),
       holdbar: $('.holdbar', root), holdfill: $('.holdbar u', root),
-      ammoN: $('.ammo-n', root), weapon: $('.weapon', root), wIcon: $('.weapon-icon', root), wName: $('.weapon-name', root), swapBtn: $('.swap-btn', root),
+      ammoN: $('.ammo-n', root), weapon: $('.weapon', root), wIcon: $('.weapon-icon', root), wName: $('.weapon-name', root), swapBtn: $('.swap-btn', root), swapIcon: $('.swap-icon', root),
       bossBar: $('.bossbar', root), bossName: $('.bossbar b', root), bossFill: $('.bossbar i', root),
       arBar: $('.ar-bar', root), arFill: $('.ar-fill', root), cashN: $('.cash-n', root), cashD: $('.cash-d', root), cashBox: $('.cash', root),
       move: $('.stick.move', root), aim: $('.stick.aim', root),
       ring: $('.reload-ring', root), ringC: $('.reload-ring circle', root),
       assist: $('.assist', root), vig: $('.vignette', root),
       banner: $('.banner', root), bt: $('.banner-title', root), bs: $('.banner-sub', root), bn: $('.banner-note', root),
-      down: $('.down-msg', root), bleed: $('.bleed i', root), toast: $('.toast', root), hint: $('.hint', root),
+      down: $('.down-msg', root), downSub: $('.down-sub', root), bleed: $('.bleed i', root), toast: $('.toast', root), hint: $('.hint', root),
       pause: $('.pause', root), pauseMenu: $('.pause-menu', root), end: $('.end', root),
       reloadBtn: $('.reload-btn', root),
       marks: [...root.querySelectorAll('.mk')],
@@ -105,6 +105,12 @@ export class HUD {
     this.el.wIcon.src = ICON(W.id);
     this.el.wName.textContent = W.name.toUpperCase();
     this.el.swapBtn.classList.toggle('hidden', p.order.length < 2);
+    // the switch button shows the gun you would switch TO, so it can never be mistaken for reload
+    if (p.order.length > 1) {
+      const next = p.order[(p.order.indexOf(W.id) + 1) % p.order.length];
+      const src = ICON(next);
+      if (this.el.swapIcon.getAttribute('src') !== src) this.el.swapIcon.src = src;
+    }
   }
 
   // the wallet for this run, with a little "+10" that floats up
@@ -121,6 +127,7 @@ export class HUD {
   ammo(p) {
     this.el.ammoN.textContent = p.ammo;
     this.el.ammoN.classList.toggle('empty', p.ammo === 0);
+    this.el.reloadBtn.classList.toggle('need', p.ammo <= Math.max(1, Math.floor(p.W.mag * 0.25)));
     // restart the little recoil animation WITHOUT forcing a layout (reading offsetWidth on every shot is a
     // forced reflow: a few ms on a phone, five times a second)
     const w = this.el.weapon;
@@ -257,7 +264,7 @@ export class HUD {
       return { x: (this._v.x * 0.5 + 0.5) * innerWidth, y: (-this._v.y * 0.5 + 0.5) * innerHeight };
     };
     // objective markers: a ring over each thing to reach or destroy, pinned to the screen edge (with an arrow) when off it
-    const mks = game.objective?.markers() || [];
+    const mks = game.markers?.() || [];
     this.el.marks.forEach((el, i) => {
       const m = mks[i];
       if (!m) { if (el._on) { el._on = false; el.style.display = 'none'; } return; }
@@ -270,6 +277,7 @@ export class HUD {
       const sx = (x * 0.5 + 0.5) * innerWidth, sy = (-y * 0.5 + 0.5) * innerHeight;
       el.style.transform = `translate(${sx.toFixed(0)}px, ${sy.toFixed(0)}px)`;
       el.style.setProperty('--c', m.c);
+      if (el._lb !== (m.label || '')) { el._lb = m.label || ''; el.lastChild.textContent = el._lb; }
       el.classList.toggle('off', off);
       if (off) el.firstChild.style.transform = `rotate(${(Math.atan2(-y, x) * 180 / Math.PI + 90).toFixed(0)}deg)`;
     });
@@ -297,6 +305,8 @@ export class HUD {
     const dn = me.down && !me.dead;
     if (dn !== this._dn) { this._dn = dn; this.el.down.classList.toggle('on', dn); }
     if (me.down) this.el.bleed.style.width = Math.max(0, 100 - me.downT / 30 * 100).toFixed(0) + '%';
+    const rv = me.down && !me.dead && me.reviveT > 0.05;
+    if (rv !== this._rv) { this._rv = rv; this.el.downSub.textContent = rv ? 'BEING PICKED UP… hold on' : game.players.size > 1 ? 'Keep shooting. A teammate standing next to you picks you up.' : 'Keep shooting.'; }
     // team bars
     if (this._mt === undefined || (this._mt -= dt) < 0) {            // teammates' bars: a few times a second is plenty
       this._mt = 0.2;

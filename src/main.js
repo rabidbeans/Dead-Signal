@@ -297,6 +297,16 @@ function newNet() {
   return net;
 }
 
+// start over: wipe this browser's save after a second, explicit yes
+$('reset').addEventListener('click', () => { click(); $('confirm').classList.remove('hidden'); });
+$('reset-no').addEventListener('click', () => { click(); $('confirm').classList.add('hidden'); });
+$('reset-yes').addEventListener('click', () => {
+  save.reset();
+  picked = 1;
+  $('confirm').classList.add('hidden');
+  refreshMenu();
+  audio.play('deny', { vol: 0.5, jitter: 0 });
+});
 $('safehouse').addEventListener('click', () => {
   click();
   openShop(picked, false);

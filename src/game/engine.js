@@ -60,11 +60,11 @@ export class Engine {
     this.bloom = new BloomEffect({
       luminanceThreshold: 0.76, luminanceSmoothing: 0.14, intensity: 1.4, mipmapBlur: true, radius: 0.72, resolutionScale: Q.bloomScale, levels: Q.msaa ? 8 : 5,
     });
-    this.vignette = new VignetteEffect({ offset: 0.35, darkness: 0.4 });
+    this.vignette = new VignetteEffect({ offset: 0.45, darkness: 0.28 });
     this.noise = new NoiseEffect({ blendFunction: BlendFunction.OVERLAY, premultiply: false });
     this.noise.blendMode.opacity.value = 0.11;
     this.grade = new HueSaturationEffect({ saturation: 0.1, hue: 0 });
-    this.contrast = new BrightnessContrastEffect({ contrast: 0.16, brightness: 0.05 });
+    this.contrast = new BrightnessContrastEffect({ contrast: 0.14, brightness: 0.09 });
     this.tone = new ToneMappingEffect({ mode: ToneMappingMode.AGX });
     this.chroma = new ChromaticAberrationEffect({ offset: new THREE.Vector2(0.0006, 0.0004), radialModulation: true, modulationOffset: 0.4 });
     this.ink = new InkEffect();
