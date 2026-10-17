@@ -1,41 +1,10 @@
-// The dead talk. Speech bubbles over their heads: zombie puns from the horde, and each boss with a voice of its own
+// The bosses talk (only the bosses: Sam, 2026-10-17). Speech bubbles over their heads, each boss with a voice of its own
 // (an entrance, a line for each special move, taunts, hurt lines, a last word). The HOST decides who says what and
 // when (hostLine), and sends `say` events so every machine shows the same line on the same body.
 import * as THREE from 'three';
 import { audio } from './audio.js';
 
 export const LINES = {
-  // the ordinary dead
-  z: {
-    idle: [
-      "I'm dead serious.", "Let's grab a bite!", 'No body loves me.', "I'm dying to meet you.", 'Lend me a hand... I lost mine.',
-      'Got brains? Asking for a friend.', "I've got a bone to pick with you.", "Don't be a stranger. Be a snack.",
-      'Stop running, I just want a hug!', "I'm not slow. I'm decomposing.", "Doctor says I'm in grave condition.",
-      'I used to be a people person.', 'Mind if I pick your brain?', "I'm on a strict brain diet.", 'Gimme some skin!',
-      'Feeling a little rotten today.', 'Undead and loving it.', "I'd run, but I'm dead tired.",
-      "You're the apple of my eye socket.", 'Heads up! ...Mine fell off.', 'Just a nibble. I swear.',
-      "Brains! They're gluten free!", 'Is that a pulse? How rude.', "I've been dying to see you!",
-      "Don't worry, I'm a vegetarian. I only eat HUMAN BEANS.", 'Ugh. Mondays. Forever.',
-      "I'm a little rough around the edges. And the middle.", "Wait up! I've got a flesh wound!",
-      "Rot 'n' roll!", 'Corpse-orate team building!',
-    ],
-    wake: ['Five more minutes... OH, FOOD!', 'Rise and dine!', 'Who ordered takeout?', 'I smell a snack!', 'Good mourning!', 'Who woke the dead?!'],
-    bite: ['Tastes like chicken!', 'Mmm, finger food!', 'Bite-sized!', 'Needs salt.', "You're to die for!", 'Nom. NOM.', 'Chew on THAT.'],
-    die: ["I'm dead... again.", 'Rest in pieces.', 'Not AGAIN!', 'Worth it.', 'Back to the graveyard shift.', 'I was... gutted...', 'Ugh. Dead end.'],
-  },
-  // lines that belong to who they were (picked now and then instead of a general one)
-  m: {
-    z_cop: ["Freeze! ...Oh wait, I'm already stiff.", 'Officer Dead, at your service!', 'You have the right to remain... tasty.'],
-    z_nurse: ['Time for your shot... of BRAINS!', 'Nurse needs a bite!', 'This will only sting... forever.'],
-    z_jogger: ["Can't stop! Cardio!", 'Personal best: zero heartbeats!', 'Running on empty! Feed me!'],
-    z_office: ['Per my last email: BRAINS.', "Let's circle back... to your brain.", "Let's take this offline. Into my mouth."],
-    z_elder: ['Back in my day we ate brains uphill both ways!', 'You kids and your PULSES!', "I'm not old. I'm VINTAGE."],
-    z_burned: ["I'm a little toasty.", 'Too hot to handle!', 'Well done. Like me.'],
-    z_trucker: ['Breaker breaker, I am HUNGRY!', '10-4, good bite!', 'Long haul... to your brain.'],
-    z_worker: ["I'm on my lunch break. You're lunch.", 'Punching in... to your skull!', 'Hard work, hard hat, soft brain!'],
-    z_hoodie: ['No cap, I am dead.', 'Bruh. BRAINS.', "It's giving... DEAD."],
-    z_patient: ["I'm feeling much worse, thanks!", 'Is the doctor in? I am STARVING!', 'Discharge me... into your face!'],
-  },
   warden: {
     spawn: ["Freeze! You're under a-REST!", 'Halt! This is a dead zone!'],
     charge: ['STOP RESISTING!', 'You have the right to remain... DINNER!', 'Make way! RIOT ACT!'],
@@ -73,6 +42,8 @@ export const LINES = {
     spawn: ['I AM THE ALPHA AND THE OMEGA!', 'TESTING, TESTING... ONE, TWO, CHEW!'],
     scream: ['COME, MY LAB RATS!', 'DINNER BELL! RING RING!', 'EVERYBODY... GROUP HUG!'],
     charge: ['SIDE EFFECTS INCLUDE... ME!', 'FAST-ACTING FORMULA!'],
+    quake: ['GROUND... POUND!', 'FEEL THE EARTH... QUAKE!', 'JUMP, LITTLE LAB RATS!'],
+    spit: ['SAY AHH!', 'TASTE THE SERUM!', 'COME DOWN FROM THERE!'],
     bite: ['EXPERIMENT SUCCESSFUL!', 'PEER... REVIEWED!', 'NEW SPECIES: SNACK!'],
     hurt: ["I'M EVOLVING!", 'GAIN OF FUNCTION!', 'MORE! MORE SERUM!'],
     die: ['Results... inconclusive...', 'Experiment... over...'],
@@ -91,7 +62,6 @@ export class Speech {
     document.body.appendChild(this.el);
     this.list = [];
     this.cd = new Map();           // per body: no new line until then
-    this.chatT = 4;
     this.tauntT = 10;
     this.bag = {};                  // lines not yet used, per category (so you don't hear the same pun twice in a row)
   }
@@ -104,33 +74,18 @@ export class Speech {
     return this.bag[k].pop();
   }
 
-  pickM(model) {
-    const all = LINES.m[model];
-    const k = 'm:' + model;
-    if (!this.bag[k]?.length) this.bag[k] = all.map((_, i) => i).sort(() => Math.random() - 0.5);
-    return this.bag[k].pop();
-  }
-
   // host: maybe say something (cat: idle, wake, bite, die, hurt, spawn, or a move name)
   hostLine(z, cat, prob = 1, delay = 0) {
     const g = this.g;
-    if (!g.isHost || g.opts.attract || !z || Math.random() > prob) return;
-    const key = z.boss ? z.type : 'z';
+    // only the bosses talk (Sam, 2026-10-17: "only the bosses are supposed to have bubbles")
+    if (!g.isHost || g.opts.attract || !z || !z.boss || Math.random() > prob) return;
+    const key = z.type;
     if (!LINES[key]?.[cat]) return;
     const now = g.time || 0;
     if (cat !== 'die' && (this.cd.get(z.id) || 0) > now) return;
-    if (!z.boss) {
-      // the horde: only close to someone, and never more than two talking at once
-      if (this.list.filter((b) => !b.boss && b.t < b.life).length >= 2) return;
-      let near = false;
-      for (const p of g.players.values()) if (Math.hypot(p.x - z.x, p.z - z.z) < 15) near = true;
-      if (!near) return;
-    }
-    // the ordinary dead: sometimes a line about who they used to be
-    if (!z.boss && cat === 'idle' && LINES.m[z.model] && Math.random() < 0.45) cat = 'm';
-    const i = cat === 'm' ? this.pickM(z.model) : this.pick(key, cat);
+    const i = this.pick(key, cat);
     if (i < 0) return;
-    this.cd.set(z.id, now + (z.boss ? 3 : 7));
+    this.cd.set(z.id, now + 3);
     const e = { k: 'say', id: z.id, c: cat, i, d: delay };
     g.emit(e);
     this.show(e);
@@ -138,9 +93,8 @@ export class Speech {
 
   show(e) {
     const z = this.g.zombies.get(e.id);
-    if (!z) return;
-    const key = z.boss ? z.type : 'z';
-    const text = e.c === 'm' ? LINES.m[z.model]?.[e.i] : LINES[key]?.[e.c]?.[e.i];
+    if (!z || !z.boss) return;
+    const text = LINES[z.type]?.[e.c]?.[e.i];
     if (!text) return;
     // one bubble per body: a new line replaces the old
     for (const b of this.list) if (b.z === z) b.life = Math.min(b.life, b.t + 0.15);
@@ -156,17 +110,6 @@ export class Speech {
   update(dt) {
     const g = this.g;
     if (!g.opts.attract && g.isHost) {
-      // the horde chatters: now and then, one of the dead near a survivor says something
-      this.chatT -= dt;
-      if (this.chatT <= 0) {
-        this.chatT = 3.5 + Math.random() * 3.5;
-        const cands = [];
-        for (const z of g.zombies.values()) {
-          if (!z.alive || z.boss || z.idle) continue;
-          for (const p of g.players.values()) if (p.alive && Math.hypot(p.x - z.x, p.z - z.z) < 12) { cands.push(z); break; }
-        }
-        if (cands.length) this.hostLine(cands[Math.floor(Math.random() * cands.length)], 'idle', 1);
-      }
       // a boss taunts while it hunts you
       this.tauntT -= dt;
       if (this.tauntT <= 0) {

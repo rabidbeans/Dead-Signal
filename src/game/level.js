@@ -9,6 +9,7 @@
 //   maze B ........................
 //   cross[1] = lz.z  the boss plaza; the safe room door is at zMin + 3
 import { mulberry } from './rng.js';
+import { genInterior, genCanals, zoneBlocked } from './layout.js';
 
 // ---------------------------------------------------------------- the levels --
 // L, HOLDS, MEDKITS, AMBUSH, MAZE and LV are live objects that setLevel(n) rewrites IN PLACE, so every module that
@@ -20,6 +21,8 @@ export const AMBUSH = [];
 export const MAZE = [];          // barricade rows: { z, gx (gap centre x), gw (gap width), kind, seed }
 export const LANES = [];         // walls ALONG the street: { x, z0 (south end), z1 (north end), kind, brk: [south, north] | null, seed }
 export const LV = {};            // everything else about the current level (names, theme, dressing)
+export const ZONES = [];         // the WIDE stretches (layout.js): hospital wards, warehouse, canals - instead of barricade rows
+export const ZONE_HW = 20;       // half the width of a wide zone (the street is 9)
 
 const BASE = { roadHW: 6, buildX: 9, crossHW: 5, zMax: 40, xWall: 34, start: { x: 0, z: 29 } };
 const geo = (zc, lz) => ({ ...BASE, cross: [zc, lz], gate: [zc - 14], lz: { x: 0, z: lz, r: 9 }, zMin: lz - 22 });
@@ -46,15 +49,15 @@ const LEVELS = {
   2: {
     id: 2, name: 'ST. MERCY ROW', kicker: 'LEVEL 2 · ST. MERCY ROW', finale: 'saferoom',
     objective: 'power',
-    banner: 'The power is out. Pick through the pile-ups, throw the three breakers to raise the gate, then put down Patient Zero.',
-    blurb: 'The hospital district is blacked out: pick through the pile-ups in the dark, throw three breakers to get the lights and the gate back, and put down Patient Zero.',
+    banner: 'The power is out. Find your way through the dark wards of St. Mercy, throw the three breakers in the courtyard, then put down Patient Zero.',
+    blurb: 'Inside St. Mercy Hospital, blacked out: a maze of wards, corridors and sliding doors, three breakers to throw in the courtyard, and Patient Zero.',
     L: geo(-84, -200),
     holds: [
       { secs: 50, n: 55, lurch: 0.2, runner: 0.12, cap: 22, title: 'THE BLACKOUT', brutes: 1 },
       { secs: 40, n: 46, lurch: 0.22, runner: 0.14, cap: 19, title: 'PATIENT ZERO', final: true, boss: 'patientzero', brutes: 1 },
     ],
     zHp: 1.1, zSpd: 1.03, brutePop: 0.05, sleepGap: [4.2, 4.2],
-    style: 'pileup', rowGap: [12, 3], rowKinds: ['pileup', 'pileup', 'fence', 'pileup'],
+    style: 'wards', rowGap: [12, 3], rowKinds: ['pileup', 'pileup', 'fence', 'pileup'],
     heights: [8, 4, 9, 15],
     signs: [['ER', '#ff3030', 3], ['PHARMACY', '#3dff8a', 5.5], ['MORGUE', '#8ad7ff', 4.5], ['CLINIC', '#4affd6', 4.5], ['X-RAY', '#b8a0ff', 3.5], ['URGENT CARE', '#ff9a4a', 6], ['DENTAL', '#5ad0ff', 4], ['24 HR', '#6aa8ff', 3.5], ['QUARANTINE', '#ffd34a', 6.5]],
     theme: { bg: 0x081414, fog: 0x0e2a28, fogD: 0.018, hemiSky: 0x52c0aa, hemiGround: 0x142220, hemiI: 1.85, moon: 0xa0ffe0, moonI: 1.5, fogSheet: 0x8ad0c0, sat: 0.3, lamp: 0xd8ffea, lamp2: 0x50e0ff, walls: [0xf0f0e8, 0x7ad8c8, 0xf0c8c8], accent: [0xe03030, 0xf2f2f2], rim: 0x6affc0 },
@@ -63,15 +66,15 @@ const LEVELS = {
   3: {
     id: 3, name: 'LANTERN STREET', kicker: 'LEVEL 3 · LANTERN STREET', finale: 'saferoom',
     objective: 'nests', tanks: true,
-    banner: 'Weave through the market aisles, burn out the three nests, and watch for the Butcher\'s cleavers. Red gas tanks go off when shot.',
-    blurb: 'The night market: aisles of stalls under the lanterns, red gas tanks you can shoot, three pulsing nests breeding the dead, and the Butcher.',
+    banner: 'Cross the canal quarter bridge by bridge, burn out the three nests, and watch for the Butcher\'s cleavers. Red gas tanks go off when shot.',
+    blurb: 'The canal quarter: islands of market stalls joined by narrow footbridges, red gas tanks you can shoot, three pulsing nests breeding the dead, and the Butcher.',
     L: geo(-90, -212),
     holds: [
       { secs: 55, n: 24, lurch: 0.22, runner: 0.15, cap: 17, title: 'THE NESTS', brutes: 1 },
       { secs: 40, n: 52, lurch: 0.24, runner: 0.18, cap: 20, title: 'THE BUTCHER', final: true, boss: 'butcher', brutes: 1 },
     ],
     zHp: 1.2, zSpd: 1.06, brutePop: 0.06, sleepGap: [4, 4],
-    style: 'aisles', rowGap: [12.5, 2], rowKinds: ['stalls'],
+    style: 'canals', rowGap: [12.5, 2], rowKinds: ['stalls'],
     heights: [7, 4, 8, 10],
     signs: [['NOODLES', '#ff4040', 5], ['DUMPLINGS', '#ffd040', 6], ['KARAOKE', '#ff5fd0', 5.5], ['TEA', '#4affb0', 3], ['MARKET', '#ffb030', 5], ['HERBS', '#7aff5a', 4], ['LUCKY', '#ff3060', 4.5], ['BBQ', '#ff8a3a', 3.5]],
     theme: { bg: 0x1a0c0c, fog: 0x2c1414, fogD: 0.017, hemiSky: 0xe08a6a, hemiGround: 0x2a1410, hemiI: 1.8, moon: 0xffd0b0, moonI: 1.4, fogSheet: 0xd8968a, sat: 0.36, lamp: 0xff6a3a, lamp2: 0xffd040, walls: [0xffa888, 0xb8e890, 0xffd080], accent: [0xd02020, 0xffc020], rim: 0xff8a50, lanterns: true },
@@ -80,15 +83,15 @@ const LEVELS = {
   4: {
     id: 4, name: 'THE DOCKS', kicker: 'LEVEL 4 · THE DOCKS', finale: 'saferoom',
     objective: 'dozer',
-    banner: 'Find the way through the container yard, keep the bulldozer moving until it breaks the wall, and dodge the Foreman\'s leap.',
-    blurb: 'The shipping yards: a maze of container walls, a bulldozer that only pushes while you stand by it, and the Foreman, who leaps and smashes the ground.',
+    banner: 'Find the keycards in the bonded warehouses to open the locked doors, keep the bulldozer moving, and dodge the Foreman\'s leap.',
+    blurb: 'The docks\' bonded warehouses: aisles of racking, doors locked until you find their coloured keycard, a bulldozer that only pushes while you stand by it, and the Foreman.',
     L: geo(-96, -224),
     holds: [
       { secs: 45, n: 85, lurch: 0.24, runner: 0.2, cap: 26, title: 'THE CONTAINER WALL', brutes: 2 },
       { secs: 40, n: 58, lurch: 0.25, runner: 0.22, cap: 21, title: 'THE FOREMAN', final: true, boss: 'foreman', brutes: 2 },
     ],
     zHp: 1.25, zSpd: 1.08, brutePop: 0.07, sleepGap: [4, 4],
-    style: 'yard', rowGap: [18, 2], rowKinds: ['containers'],
+    style: 'warehouse', keys: ['red', 'blue'], rowGap: [18, 2], rowKinds: ['containers'],
     heights: [7, 3, 8, 7],
     signs: [['PIER 9', '#ffb030', 4], ['CUSTOMS', '#4ad8ff', 5], ['FREIGHT', '#ff6a3a', 5], ['BAIT', '#7aff5a', 3], ['CRANE 3', '#ffd34a', 5]],
     theme: { bg: 0x1a1024, fog: 0x2a1a34, fogD: 0.016, hemiSky: 0xb08ad8, hemiGround: 0x2a1a20, hemiI: 1.85, moon: 0xffb070, moonI: 1.6, fogSheet: 0xc09ad0, sat: 0.34, lamp: 0xffb050, lamp2: 0x60b0ff, walls: [0xc8d0ff, 0xd8a070, 0xffb890], accent: [0xffc020, 0x202020], rim: 0xffa060 },
@@ -127,7 +130,7 @@ export const levelInfo = (n) => LEVELS[n];
 function genMaze(d) {
   const rng = mulberry(7000 + d.id * 31);
   const rows = [], lanes = [];
-  const zones = [[d.L.start.z - 11, d.L.cross[0] + 13], [d.L.gate[0] - 11, d.L.lz.z + 17]];
+  const zones = WIDE[d.style] ? [] : mazeZones(d);
   const style = d.style || 'rows';
   let side = rng() < 0.5 ? -1 : 1;
   for (const [a, b] of zones) {
@@ -171,8 +174,31 @@ function genMaze(d) {
   return { rows, lanes };
 }
 
+// the two maze stretches of a level: start -> junction, gate -> boss plaza
+const mazeZones = (d) => [[d.L.start.z - 11, d.L.cross[0] + 13], [d.L.gate[0] - 11, d.L.lz.z + 17]];
+const WIDE = { wards: 1, warehouse: 1, canals: 1 };
+function genZones(d) {
+  if (!WIDE[d.style]) return [];
+  return mazeZones(d).map(([a, b], k) => {
+    const seed = 9100 + d.id * 53 + k * 7;
+    if (d.style === 'canals') return genCanals(seed, a, b, ZONE_HW);
+    const ward = d.style === 'wards';
+    const Z = genInterior(seed, a, b, ZONE_HW, ward ? { corridors: 0.45, loops: 0.25, arch: 0.15, archC: 0.3, maxArea: 9 } : { corridors: 0.35, loops: 0.12, arch: 0.25, archC: 0.5, maxArea: 12, key: d.keys?.[k] });
+    Z.style = d.style;
+    Z.index = k;
+    return Z;
+  });
+}
+// the wide zone (if any) that z is in
+export function zoneAt(z, pad = 0) {
+  for (const Z of ZONES) if (z <= Z.zTop + pad && z >= Z.zBot - pad) return Z;
+  return null;
+}
+
 // is (x, z) inside a maze piece (with `pad` metres to spare)? Used to keep kits, lamps and sleepers out of the walls.
 export function inMaze(x, z, pad = 1.2) {
+  const Z = zoneAt(z, 0.5);
+  if (Z && zoneBlocked(Z, x, z, pad * 0.7)) return true;
   for (const r of MAZE) if (Math.abs(r.z - z) < pad + 0.6 && Math.abs(x - r.gx) > r.gw / 2 - 0.2) return true;
   for (const l of LANES) {
     if (Math.abs(x - l.x) > pad + 0.8 || z > l.z0 + pad || z < l.z1 - pad) continue;
@@ -190,10 +216,17 @@ export function setLevel(n) {
   const mz = genMaze(d);
   MAZE.splice(0, MAZE.length, ...mz.rows);
   LANES.splice(0, LANES.length, ...mz.lanes);
+  ZONES.splice(0, ZONES.length, ...genZones(d));
   // first-aid kits: a few along each stretch, never in a barricade, and one in front of the boss plaza
   const kits = [];
   const kz = [d.L.start.z - 18, (d.L.start.z + d.L.cross[0]) / 2, d.L.cross[0] + 9, d.L.gate[0] - 16, (d.L.gate[0] + d.L.lz.z) / 2, d.L.lz.z + 14];
   kz.forEach((z, i) => {
+    const Z = zoneAt(z);
+    if (Z?.kind === 'interior') {
+      // the middle of the nearest real room (furniture keeps to the walls)
+      const r = Z.rooms.filter((q) => q.kind !== 'corridor' && !q.keyRoom).sort((a, b) => Math.abs(a.cz - z) - Math.abs(b.cz - z))[0];
+      if (r) { kits.push([+r.cx.toFixed(1), +r.cz.toFixed(1)]); r.medkit = true; return; }
+    }
     let zz = z, x = i % 2 ? 4.6 : -4.6;
     for (let k = 0; k < 40 && inMaze(x, zz, 0.9); k++) { if (k % 2) zz -= 1.5; x = -x; }
     kits.push([x, +zz.toFixed(1)]);
@@ -245,7 +278,23 @@ export function buildLots() {
       }
     }
   });
-  return lots;
+  // a wide zone pushes the buildings back to its walls: the part of a lot inside the zone's z range starts at ZONE_HW
+  let out = lots;
+  for (const Z of ZONES) {
+    const next = [];
+    const inner = ZONE_HW + 0.25;
+    for (const lot of out) {
+      if (lot.z1 <= Z.zBot || lot.z0 >= Z.zTop) { next.push(lot); continue; }
+      if (lot.z0 < Z.zBot - 2) next.push({ ...lot, z1: Z.zBot, northCross: false, southCross: false });
+      if (lot.z1 > Z.zTop + 2) next.push({ ...lot, z0: Z.zTop, northCross: false });
+      const z0 = Math.max(lot.z0, Z.zBot), z1 = Math.min(lot.z1, Z.zTop);
+      const far = lot.side < 0 ? lot.x0 : lot.x1;
+      if (Math.abs(far) - inner < 4) continue;
+      next.push({ ...lot, z0, z1, x0: lot.side < 0 ? Math.min(lot.x0, -inner - 6) : inner, x1: lot.side < 0 ? -inner : Math.max(lot.x1, inner + 6), southCross: false, northCross: false, zone: true });
+    }
+    out = next;
+  }
+  return out;
 }
 
 // Lamp posts: one every ~22 m, alternating sides, on the sidewalk.
@@ -254,7 +303,7 @@ export function lampSites() {
   let k = 0;
   for (let z0 = 30; z0 > L.zMin + 6; z0 -= 22) {
     // keep clear of the gates, the cross-street mouths, the barricade rows and the safe room front
-    const ok = (z) => !L.cross.some((c) => Math.abs(z - c) < 7) && !L.gate.some((g) => Math.abs(z - g) < 4) && !MAZE.some((r) => Math.abs(z - r.z) < 2.5) && z > L.zMin + 10;
+    const ok = (z) => !L.cross.some((c) => Math.abs(z - c) < 7) && !L.gate.some((g) => Math.abs(z - g) < 4) && !MAZE.some((r) => Math.abs(z - r.z) < 2.5) && z > L.zMin + 10 && !zoneAt(z, 3);
     const z = [0, 3, -3, 5, -5].map((o) => z0 + o).find(ok);
     if (z === undefined) continue;
     const side = k++ % 2 ? 1 : -1;

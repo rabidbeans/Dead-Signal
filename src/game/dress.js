@@ -14,6 +14,8 @@ import { L, LV, MAZE, LANES } from './level.js';
 import { container, stall, hesco, lanternStrings, safeRoom } from './kit.js';
 import { Q } from './quality.js';
 import { placeObjective } from './objective.js';
+import { buildZones } from './zones.js';
+import { zoneAt } from './level.js';
 import { signTexture } from './world.js';
 
 const _q = new THREE.Quaternion();
@@ -32,7 +34,7 @@ export function populate(world) {
     if (o.s) g.scale.setScalar(o.s);
     if (o.tilt) g.rotation.z = o.tilt;
     world.add(g);
-    if (o.box) col.box(x, z, o.box[0], o.box[1], -ry, o.h ?? 1.0, o.tag || 'solid');
+    if (o.box) col.box(x, z, o.box[0], o.box[1], o.boxWorld ? 0 : -ry, o.h ?? 1.0, o.tag || 'solid');
     if (o.circle) col.circle(x, z, o.circle, o.h ?? 1.0, o.tag || 'solid');
     return g;
   };
@@ -220,7 +222,7 @@ export function populate(world) {
   // the buildings let you walk round the second half of the maze)
   for (const c of zc) for (const side of [-1, 1]) {
     const x = side * 13.2;
-    if (LV.style === 'yard') {
+    if (LV.style === 'yard' || LV.style === 'warehouse') {
       for (const dz of [-2.6, 2.6]) { const m = container(dz > 0 ? 2 : 5); m.position.set(x, 0, c + dz); m.rotation.y = Math.PI / 2; m.scale.x = 0.86; world.add(m); }
     } else if (LV.style === 'chicane') {
       for (let z = c - 4.7; z <= c + 4.8; z += 1.1) { const h = hesco(); h.position.set(x, 0, z); h.rotation.y = Math.PI / 2; world.add(h); const t = hesco(); t.position.set(x, 1.05, z); t.rotation.y = Math.PI / 2; world.add(t); }
@@ -241,13 +243,15 @@ export function populate(world) {
     for (const [x, z] of [[7.6, c + 6.5], [-7.6, c - 6.5]]) put('bollard', x, z, 0, { circle: 0.15, h: 1.0 });
   }
 
+  // ---- the wide zones (layout.js / zones.js): the hospital wards, the warehouse, the canal quarter
+  buildZones(world, { put, fire });
   // ---- the maze: barricade rows across the street, one gap each (level.js MAZE)
   buildMaze(world, { put, veh, wreck, sandbags, fire, rng });
   buildLanes(world, { put, veh, fire, rng });
   placeObjective(world);           // breaker cabinets, nests and gas tanks need their colliders before the nav grid
   if (LV.theme.lanterns) {
     const zs = [];
-    for (let z = L.zMax - 8; z > L.zMin + 10; z -= 12) if (!MAZE.some((r) => Math.abs(r.z - z) < 1) && !L.gate.some((g) => Math.abs(g - z) < 4)) zs.push(z);
+    for (let z = L.zMax - 8; z > L.zMin + 10; z -= 12) if (!MAZE.some((r) => Math.abs(r.z - z) < 1) && !L.gate.some((g) => Math.abs(g - z) < 4) && !zoneAt(z, 3)) zs.push(z);
     lanternStrings(world, zs);
   }
 
@@ -581,9 +585,9 @@ export function dressGround(game) {
   const free = (x, z, r = 0.3) => { const p = world.col.resolve(x, z, r); return Math.abs(p.x - x) + Math.abs(p.z - z) < 1e-3; };
   world.steam = [];
   for (const c of L.cross) { manhole.add(-1.6, c + 1.4, 1.05, rng() * 6, 0, 0.004); manhole.add(2.2, c - 2.2, 1.05, rng() * 6, 0, 0.004); world.steam.push({ x: -1.6, z: c + 1.4 }); }
-  for (let z = 10; z > L.zMin + 8; z -= 40 + rng() * 20) manhole.add((rng() - 0.5) * 6, z, 1.05, rng() * 6, 0, 0.004);
+  for (let z = 10; z > L.zMin + 8; z -= 40 + rng() * 20) if (!zoneAt(z, 2)) manhole.add((rng() - 0.5) * 6, z, 1.05, rng() * 6, 0, 0.004);
   // storm drains sit in the gutters beside each curb
-  for (let z = 20; z > L.zMin + 6; z -= 18 + rng() * 14) drain.add(rng() < 0.5 ? -5.55 : 5.55, z, 0.85, Math.PI / 2, 0, 0.006);
+  for (let z = 20; z > L.zMin + 6; z -= 18 + rng() * 14) if (!zoneAt(z, 2)) drain.add(rng() < 0.5 ? -5.55 : 5.55, z, 0.85, Math.PI / 2, 0, 0.006);
   // brake marks that end at the wrecks
   const wrecks = world.col.boxes.filter((b) => b.tag === 'solid' && b.hw > 2.3 && b.hw < 3.1 && Math.abs(b.cx) < 6);
   wrecks.slice(0, 12).forEach((b, i) => { if (i % 2 === 0) skid.add(b.cx, b.cz + 4.5, 6.5, 1.57 + (rng() - 0.5) * 0.2, 0, 0.007, 0, 0, 0.55); });
@@ -594,7 +598,7 @@ export function dressGround(game) {
   // spray paint on a few walls
   for (let z = 6; z > L.zMin + 10; z -= 38 + rng() * 22) {
     const side = rng() < 0.5 ? -1 : 1;
-    if (L.cross.some((c) => Math.abs(z - c) < 7)) continue;
+    if (L.cross.some((c) => Math.abs(z - c) < 7) || zoneAt(z, 3)) continue;
     tag.add(side * 9.02 - side * 0.01, z, 1.8, 0.0, 0, 1.6 + rng() * 0.9, -side, 0);
   }
 
@@ -624,6 +628,8 @@ export function dressGround(game) {
   scatter('deb_brick', 18, 0.85, 1.1); scatter('deb_bag', 8, 0.8, 1.5, 0.002); scatter('deb_rag', 8, 0.9, 1.4, 0.004);
   scatter('deb_plank', 6, 0.8, 1.2, 0.002);
 
+  // blood where something happened in the wards and the warehouse
+  for (const b of world.zoneBlood || []) fx.pools.add(b.x, b.z, 1.2 + rng() * 1.2, rng() * 6, 0, 0.03);
   // ---- the fallen: bodies in the road, each with its pool and a drag trail
   const models = ['z_cop', 'z_worker', 'z_office', 'z_nurse', 'z_hoodie', 'z_jogger', 'z_trucker', 'z_patient', 'z_elder', 'z_burned'];
   const dead = LV.id === 1 ? [

@@ -230,6 +230,13 @@ function upgrade(mat) {
       m = new THREE.MeshStandardMaterial({ color: 0x9a9da0, metalness: 0.7, roughness: 0.5, alphaMap: tex('tex/chainlink.webp', { srgb: false, repeat: true }), transparent: true, alphaTest: 0.4, side: THREE.DoubleSide });
       m.alphaMap = null; m.map = tex('tex/chainlink.webp', { repeat: true });
       break;
+    // the interior kit (interior_kit.py): every colour is in the vertices, so a roomful of furniture is one material
+    case 'int_vc':
+      m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.08 });
+      break;
+    case 'int_glow':
+      m = new THREE.MeshBasicMaterial({ vertexColors: true, color: new THREE.Color(1.1, 1.1, 1.1) });
+      break;
     case 'burlap': {
       m = mat.clone();
       m.roughness = 1;
@@ -248,7 +255,7 @@ function upgrade(mat) {
 let propRoots = [];
 
 export async function loadProps() {
-  const gs = await Promise.all(['props/props.glb', 'props/street.glb', 'props/vehicles.glb'].map(loadGLB));
+  const gs = await Promise.all(['props/props.glb', 'props/street.glb', 'props/vehicles.glb', 'props/interior.glb'].map(loadGLB));
   propRoots = gs.map((g) => g.scene);
   for (const root of propRoots) {
     root.traverse((o) => {

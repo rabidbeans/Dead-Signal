@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { prop, surface, tex, propMaterial, instanced, awningMaterial, dirtify } from './assets.js';
 import { populate } from './dress.js';
-import { L, LV, MAZE, blockRanges, buildLots, lampSites } from './level.js';
+import { L, LV, MAZE, ZONES, zoneAt, blockRanges, buildLots, lampSites } from './level.js';
 import { mulberry } from './rng.js';
 import { Q } from './quality.js';
 
@@ -82,6 +82,7 @@ export class Colliders {
 
   _resolve(boxes, circles, x, z, r) {
     for (const b of boxes) {
+      if (b.off) continue;          // an open door
       const dx = x - b.cx, dz = z - b.cz;
       const lx = dx * b.c + dz * b.s, lz = -dx * b.s + dz * b.c;
       const qx = Math.max(-b.hw, Math.min(b.hw, lx)), qz = Math.max(-b.hd, Math.min(b.hd, lz));
@@ -130,7 +131,7 @@ export class Colliders {
   _ray(boxes, circles, ox, oz, dx, dz, maxD) {
     let best = maxD, nx = 0, nz = 0;
     for (const b of boxes) {
-      if (b.h < 0.9) continue;    // bullets fly over curbs, sandbags and barriers
+      if (b.h < 0.9 || b.off) continue;    // bullets fly over curbs, sandbags and barriers (and through open doors)
       const rx = ox - b.cx, rz = oz - b.cz;
       const lox = rx * b.c + rz * b.s, loz = -rx * b.s + rz * b.c;
       const ldx = dx * b.c + dz * b.s, ldz = -dx * b.s + dz * b.c;
@@ -199,7 +200,7 @@ export class NavField {
   }
 
   markAll() {
-    for (const b of this.colliders.boxes) this.mark(b);
+    for (const b of this.colliders.boxes) if (b.tag !== 'door' && !b.off) this.mark(b);
     for (const c of this.colliders.circles) this.mark(c);
   }
 
@@ -330,7 +331,7 @@ export const cutaway = {
   uPlayers: { value: [new THREE.Vector4(-9, -9, 0, 0), new THREE.Vector4(-9, -9, 0, 0), new THREE.Vector4(-9, -9, 0, 0), new THREE.Vector4(-9, -9, 0, 0)] },
   uRes: { value: new THREE.Vector2(1, 1) },
 };
-function withCutaway(m) {
+export function withCutaway(m) {
   const prev = m.onBeforeCompile;
   m.onBeforeCompile = (sh, r) => {
     prev?.(sh, r);
@@ -370,6 +371,21 @@ export function signTexture(text, color, bg = '#060606', w = 512, h = 128) {
   return t;
 }
 
+// the z ranges [zN, zS] with the wide zones taken out (sidewalks do not run through the hospital)
+function clipZones(ranges) {
+  let out = ranges;
+  for (const Z of ZONES) {
+    const next = [];
+    for (const [a, b] of out) {
+      if (b <= Z.zBot || a >= Z.zTop) { next.push([a, b]); continue; }
+      if (a < Z.zBot) next.push([a, Z.zBot]);
+      if (b > Z.zTop) next.push([Z.zTop, b]);
+    }
+    out = next;
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------- level --
 const _wc = new THREE.Color();
 const CH = 36;                                   // batching / culling chunk (m of street)
@@ -391,6 +407,9 @@ export class World {
     this.papers = [];
     this.bounds = { minX: -L.xWall, maxX: L.xWall, minZ: L.zMin, maxZ: L.zMax };
     this.spawns = [];
+    this.raised = [];           // walkways above the ground (the canals' footbridges): groundY rides them
+    this.doors = [];            // sliding doors and shutters (zones.js)
+    this.keyItems = [];         // keycards (level 4)
     this.build();
   }
 
@@ -431,7 +450,7 @@ export class World {
     this.wetMaterial(walk, 0.6);
     const curbMat = surface('concrete');
     const blocks = this.blocks = [];
-    for (const [zN, zS] of blockRanges()) for (const side of [-1, 1]) blocks.push(side < 0 ? [-80, -7, zN, zS] : [7, 80, zN, zS]);
+    for (const [zN, zS] of clipZones(blockRanges())) for (const side of [-1, 1]) blocks.push(side < 0 ? [-80, -7, zN, zS] : [7, 80, zN, zS]);
     for (const [x0, x1, z0, z1] of blocks) {
       const w = x1 - x0, d = z1 - z0;
       const slab = new THREE.Mesh(worldBox(w, 0.15, d, 3), [walk, walk, walk, walk, walk, walk]);
@@ -464,7 +483,7 @@ export class World {
       p.receiveShadow = true;
       this.add(p);
     };
-    const nearCross = (z, pad) => L.cross.some((c) => Math.abs(z - c) < pad);
+    const nearCross = (z, pad) => L.cross.some((c) => Math.abs(z - c) < pad) || !!zoneAt(z, 2);
     for (let z = L.zMax - 3; z > L.zMin; z -= 6) {
       if (nearCross(z, 8.5)) continue;
       strip(-0.12, z, 0.12, 3, yellow); strip(0.12, z, 0.12, 3, yellow);
@@ -476,7 +495,7 @@ export class World {
     for (const zc of L.cross) {
       for (let k = -4; k <= 4; k++) { strip(k * 1.2, zc - 7.2, 0.55, 2.6, paint); strip(k * 1.2, zc + 7.2, 0.55, 2.6, paint); }
       for (let k = -4; k <= 4; k++) { strip(-8.6, zc + k * 1.0, 2.6, 0.5, paint); strip(8.6, zc + k * 1.0, 2.6, 0.5, paint); }
-      for (let x = -L.xWall + 2; x < L.xWall; x += 6) if (Math.abs(x) > 12) strip(x, zc, 3, 0.14, yellow);
+      for (let x = -L.xWall + 2; x < L.xWall; x += 6) if (Math.abs(x) > 12 && !zoneAt(zc, 2)) strip(x, zc, 3, 0.14, yellow);
     }
     this.asphalt = asphalt;
   }
@@ -629,7 +648,7 @@ float wetG = smoothstep(0.25, 0.7, wetMask(vRoughnessMapUv)) * ${amount.toFixed(
       let g = o.geometry;
       g = g.index ? g.toNonIndexed() : g.clone();
       g.applyMatrix4(o.matrixWorld);
-      for (const name of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(name)) g.deleteAttribute(name);
+      for (const name of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(name) && !(name === 'color' && o.material.vertexColors)) g.deleteAttribute(name);
       if (!g.attributes.uv) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
       if (!g.attributes.normal) g.computeVertexNormals();
       if (!buckets.has(key)) buckets.set(key, { mat: o.material, cast: o.castShadow, recv: o.receiveShadow, geos: [] });
@@ -655,6 +674,7 @@ float wetG = smoothstep(0.25, 0.7, wetMask(vRoughnessMapUv)) * ${amount.toFixed(
   // 40 cm ramp worth of curb, so feet never sink into it
   groundY(x, z) {
     let y = 0;
+    for (const r of this.raised) if (x > r.x0 && x < r.x1 && z > r.z0 && z < r.z1) y = Math.max(y, r.h(x, z));
     for (const [x0, x1, z0, z1] of this.blocks) {
       const d = Math.min(x - x0, x1 - x, z - z0, z1 - z);
       if (d > 0) {
@@ -790,7 +810,7 @@ float wetG = smoothstep(0.25, 0.7, wetMask(vRoughnessMapUv)) * ${amount.toFixed(
     const nearLamp = (z) => lamps.some((l) => Math.abs(l.z - z) < 2.5);
     for (const [zN, zS] of blockRanges()) {
       for (let z = zS - 3; z > zN + 2; z -= 5 + rng() * 5) {
-        if (nearLamp(z) || L.gate.some((g) => Math.abs(g - z) < 6) || MAZE.some((r) => Math.abs(r.z - z) < 3.5) || z < L.zMin + 9 || z > 31) continue;
+        if (nearLamp(z) || L.gate.some((g) => Math.abs(g - z) < 6) || MAZE.some((r) => Math.abs(r.z - z) < 3.5) || z < L.zMin + 9 || z > 31 || zoneAt(z, 3)) continue;
         for (const side of [-1, 1]) {
           const r = rng();
           if (r > 0.55) continue;
@@ -911,7 +931,7 @@ float wetG = smoothstep(0.25, 0.7, wetMask(vRoughnessMapUv)) * ${amount.toFixed(
       if (!n) { l.intensity = 0; return; }
       l.position.set(n.it.x, n.it.y - 0.3, n.it.z);
       l.color.set(n.it.color ?? LV.theme.lamp ?? 0xffa860);
-      l.intensity = 100 * (n.it.power ?? 1) * this.lampLevel(n.it, t) * (n.it.nofx ? 1 : this.lampDim);
+      l.intensity = 100 * (n.it.power ?? 1) * this.lampLevel(n.it, t) * (n.it.nofx && !n.it.dim ? 1 : this.lampDim);
     });
     for (const { cone, pool, L: Lm } of this.lampFx) {
       const far = Math.abs(Lm.z - focus.z) > 40;

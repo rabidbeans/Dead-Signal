@@ -151,7 +151,7 @@ input:focus { border-color: rgba(200,64,46,.7); }
 .bleed i { display: block; height: 100%; background: var(--signal); }
 .toast { position: absolute; left: 50%; top: 16vh; transform: translateX(-50%); font-weight: 600; letter-spacing: .14em; font-size: 15px; color: var(--dim); opacity: 0; }
 .toast.on { animation: toast 3s; }
-.toast.long { width: min(80vw, 520px); text-align: center; letter-spacing: .06em; line-height: 1.3; color: var(--text); }
+.toast.long { top: 21vh; width: min(80vw, 520px); text-align: center; letter-spacing: .06em; line-height: 1.3; color: var(--text); }
 .toast.long.on { animation: toast 5.5s; }
 /* the dead talk (speech.js): a bubble over the head, popping in */
 .speech { position: fixed; inset: 0; pointer-events: none; z-index: 4; overflow: hidden; }
@@ -300,3 +300,10 @@ input:focus { border-color: rgba(200,64,46,.7); }
 .confirm p { margin: 0 0 18px; color: var(--text, #d9d4c7); font-size: 15px; line-height: 1.45; }
 .confirm .row { display: flex; gap: 10px; flex-wrap: wrap; }
 .btn.danger { background: #b8321f; border-color: #ff6a4a; color: #fff; }
+/* level 5's warp into the side-scroller (side.js): a glitch over the picture, then a white flash */
+.warp { position: fixed; inset: 0; z-index: 6; pointer-events: none; opacity: 0; mix-blend-mode: screen;
+  background: repeating-linear-gradient(0deg, rgba(120,255,90,.12) 0 2px, transparent 2px 5px), linear-gradient(90deg, rgba(255,0,80,.18), transparent 30%, transparent 70%, rgba(0,200,255,.18)); }
+.warp.on { animation: warpGlitch 1.6s steps(12) forwards; }
+@keyframes warpGlitch { 0% { opacity: 0; transform: translateX(0); } 10% { opacity: .9; transform: translateX(-8px) skewX(4deg); } 20% { opacity: .4; transform: translateX(6px); } 35% { opacity: .95; transform: translateX(-3px) scaleY(1.03); } 60% { opacity: .6; transform: translateX(10px) skewX(-6deg); } 80% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+.warp-flash { position: fixed; inset: 0; z-index: 7; pointer-events: none; background: #f2ffe8; animation: warpFlash .9s ease-out forwards; }
+@keyframes warpFlash { 0% { opacity: 0; } 12% { opacity: 1; } 100% { opacity: 0; } }

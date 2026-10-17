@@ -299,9 +299,9 @@ export class FX {
     }
   }
 
-  tracer(x0, y, z0, x1, z1) {
-    const len = Math.hypot(x1 - x0, z1 - z0);
-    this.tracerList.push({ x0, z0, y, dx: (x1 - x0) / len, dz: (z1 - z0) / len, len, d: 0.3, speed: 140 });
+  tracer(x0, y, z0, x1, z1, y1 = y) {
+    const len = Math.hypot(x1 - x0, z1 - z0, y1 - y) || 1e-3;
+    this.tracerList.push({ x0, z0, y, dx: (x1 - x0) / len, dz: (z1 - z0) / len, dy: (y1 - y) / len, len, d: 0.3, speed: 140 });
   }
 
   shell(x, y, z, dirx, dirz) {
@@ -376,7 +376,7 @@ export class FX {
       t.d += t.speed * dt;
       const head = Math.min(t.len, t.d), tail = Math.max(0, t.d - 2.2);
       if (tail >= t.len) return false;
-      this.tracers.push({ ax: t.x0 + t.dx * tail, ay: t.y, az: t.z0 + t.dz * tail, bx: t.x0 + t.dx * head, by: t.y, bz: t.z0 + t.dz * head, w: 0.035, r: 1, g: 0.85, b: 0.6, a: 0.9 });
+      this.tracers.push({ ax: t.x0 + t.dx * tail, ay: t.y + t.dy * tail, az: t.z0 + t.dz * tail, bx: t.x0 + t.dx * head, by: t.y + t.dy * head, bz: t.z0 + t.dz * head, w: 0.035, r: 1, g: 0.85, b: 0.6, a: 0.9 });
       return true;
     });
     this.tracers.flush();
@@ -418,6 +418,7 @@ export class FX {
     this.shells.instanceMatrix.needsUpdate = true;
     // fires: flames, embers, smoke
     for (const f of this.world.fires) {
+      if (!!f.stage !== !!this.stage2d) continue;      // the 2D stage has its own fires (side.js)
       const d2 = (f.x - focus.x) ** 2 + (f.z - focus.z) ** 2;
       if (d2 > 900) continue;
       const rate = 26 * f.size;
@@ -450,6 +451,7 @@ export class FX {
         r.y += 14; r.x = (Math.random() - 0.5) * 34; r.z = (Math.random() - 0.5) * 26;
       }
       const X = focus.x + r.x, Z = focus.z + r.z;
+      if (this.roofed?.(X, Z)) continue;           // no rain inside the hospital and the warehouse
       this.rain.push({ ax: X, ay: r.y, az: Z, bx: X - wind.x * 0.05, by: r.y + 0.55, bz: Z - wind.z * 0.05, w: 0.018, r: 1, g: 1, b: 1, a: 0.32 });
     }
     this.rain.flush();
@@ -458,7 +460,7 @@ export class FX {
       const p = this.rip[i];
       p.t += dt * 2.2;
       if (p.t > 1) { p.t = 0; p.x = focus.x + (Math.random() - 0.5) * 30; p.z = focus.z + (Math.random() - 0.5) * 22; p.s = 0.15 + Math.random() * 0.25; }
-      const s = p.s * (0.2 + p.t);
+      const s = this.roofed?.(p.x, p.z) ? 0.001 : p.s * (0.2 + p.t);
       _m.compose(_v.set(p.x, 0.035, p.z), _q.identity(), _s.set(s, 1, s));
       this.ripples.setMatrixAt(i, _m);
     }

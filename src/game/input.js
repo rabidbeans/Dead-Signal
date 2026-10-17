@@ -129,6 +129,6 @@ export class Input {
     const rl = this.reloadPressed; this.reloadPressed = false;
     const slot = this.slotPressed; this.slotPressed = null;
     const swap = this.swapPressed; this.swapPressed = false;
-    return { move: mv, aim, firing, tap, reload: rl, slot, swap, mouse: this.mouseAim, mouseFiring: this.mouseFiring };
+    return { move: mv, aim, firing, tap, reload: rl, slot, swap, jump: k.has('Space'), mouse: this.mouseAim, mouseFiring: this.mouseFiring };
   }
 }

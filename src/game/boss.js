@@ -91,7 +91,13 @@ export class BossFX {
     const g = this.game;
     const z = g.zombies.get(e.id);
     if (e.a === 'wind') {
-      if (z) { z.anim.move = e.m; z.anim.moveT = 0; }
+      if (z) { z.anim.move = e.m; z.anim.moveT = 0; if (e.m === 'quake') { z.anim.roar = 1.3; audio.zombie('scream', z.x, z.z, 1.4); } }
+    } else if (e.a === 'quake') {
+      if (z) z.anim.strike = 1;
+      g.side?.quake(e.x);
+    } else if (e.a === 'spit') {
+      if (z) z.anim.strike = 1;
+      g.side?.spit(e.x, e.y, e.tx, e.ty);
     } else if (e.a === 'overtime') {
       if (z) { z.overtime = true; z.char.material.userData.uniforms.uTint.value.multiplyScalar(1.08); z.anim.springs.headX.kick(-20); }
       g.hud.toast('The Foreman is on overtime: faster swings!');
@@ -113,6 +119,13 @@ export class BossFX {
       m.rotation.y = Math.atan2(-e.dx, -e.dz);
       m.scale.set(2.6, 1, e.len);
       this.tele.push({ m, t: 0, dur: e.dur, pulse: true });
+      if (g.side?.active) {
+        // side-on, a lane on the floor is a line: stand a red wall of light up along it instead
+        this.lane2d ??= (() => { const q = new THREE.Mesh(new THREE.PlaneGeometry(1, 2.6).translate(0.5, 1.3, 0), new THREE.MeshBasicMaterial({ map: LANE, color: 0xff2a1a, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false, opacity: 0 })); q.frustumCulled = false; this.scene.add(q); return q; })();
+        const q = this.lane2d;
+        q.visible = true; q.position.set(e.x, 0, e.z + 0.3); q.scale.set(e.len * Math.sign(e.dx || 1), 1, 1);
+        this.tele.push({ m: q, t: 0, dur: e.dur, pulse: true });
+      }
       if (z) { audio.zombie('scream', z.x, z.z, 1.2); z.flash = 1; }
     } else if (e.a === 'charge') {
       if (z) { z.charging = e.dur; audio.play('gate', { x: z.x, z: z.z, vol: 0.5, rate: 1.5 }); }
@@ -270,6 +283,7 @@ export class BossBrain {
     }
     this.cd -= dt; this.cd2 -= dt;
     if (!best || z.state !== 'walk') return false;
+    if (g.side?.active) return this.think2D(best, dist);      // level 5's side-scrolling fight has its own moves
     const move = MOVES[z.type][0];
     if (z.enraged && this.cd2 <= 0 && dist > 4 && dist < 15) { this.cd2 = 5.5; return this.startCharge(best, dist); }
     if (this.cd > 0) return false;
@@ -282,10 +296,33 @@ export class BossBrain {
     return false;
   }
 
+  // ---- Omega in the side-scroller: spit at whoever is up on a platform, slam the floor (a shockwave to jump), charge
+  // when berserk, scream the horde in now and then
+  think2D(best, dist) {
+    const z = this.z, g = z.game;
+    const high = [...g.players.values()].filter((p) => p.alive && (p.y2 || 0) > 1.5);
+    if (this.cd <= 0 && high.length && Math.random() < 0.7) { this.cd = 2.4 + Math.random(); const p = high[(Math.random() * high.length) | 0]; return this.begin('spitWind', { tx: p.x, ty: (p.y2 || 0) + 0.9 }); }
+    if (z.enraged && this.cd2 <= 0 && dist > 4 && dist < 15) { this.cd2 = 5.5; return this.startCharge(best, dist); }
+    if (this.cd <= 0 && dist < 10) { this.cd = 4.2 + Math.random() * 1.5; return this.begin('quakeWind', {}); }
+    if (this.cd <= -4) { this.cd = 3; return this.begin('scream', {}); }
+    return false;
+  }
+  quakeWind(dt, a) {
+    if (a.t < 0.95) return true;
+    this.emit({ a: 'quake', x: +this.z.x.toFixed(2) });
+    return this.end(0.9);
+  }
+  spitWind(dt, a) {
+    if (a.t < 0.5) return true;
+    const z = this.z, h = 1.8 * z.char.root.scale.x;
+    this.emit({ a: 'spit', x: +z.x.toFixed(2), y: +(h * 0.85).toFixed(2), tx: +a.tx.toFixed(2), ty: +a.ty.toFixed(2) });
+    return this.end(0.35);
+  }
+
   begin(name, o) { this.act = { name, t: 0, ...o }; this.z.setState('windup'); this.face(o.tx, o.tz); this.wind(name); return true; }
   // every machine poses the wind-up of the move that is coming; the boss says something about it
   wind(name) {
-    const m = { bileWind: 'bile', cleaverWind: 'cleaver', scream: 'scream', chargeWind: 'charge', leapWind: 'leap' }[name] || name;
+    const m = { bileWind: 'bile', cleaverWind: 'cleaver', scream: 'scream', chargeWind: 'charge', leapWind: 'leap', quakeWind: 'quake', spitWind: 'spit' }[name] || name;
     this.emit({ a: 'wind', m });
     this.z.game.speech?.hostLine(this.z, m, 0.7);
   }
@@ -314,13 +351,13 @@ export class BossBrain {
   charging(dt, a) {
     const z = this.z, g = z.game;
     const step = 10 * dt;
-    const res = g.world.col.resolve(z.x + a.dx * step, z.z + a.dz * step, 0.5);
+    const res = g.side?.active ? g.side.resolve(z.x + a.dx * step, z.z + a.dz * step) : g.world.col.resolve(z.x + a.dx * step, z.z + a.dz * step, 0.5);
     const moved = Math.hypot(res.x - z.x, res.z - z.z);
     z.x = res.x; z.z = res.z;
     a.gone += moved;
     for (const p of g.players.values()) {
       if (!p.alive || a.hit.has(p.id)) continue;
-      if (Math.hypot(p.x - z.x, p.z - z.z) < 1.6) { a.hit.add(p.id); g.hurtPlayer(p, z.enraged ? 34 : z.type === 'warden' ? 20 : 28, { x: z.x - a.dx, z: z.z - a.dz }, 2.6); }
+      if (Math.hypot(p.x - z.x, p.z - z.z) < 1.6 && (p.y2 || 0) < 2.2) { a.hit.add(p.id); g.hurtPlayer(p, z.enraged ? 34 : z.type === 'warden' ? 20 : 28, { x: z.x - a.dx, z: z.z - a.dz }, 2.6); }
     }
     if (Math.random() < 0.6) g.fx.smoke.emit({ x: z.x, y: 0.2, z: z.z, vx: -a.dx * 2, vy: 0.4, vz: -a.dz * 2, life: 1.0, s0: 0.5, s1: 1.8, r: 0.5, g: 0.47, b: 0.43, a0: 0.35, a1: 0, drag: 1 });
     // stops at the end of the lane, or against a wall (and is dazed a moment: the time to unload on him)
@@ -386,7 +423,7 @@ export class BossBrain {
     if (!a.done && a.t > 0.5) {
       a.done = true;
       this.emit({ a: 'scream', x: +z.x.toFixed(2), z: +z.z.toFixed(2) });
-      for (let i = 0; i < 5 + 2 * (g.players.size - 1); i++) g.spawnZombie('runner');
+      for (let i = 0; i < (g.side?.active ? 3 : 5) + 2 * (g.players.size - 1); i++) g.spawnZombie('runner');
     }
     if (a.t > 1.2) return this.end(0);
     return true;

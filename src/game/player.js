@@ -150,6 +150,7 @@ export class Player {
   // --------------------------------------------------------- local sim --
   control(dt, inp, cam) {
     const g = this.game;
+    if (g.side?.active || g.side?.warping) return g.side.control(this, inp, dt);     // level 5's side-scrolling boss fight
     if (this.dead) return;
     const sp = this.down ? 0.7 : this.speed * (this.reloadT > 0 ? 0.92 : 1) * (this.W.moveK || 1);
     // screen -> world: right is +x, down the screen is +z
@@ -367,7 +368,7 @@ export class Player {
   remoteShot(e) {
     const g = this.game;
     g.fx.muzzle(e.x, e.y, e.z, e.dx, e.dz);
-    g.fx.tracer(e.x + e.dx * 0.4, e.y, e.z + e.dz * 0.4, e.hx, e.hz);
+    g.fx.tracer(e.x + e.dx * 0.4, e.y, e.z + e.dz * 0.4, e.hx, e.hz, e.hy ?? e.y);
     g.fx.shell(e.x, e.y + 0.05, e.z, e.dx, e.dz);
     const id = WEAPON_IDS[e.wp] || 'pistol';
     if (this.cur.id !== id) this.setWeapon(id, true);
@@ -425,7 +426,8 @@ export class Player {
   update(dt) {
     const root = this.char.root;
     // remote players are smoothed toward the latest network position
-    this.gy = this.game.world.groundY(this.x, this.z);
+    if (!this.local && this.y2t !== undefined) this.y2 = (this.y2 || 0) + (this.y2t - (this.y2 || 0)) * Math.min(1, dt * 15);
+    this.gy = this.game.side?.active ? (this.y2 || 0) : this.game.world.groundY(this.x, this.z);
     root.position.set(this.x, this.gy, this.z);
     root.rotation.y = this.face;
     const c = Math.cos(this.face), s = Math.sin(this.face);
@@ -448,8 +450,9 @@ export class Player {
     if (this.lantern) {
       const fl = this.game.fx.flash;
       if (fl.t < 0.06) { this.lantern.position.set(fl.x, fl.y, fl.z); this.lantern.intensity = 30 + 26 * (1 - fl.t / 0.06); }
-      else { this.lantern.position.set(this.x, 2.2 + this.gy, this.z); this.lantern.intensity = 30; }
+      else { this.lantern.position.set(this.x, 2.2 + this.gy, this.z + (this.game.side?.active ? 1.2 : 0)); this.lantern.intensity = this.game.side?.active ? 14 : 30; }
     }
+    if (this.game.side?.active) { this.game.side.aimVisuals(this); this.laser.material.opacity += (((this.aiming && !this.dead) ? 0.55 : 0) - this.laser.material.opacity) * Math.min(1, dt * 12); this.char.material.userData.uniforms.uFlash.value = Math.max(0, this.char.material.userData.uniforms.uFlash.value - dt * 10); return; }
     // laser
     const showLaser = this.aiming && !this.dead && this.reloadT <= 0;
     this.laser.material.opacity += ((showLaser ? 0.55 : 0) - this.laser.material.opacity) * Math.min(1, dt * 12);

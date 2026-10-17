@@ -16,11 +16,13 @@ import { openSafeRoom, tickSafeRoom } from './kit.js';
 import { BossFX } from './boss.js';
 import { Speech } from './speech.js';
 import { gearPieces } from './bossgear.js';
-import { Objective, ring } from './objective.js';
+import { SideStage } from './side.js';
+import { Objective, ring, beam } from './objective.js';
+import { tickZones, takeKey, dressKeys, indoors, KEY_COLORS } from './zones.js';
 
 // picking a downed teammate back up: stand this close for this long
 const REVIVE_R = 2.4, REVIVE_T = 2.5;
-import { L, LV, HOLDS, AMBUSH, MAZE, HOLD_TRIGGER, HOLD_RADIUS, MEDKITS, setLevel } from './level.js';
+import { L, LV, HOLDS, AMBUSH, MAZE, HOLD_TRIGGER, HOLD_RADIUS, MEDKITS, ZONE_HW, setLevel, zoneAt } from './level.js';
 import { mulberry } from './rng.js';
 import { Q } from './quality.js';
 
@@ -133,6 +135,7 @@ export class Game {
     if (Q.env) { s.environment = nightEnvironment(this.engine.renderer); s.environmentIntensity = 1.0; }
     this.world = new World(s);
     this.fx = new FX(s, this.world);
+    this.fx.roofed = indoors;
     this.corpses = [];
     this.gunModels = {};
     await Promise.all(WEAPON_IDS.map(async (id) => { this.gunModels[id] = await loadWeapon(WEAPONS[id].model); }));
@@ -166,6 +169,11 @@ export class Game {
       // the level's own objective at the junction (breakers, nests, the bulldozer) and its hazards (gas tanks, shells)
       this.objective = new Objective(this);
       if (cp > 0) this.objective.skip();
+      dressKeys(this, beam);
+      // level 5: the boss fight is a side-scroller, built at the evac pad and hidden until the warp
+      if (LV.finale === 'heli') this.side = new SideStage(this);
+      // a checkpoint restart: the keycards of the stretch already behind us are taken
+      if (cp > 0) this.world.keyItems.forEach((k, i) => { if (k.zone < cp) takeKey(this, i, true); });
     } else this.targets = new Map();
     // (main.js routes network messages here once the level is running)
     // warm up shaders while the title card shows
@@ -377,7 +385,9 @@ export class Game {
       // the boss comes down from the north end of the pad toward the survivors
       this.bossSpawned = true;
       const bz = this.spawnZombie(H.boss, { x: 0, z: LV.finale === 'heli' ? L.lz.z - 8 : L.zMin + 9, seed: 424242 + this.level });
-      this.speech?.hostLine(bz, 'spawn', 1, 1.6);
+      this.speech?.hostLine(bz, 'spawn', 1, 3.2);
+      // level 5: everything warps into a side-scroller for the last fight
+      if (this.side) { bz.x = L.lz.x + 9; this.netEvent({ k: 'warp' }); this.side.start(); }
     }
     const ob = !H.boss && this.objective?.custom ? this.objective.blurb() : null;
     this.hud.banner(H.boss ? TYPES[H.boss].name : H.title, H.boss ? (LV.finale === 'heli' ? 'Kill it to call in the bird' : 'Kill it to open the safe room') : ob || 'Hold the junction while the gate is cut open', 2.8);
@@ -454,8 +464,10 @@ export class Game {
         // (the boss fight goes on until the boss is dead: after the planned dead have come, a steady trickle keeps coming)
         const endless = (H.boss || obj) && prog >= 1;
         const want = endless ? 1e9 : Math.round(this.holdTotal * Math.min(1, prog * 1.15));
-        if (this.spawnT <= 0 && this.holdSpawned < want && hunting < H.cap + 8 * (this.players.size - 1)) {
-          this.spawnT = (endless ? 1.0 : 0.25) + Math.random() * 0.5;
+        // (on the side-scroller's one line the dead pile straight into you: far fewer at a time)
+        const cap = this.side?.active ? 5 + 3 * (this.players.size - 1) : H.cap + 8 * (this.players.size - 1);
+        if (this.spawnT <= 0 && this.holdSpawned < want && hunting < cap && !this.side?.warping) {
+          this.spawnT = (this.side?.active ? 2.2 : endless ? 1.0 : 0.25) + Math.random() * 0.5;
           const roll = Math.random();
           let type = roll < H.runner ? 'runner' : roll < H.runner + H.lurch ? 'lurcher' : 'shambler';
           // the brutes lumber in at even points through the hold
@@ -500,7 +512,8 @@ export class Game {
     for (let z = L.start.z - 16; z > L.zMin + 14; z -= LV.sleepGap[0] + rng() * LV.sleepGap[1]) {
       if (L.cross.some((c) => Math.abs(z - c) < 10)) continue;       // junctions are for the hold
       const n = 1 + Math.floor(rng() * 3.4);
-      const cx = (rng() - 0.5) * 9;
+      const wide = zoneAt(z);
+      const cx = (rng() - 0.5) * (wide ? (ZONE_HW - 3) * 2 : 9);
       for (let i = 0; i < n; i++) {
         const x = cx + (rng() - 0.5) * 3, zz = z + (rng() - 0.5) * 3;
         if (!free(x, zz)) continue;
@@ -554,6 +567,7 @@ export class Game {
   // Out of sight, but not far: a free, reachable bit of street 15-30 m from a
   // survivor that is off the edge of the screen. Falls back to a street end.
   pickSpawn() {
+    if (this.side?.active || this.side?.warping) return this.side.spawnPoint();
     const pls = [...this.players.values()].filter((p) => p.alive);
     if (!pls.length) return this.world.spawns[0];
     const nav = this.world.nav, v = new THREE.Vector3();
@@ -755,6 +769,10 @@ export class Game {
       if (z) { z.anim.doLurch(); if (!this.isHost) audio.zombie('scream', z.x, z.z, 1); }
     } else if (e.k === 'boss') {
       if (!this.isHost) this.bossFx?.event(e);
+    } else if (e.k === 'warp') {
+      if (!this.isHost) this.side?.start();
+    } else if (e.k === 'key') {
+      if (!this.isHost) takeKey(this, e.i);
     } else if (e.k === 'say') {
       if (!this.isHost) this.speech?.show(e);
     } else if (e.k === 'zgone') {
@@ -767,6 +785,7 @@ export class Game {
     p.buf.push({ t: performance.now(), x: m.x, z: m.z, f: m.f });
     if (p.buf.length > 20) p.buf.shift();
     p.aimx = m.ax; p.aimz = m.az; p.aiming = !!(m.fl & 1);
+    p.y2t = m.y || 0; p.aim2x = m.ax; p.aim2y = m.ay || 0;
     p.hp = m.hp;
     if (m.mh) p.maxHp = m.mh;
     if (m.w !== undefined && p.order) { const id = WEAPON_IDS[m.w]; if (id && p.cur.id !== id) p.setWeapon(id, true); }
@@ -784,12 +803,14 @@ export class Game {
       this.holdT = ht;
     }
     if (m.O) this.objective?.apply(m.O);
+    if (m.S2 && this.side && !this.side.active && !this.side.warping) this.side.start(true);
+    if (m.KY) this.world.keyItems.forEach((k, i) => { if (m.KY & (1 << i) && !k.taken) takeKey(this, i); });
     for (const r of m.p) {
-      const [id, x, z, f, ax, az, hp, fl, w, mh, rv] = r;
+      const [id, x, z, f, ax, az, hp, fl, w, mh, rv, y2, ay] = r;
       if (id === this.me.id) { this.me.reviveT = rv || 0; continue; }
       const p = this.players.get(id);
       if (p) p.reviveT = rv || 0;
-      if (p) this.applyRemote(p, { x, z, f, ax, az, hp, fl, w, mh });
+      if (p) this.applyRemote(p, { x, z, f, ax, az, hp, fl, w, mh, y: y2, ay });
     }
     if (m.B) { const bz = this.zombies.get(m.B[0]); if (bz) bz.hp = m.B[1]; }
     for (const r of m.z) {
@@ -825,20 +846,20 @@ export class Game {
         this.inT = 1 / 20;
         const p = this.me;
         const fl = (p.aiming ? 1 : 0) | (p.down ? 2 : 0) | (p.dead ? 4 : 0);
-        this.net.toHost({ t: 'in', x: +p.x.toFixed(2), z: +p.z.toFixed(2), f: +p.face.toFixed(3), ax: +p.aimx.toFixed(2), az: +p.aimz.toFixed(2), hp: p.hp, fl, w: WEAPON_IDS.indexOf(p.cur.id), mh: p.maxHp }, false);
+        this.net.toHost({ t: 'in', x: +p.x.toFixed(2), z: +p.z.toFixed(2), f: +p.face.toFixed(3), ax: +p.aimx.toFixed(2), az: +p.aimz.toFixed(2), hp: p.hp, fl, w: WEAPON_IDS.indexOf(p.cur.id), mh: p.maxHp, y: +(p.y2 || 0).toFixed(2), ay: +(p.aim2y || 0).toFixed(2) }, false);
       }
     } else if (this.role === 'host') {
       this.snapT -= dt;
       if (this.snapT <= 0) {
         this.snapT = 1 / 15;
-        const P = [...this.players.values()].map((p) => [p.id, +p.x.toFixed(2), +p.z.toFixed(2), +p.face.toFixed(3), +p.aimx.toFixed(2), +p.aimz.toFixed(2), p.hp, (p.aiming ? 1 : 0) | (p.down ? 2 : 0) | (p.dead ? 4 : 0), WEAPON_IDS.indexOf(p.cur.id), p.maxHp, +(p.reviveT || 0).toFixed(1)]);
+        const P = [...this.players.values()].map((p) => [p.id, +p.x.toFixed(2), +p.z.toFixed(2), +p.face.toFixed(3), +p.aimx.toFixed(2), +p.aimz.toFixed(2), p.hp, (p.aiming ? 1 : 0) | (p.down ? 2 : 0) | (p.dead ? 4 : 0), WEAPON_IDS.indexOf(p.cur.id), p.maxHp, +(p.reviveT || 0).toFixed(1), +(p.y2 || 0).toFixed(2), +(p.aim2y || 0).toFixed(2)]);
         const Z = [];
         for (const z of this.zombies.values()) {
           if (!z.alive) continue;
           Z.push([z.id, +z.x.toFixed(2), +z.z.toFixed(2), +z.face.toFixed(2), { walk: 0, windup: 1, stagger: 2, recover: 3 }[z.state] || 0]);
         }
         const bz = this.bossZ();
-        this.net.broadcast({ t: 'snap', p: P, z: Z, B: bz ? [bz.id, Math.round(bz.hp)] : 0, h: [this.hold, +this.holdT.toFixed(1), this.holdAway ? 1 : 0, this.opened], O: this.objective?.state() ?? 0 }, false);
+        this.net.broadcast({ t: 'snap', p: P, z: Z, B: bz ? [bz.id, Math.round(bz.hp)] : 0, h: [this.hold, +this.holdT.toFixed(1), this.holdAway ? 1 : 0, this.opened], O: this.objective?.state() ?? 0, KY: this.world.keyItems.reduce((m, k, i) => m | (k.taken ? 1 << i : 0), 0), S2: this.side?.active || this.side?.warping ? 1 : 0 }, false);
       }
     }
   }
@@ -894,6 +915,14 @@ export class Game {
   // the HUD's screen-edge markers: the objective's, and every downed teammate
   markers() {
     const out = this.objective?.markers() || [];
+    const me = this.me;
+    for (const k of this.world.keyItems) {
+      if (k.taken) continue;
+      const Z = zoneAt(me.z, 4);
+      if (!Z || Z.index !== k.zone) continue;
+      const hex = '#' + KEY_COLORS[k.color].toString(16).padStart(6, '0');
+      out.push({ x: k.x, z: k.z, c: hex, label: `${k.color.toUpperCase()} KEY` });
+    }
     for (const p of this.players.values()) if (!p.local && p.down && !p.dead) out.push({ x: p.x, z: p.z, c: '#ff4a4a', label: 'HELP' });
     return out;
   }
@@ -969,7 +998,7 @@ export class Game {
       if (me.ammo < shots) this.stats.shots++;
     }
     // medkits
-    for (const m of [...this.medkits]) {
+    for (const m of this.side?.active ? [] : [...this.medkits]) {
       m.g.rotation.y += dt;
       if (me.alive && me.hp < me.maxHp && Math.hypot(me.x - m.x, me.z - m.z) < 0.9) {
         me.hp = Math.min(me.maxHp, me.hp + Math.max(50, me.maxHp * 0.5));
@@ -1008,7 +1037,7 @@ export class Game {
       const plist = this._plist || (this._plist = []);
       plist.length = 0;
       for (const p of this.players.values()) plist.push(p);
-      for (const z of this.zombies.values()) z.think(dt, plist);
+      if (!this.side?.warping) for (const z of this.zombies.values()) z.think(dt, plist);
       this.director(dt);
       this.revives(dt);
       this.reviveFx(dt);
@@ -1029,7 +1058,9 @@ export class Game {
     this.wind.gust = Math.max(0, perlin1(this.time * 0.25) * 1.4);
     this.world.update(this.time, dt, me, this.wind);
     this.ambient(dt);
-    this.cam.update(dtReal, me, me.aimx, me.aimz, me.aiming);
+    this.side?.update(dt);
+    if (this.side?.active) this.side.camera(dtReal);
+    else if (!this.side?.warping) this.cam.update(dtReal, me, me.aimx, me.aimz, me.aiming);
     audio.setListener(me.x, me.z);
     const scale = this.engine.h * this.engine.renderer.getPixelRatio() / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)));
     this.fx.update(dt, this.camera, me, scale, this.wind);
@@ -1040,6 +1071,8 @@ export class Game {
     this.bossFx?.update(dt);
     this.speech?.update(dt);
     this.objective?.update(dt);
+    tickZones(this, dt);
+    if (this.groundFog) this.groundFog.pts.visible = Q.fogSheets > 0 && !indoors(me.x, me.z);
     this.gateTick(dt);
     this.updateCutaway();
     // low health: heartbeat and a draining picture
@@ -1056,7 +1089,7 @@ export class Game {
   botField(goal, key) {
     if (!this.botNav || this.botNavKey !== key) {
       const b = this.world.bounds;
-      this.botNav ??= new NavField(b.minX - 6, b.minZ - 8, b.maxX + 6, b.maxZ + 8, 0.5, this.world.col);
+      this.botNav = new NavField(b.minX - 6, b.minZ - 8, b.maxX + 6, b.maxZ + 8, 0.5, this.world.col);
       for (const d of this.world.col.dyn) this.botNav.mark(d);      // (the bulldozer: the bot walks round it)
       this.botNav.build([goal], 1e5);
       this.botNavKey = key;
@@ -1064,8 +1097,30 @@ export class Game {
     return this.botNav;
   }
 
+  // the side-scroller: keep a few metres from Omega, jump its shockwaves and the dead that get close, shoot
+  botInput2D() {
+    const me = this.me, S = this.side;
+    let best = null, bd = 1e9;
+    const boss = this.bossZ();
+    for (const z of this.zombies.values()) { if (!z.alive) continue; const d = Math.abs(z.x - me.x); if (d < bd) { bd = d; best = z; } }
+    const focus = boss || best;
+    let mx = 0, my = 0;
+    if (focus) {
+      const side = me.x < focus.x ? -1 : 1;
+      const want = focus.x + side * 8;
+      mx = Math.max(-1, Math.min(1, (want - me.x) * 0.5));
+      if (Math.abs(me.x - S.X0) > 19) mx = -Math.sign(me.x - S.X0);
+    }
+    const wave = S.waves.some((w) => Math.abs(w.x - me.x) < 3.5 && Math.sign(me.x - w.x) === w.dir);
+    if (wave || (best && bd < 1.6 && Math.random() < 0.08)) my = -1;
+    const t = best && bd < 18 ? best : null;
+    const aim = t ? (() => { const ax = t.x - me.x, ay = 1.0 * t.char.root.scale.x - ((me.y2 || 0) + 1.35), l = Math.hypot(ax, ay); return { x: ax / l, y: -ay / l, mag: 1 }; })() : null;
+    return { move: { x: mx, y: my }, aim, firing: !!aim, tap: false, reload: me.ammo === 0, mouse: null, mouseFiring: false, jump: false };
+  }
+
   botInput(dt) {
     const me = this.me;
+    if (this.side?.active || this.side?.warping) return this.botInput2D(dt);
     // what the objective wants: the nearest unfinished breaker, the nearest live nest (to shoot from range), the dozer
     let obGoal = null, obShoot = null;
     const O = this.objective;
@@ -1108,8 +1163,12 @@ export class Game {
       mx = -me.x * 0.3; my = Math.max(-0.4, Math.min(0.4, (c - me.z) * 0.2));
     } else {
       // walk the maze: a distance field from where it is going (the shut gate, then the boss plaza)
-      const goal = this.opened < L.gate.length ? { x: 0, z: L.gate[this.opened] + 4 } : { x: 0, z: L.lz.z + 2 };
-      const d = this.botField(goal, 'g' + this.opened).dir(me.x, me.z);
+      let goal = this.opened < L.gate.length ? { x: 0, z: L.gate[this.opened] + 4 } : { x: 0, z: L.lz.z + 2 };
+      let gk = 'g' + this.opened;
+      // a locked door ahead: the keycard first
+      const kc = this.world.keyItems.find((k) => !k.taken && zoneAt(me.z, 4)?.index === k.zone);
+      if (kc) { goal = { x: kc.x, z: kc.z }; gk = 'k' + kc.color; }
+      const d = this.botField(goal, gk).dir(me.x, me.z);
       if (d) { mx = d.x; my = d.z; } else { mx = (goal.x - me.x) * 0.3; my = -1; }
     }
     // stuck on something (a sandbag arc dead ahead)? step round it
@@ -1160,6 +1219,7 @@ export class Game {
     this.bank(false);          // quitting keeps what you looted
     this.objective?.dispose();
     this.speech?.dispose();
+    this.side?.dispose();
     for (const z of this.zombies.values()) z.dispose();
     for (const p of this.players.values()) p.dispose();
     this.scene.clear();

@@ -21,7 +21,7 @@ export const TYPES = {
   patientzero: { boss: true, name: 'PATIENT ZERO', trait: 'Hooked to his drip: he heals if you stop shooting. Keep the pressure on.', hp: 3000, speed: [1.0, 1.1], turn: 2.4, dmg: 32, scale: 1.7, rad: 0.9, reach: 2.2, windup: 0.8, recover: 1.2, stagger: 0.02, knock: 0.05, models: ['b_patientzero'], regen: 0.006 },
   butcher: { boss: true, name: 'THE BUTCHER', trait: 'He smells blood: when you are hurt, he comes faster.', hp: 3800, speed: [1.0, 1.12], turn: 2.6, dmg: 34, scale: 1.8, rad: 0.9, reach: 2.2, windup: 0.75, recover: 1.1, stagger: 0.02, knock: 0.05, models: ['b_butcher'], tint: [1.04, 0.98, 0.98] },
   foreman: { boss: true, name: 'THE FOREMAN', trait: 'Overtime: under half health he swings and leaps faster.', hp: 4600, speed: [0.95, 1.05], turn: 2.3, dmg: 38, scale: 1.85, rad: 0.95, reach: 2.3, windup: 0.85, recover: 1.2, stagger: 0.02, knock: 0.04, models: ['b_foreman'] },
-  omega: { boss: true, name: 'SUBJECT OMEGA', trait: 'It mutates as it is hurt: bigger and faster every quarter of its health.', hp: 5600, speed: [1.05, 1.15], turn: 2.6, dmg: 40, scale: 1.95, rad: 1.0, reach: 2.4, windup: 0.75, recover: 1.0, stagger: 0.01, knock: 0.03, models: ['b_omega'] },
+  omega: { boss: true, name: 'SUBJECT OMEGA', trait: 'It mutates as it is hurt: bigger and faster every quarter of its health.', hp: 3600, speed: [1.05, 1.15], turn: 2.6, dmg: 40, scale: 1.95, rad: 1.0, reach: 2.4, windup: 0.75, recover: 1.0, stagger: 0.01, knock: 0.03, models: ['b_omega'] },
 };
 
 // per body: how the person they were still shows in the walk (on top of the shambler/lurcher/runner/brute gait)
@@ -185,7 +185,8 @@ export class Zombie {
     if (this.state === 'windup') {
       want = 0.3;
       if (this.stateT > windup) {
-        if (best && dist < reach + 0.35) {
+        // (in the 2D fight the dead cannot climb: a survivor up on a platform is out of reach)
+        if (best && dist < reach + 0.35 && (best.y2 || 0) < (this.boss ? 2.7 : 1.3)) {
           this.game.hurtPlayer(best, this.def.dmg * (this.enraged ? 1.25 : 1), this, this.type === 'butcher' ? 1.6 : undefined);
           this.game.speech?.hostLine(this, 'bite', this.boss ? 0.45 : 0.1);
         }
@@ -220,7 +221,7 @@ export class Zombie {
       const dx = nx - p.x, dz = nz - p.z, d = Math.hypot(dx, dz);
       if (d < 0.55 && d > 1e-4) { nx = p.x + dx / d * 0.55; nz = p.z + dz / d * 0.55; }
     }
-    const res = this.game.world.col.resolve(nx, nz, 0.3);
+    const res = this.game.side?.active ? this.game.side.resolve(nx, nz) : this.game.world.col.resolve(nx, nz, 0.3);
     this.x = res.x; this.z = res.z;
   }
 
@@ -363,7 +364,7 @@ export class Zombie {
       this.kit?.update(dt);
       return;
     }
-    let y = this.game.world.groundY(this.x, this.z);
+    let y = this.game.side?.active ? 0 : this.game.world.groundY(this.x, this.z);
     if (this.leap) {
       // the Foreman's leap: every machine flies the same arc (the host moves him along the ground)
       const lp = this.leap;

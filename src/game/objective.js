@@ -11,6 +11,7 @@
 // builds the same set pieces and draws them from the snapshot (`state()` / `apply()`) and from events.
 import * as THREE from 'three';
 import { L, LV, LANES } from './level.js';
+import { ZONE_TANKS } from './zones.js';
 import { audio } from './audio.js';
 import { tex } from './assets.js';
 
@@ -26,6 +27,7 @@ export function objectiveSites() {
 }
 export function tankSites() {
   if (!LV.tanks) return [];
+  if (ZONE_TANKS.length) return ZONE_TANKS;
   const out = [];
   LANES.forEach((l, i) => {
     if (i % 2) return;
@@ -66,7 +68,7 @@ export function ring(color, r) {
   return m;
 }
 // a tall shaft of light over something you need to reach: readable from anywhere on the street
-function beam(color) {
+export function beam(color) {
   const m = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.9, 22, 16, 1, true).translate(0, 11, 0), new THREE.ShaderMaterial({
     uniforms: { uColor: { value: new THREE.Color(color) }, uA: { value: 1 } },
     vertexShader: 'varying float vY; void main(){ vY = position.y / 22.0; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',

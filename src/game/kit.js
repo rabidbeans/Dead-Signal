@@ -167,7 +167,7 @@ export function hesco() {
 
 // ----------------------------------------------------------- paper lanterns --
 // Strings of red and gold lanterns across the street (Lantern Street): one InstancedMesh each, glowing (they bloom).
-export function lanternStrings(world, zs) {
+export function lanternStrings(world, zs, hw = 9) {
   const per = 9;
   const bodyGeo = new THREE.SphereGeometry(0.2, 12, 9).scale(1, 1.25, 1);
   const capGeo = new THREE.CylinderGeometry(0.09, 0.09, 0.06, 10);
@@ -180,14 +180,14 @@ export function lanternStrings(world, zs) {
   let n = 0, nc = 0;
   zs.forEach((z, si) => {
     for (let k = 0; k < per; k++) {
-      const u = (k + 0.5) / per, x = -8.8 + u * 17.6;
+      const u = (k + 0.5) / per, x = -(hw - 0.2) + u * (hw - 0.2) * 2;
       const y = 4.7 - Math.sin(u * Math.PI) * 0.6;
       p.set(x, y - 0.24, z); m.compose(p, q, s); body.setMatrixAt(n, m);
       body.setColorAt(n, colors[(k + si) % colors.length]); n++;
       p.set(x, y - 0.02, z); m.compose(p, q, s); caps.setMatrixAt(nc++, m);
       p.set(x, y - 0.5, z); m.compose(p, q, s); caps.setMatrixAt(nc++, m);
     }
-    for (let k = 0; k <= 20; k++) { const u = k / 20; wire.push(new THREE.Vector3(-9 + u * 18, 4.7 - Math.sin(u * Math.PI) * 0.6, z)); if (k > 0 && k < 20) wire.push(wire[wire.length - 1].clone()); }
+    for (let k = 0; k <= 20; k++) { const u = k / 20; wire.push(new THREE.Vector3(-hw + u * hw * 2, 4.7 - Math.sin(u * Math.PI) * 0.6, z)); if (k > 0 && k < 20) wire.push(wire[wire.length - 1].clone()); }
   });
   body.instanceMatrix.needsUpdate = true; body.instanceColor.needsUpdate = true; caps.instanceMatrix.needsUpdate = true;
   const lines = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(wire), new THREE.LineBasicMaterial({ color: 0x1a1a1a }));

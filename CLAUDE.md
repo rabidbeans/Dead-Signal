@@ -426,3 +426,42 @@ have specific and original ways they move, act, and have funny lines that are ba
   /tmp/dsdist` + `python3 -m http.server 4174 -d /tmp/dsdist`; both scripts default to :4174): an edit under the dev
   server reloads the page mid-run ("window.__game is not a function"). A one-frame black screenshot under SwiftShader
   was traced to capture timing (no NaN anywhere in the scene).
+
+## 2026-10-17: only bosses talk; every level its own map; level 5's boss in 2D
+Sam: "Only the bosses are supposed to have bubbles … most of all the levels are the same … like doom style or wolfenstein …
+or like magicka … in level five, the game switches into a 2d side scroller for the boss battle … a cool animation … warp into the 2d."
+- **Speech**: `hostLine` returns unless `z.boss`; the horde's LINES and chatter are gone. Omega has `quake`/`spit` lines.
+- **Map styles** (`style` in LEVELS): L1 `rows` (street barricades, unchanged), L2 `wards` (a hospital INTERIOR, Wolfenstein),
+  L3 `canals` (a canal quarter of quays, footbridges and islands, Magicka), L4 `warehouse` (an interior with RED and BLUE
+  keycard doors, Doom), L5 `chicane` (street, unchanged). The interior/canal stretches are `ZONES` (level.js `mazeZones`:
+  start → junction and gate → arena), `ZONE_HW` 20 m wide; buildings (`buildLots`) and lamps step back from them.
+  - `src/game/layout.js` is pure seeded data: `genInterior` (BSP rooms on a 4 m `CELL` grid, a DFS spanning tree of doors
+    plus a few loops, arches, corridors; a locked door on the tree's cut with its key room on the entrance side) and
+    `genCanals` (channels across the zone with bridges, lengthwise canals, islands); `zoneBlocked`. `inMaze` checks it.
+  - `src/game/zones.js` builds them: walls (`wallBox`: one wall material + a separate cap plane — ⚠️ a mesh with a MATERIAL
+    ARRAY is never merged by `bake()`: walls with 6-material boxes cost ~680 draw calls, split ~220), doors (collider tag
+    'door', not marked in nav, `rec.off` toggled by `tickZones`: open for a survivor within ~2.7 m or a zombie within 1.7,
+    never shut on a body), locked doors (tag 'locked', marked; `takeKey` is the host's, `key` event, `KY` bitmask in the
+    snapshot, a checkpoint restart takes the keys silently), furniture along the walls (`RECIPES`/`ITEMS`), dim room lamps
+    (`dim`/`nofx`), canal water (low colliders: you can shoot over it), footbridges added to `world.raised` (read by
+    `groundY`), `ZONE_TANKS` (L3's gas tanks), lantern strings. `indoors(x, z)`: rain, ripples and the ground fog stay out.
+  - Colliders with `off` are skipped by `_resolve`/`_ray`; `NavField.markAll` skips doors.
+  - Furniture: `tools/blender/interior_kit.py` -> `props/interior.glb` (beds, gurneys, wheelchairs, curtains, desks, cabinets,
+    vending, op table, racks, forklift, footbridge, rowboat, mooring post...). Colours are VERTEX COLOURS on two materials
+    (`int_vc`, `int_glow`) so a whole room merges into two draw calls; `bake()` keeps the colour attribute for vertexColors
+    materials (it used to strip it: black furniture).
+- **Level 5's boss fight is a SIDE-SCROLLER** (`src/game/side.js` `SideStage`, only when `LV.finale === 'heli'`): the final
+  hold sends a `warp` event; for 2.7 s the street squashes flat toward the stage plane, the camera swings from top-down to
+  side-on with a dutch roll, a glitch overlay (`.warp`), and at 1.5 s under a white flash the world is hidden, the stage shown,
+  the horde removed (host, `zgone`) and `fx.stage2d` set. On the stage: run, JUMP (stick up / W / Space), drop through a
+  platform (stick down); one-way platforms (`plats`, tolerance 0.3 m) stand BEHIND the walking plane so nobody is hidden in a
+  container; aim in the plane (right stick or the mouse), shots are rays against boxes. Heights live in `y2` (the sim keeps
+  x/z, z pinned to the plane); 'in' messages and snapshot rows carry y2/aim2y ([11],[12]), shots carry `hy`, the stage state
+  is `S2`. Omega's 2D moves (`think2D` in boss.js): SPIT at anyone up high, QUAKE (a floor shockwave: jump it), charge when
+  enraged, the scream calls 3 runners. The evac runs in 2D too. Bot: `botInput2D`.
+- QA (/home/user/tools/pw, against the build on :4174): `warp_shots.mjs <prefix>` (TIMES=… frames through the warp and the
+  fight, the loop paused), `jump_test.mjs` (crate, hop to the next platform, drop through), `drawprobe.mjs`, `obj_bot.mjs`.
+  Measured: the bot crossed L2's wards to Patient Zero, L3's canals to the Butcher, found both keycards in L4 and reached the
+  Foreman; in L5's 2D fight the (god-mode) bot killed Omega and the evac finished. Play-view draw calls L2-L4 ~210-250.
+  Known: the L5 street bot gets pinned against a hesco wall by a crowd from the start (same on the build before this round).
+  Not verified: phones, co-op on two devices for doors/keys/2D, sounds by ear.
