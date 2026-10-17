@@ -53,6 +53,9 @@ export class Rig {
       bone.quaternion._onChange(() => {});    // nothing reads a bone's Euler angles: skip keeping them in sync
     }
     this.hipsY = this.b.root ? this.b.root.position.y : 0;
+    // the leg's bone lengths (the boss's kneel lowers the hips by the shin)
+    this.shinLen = this.rest.foot_L ? this.rest.foot_L.pos.length() : 0.42;
+    this.thighLen = this.rest.shin_L ? this.rest.shin_L.pos.length() : 0.44;
     // a touch of cartoon in the proportions: heads and hands ~10% larger
     if (this.b.head) this.b.head.scale.setScalar(1.22);
     for (const h of ['hand_L', 'hand_R']) if (this.b[h]) this.b[h].scale.setScalar(1.16);
@@ -156,6 +159,15 @@ export class ZombieAnim {
     this.roar = 0;         // Omega's scream
     this.enraged = false;
     this.stepEv = 0;       // +1 each time a foot lands (the Foreman's stomp reads it)
+    // the swing: when something sets strike = 1 a timeline runs - the raised weapon ACCELERATES through an arc to the
+    // impact pose (sw 0..1), overshoots past it (over, the follow-through) and only then eases back (strike 1 -> 0)
+    this.st = null; this.sw = 0; this.over = 0; this.aHold = 0; this.swinging = false;
+    this.roarS = 0;        // the scream, eased in (it used to snap fully open in one frame)
+    this.chargeS = 0;      // the charge, eased in: the walk opens into a run
+    this.leapU = -1;       // the Foreman's leap: 0..1 along the arc while he is in the air
+    this.preK = 0;         // how far a swing has already come down before its blow lands
+    this.turn = 0;         // how fast the body is turning (rad/s): a boss leans into it
+    this.hipX = 0; this.hipY = 0; this.hipZ = 0;
     this.phase = r();
     this.t = r() * 10;
     this.twitchT = 1 + r() * 4;
@@ -199,33 +211,55 @@ export class ZombieAnim {
     }
     for (const s of Object.values(S)) s.step(dt);
     this.lurch = Math.max(0, this.lurch - dt * 2.5);
-    this.strike = Math.max(0, this.strike - dt * 2.6);
+    // (a swing already brought down in the air, the Foreman's, picks up at the impact instead of starting over)
+    if (this.strike >= 1) { this.st = this.preK > 0.5 ? (this.style?.swingT ?? 0.13) : 0; this.aHold = Math.max(this.attack, 0.6); this.strike = 0.999; this.preK = 0; }
+    if (this.st !== null) {
+      this.st += dt;
+      const SW = this.style?.swingT ?? 0.13, REC = this.style?.recT ?? 0.7;
+      const u = Math.min(1, this.st / SW);
+      this.sw = u * u;                                                   // slow out of the hold, fast into the hit
+      const rec = smooth(Math.max(0, Math.min(1, (this.st - SW - 0.18) / REC)));
+      this.attack = Math.min(this.attack, this.aHold * (1 - this.sw));
+      this.strike = Math.min(0.999, this.sw * (1 - rec));    // (never 1: that is the trigger)
+      const o = (this.st - SW) / 0.3;
+      this.over = o > 0 && o < 1 ? Math.sin(o * Math.PI) * (1 - rec) : 0;
+      if (rec >= 1) { this.st = null; this.strike = 0; this.over = 0; this.sw = 0; }
+    } else { this.strike = Math.max(0, this.strike - dt * 2.6); this.over = 0; }
+    this.swinging = this.st !== null;
+    this.roarS += (Math.min(1, this.roar * 1.6) - this.roarS) * Math.min(1, dt * 7);
+    this.chargeS += (Math.min(1, this.charge) - this.chargeS) * Math.min(1, dt * 6);
     this.throwT = Math.max(0, this.throwT - dt * 1.7);
     this.roar = Math.max(0, this.roar - dt * 0.8);
     this.moveT += dt;
     if (this.style?.tick) this.style.tick(this, dt);
 
-    if (this.dead > 0) { this.updateDeath(dt); return; }
+    if (this.dead > 0) { if (this.style) this.updateBossDeath(dt); else this.updateDeath(dt); return; }
 
-    // gait phase advances by distance: one cycle = two steps
-    const cycleLen = 1.05 * (p.stride / 0.33);
+    // gait phase advances by distance: one cycle = two steps (moved is in the body's own units: zombie.js divides by
+    // its scale, or a 1.8x boss would take a normal man's steps and his feet would skate). A charging boss runs: a
+    // longer stride, so the legs open up instead of spinning faster.
+    const run = this.style ? this.chargeS : 0;
+    const strideE = p.stride * (1 + 0.85 * run);
+    const cycleLen = 1.05 * (strideE / 0.33);
     const ph0 = this.phase;
     this.phase = (this.phase + moved / cycleLen) % 1;
     if (moved > 0 && (Math.floor(ph0 * 2) !== Math.floor(this.phase * 2))) this.stepEv++;
     const walk = Math.min(1, speed / 0.5);
     const ph = this.phase;
-    const lean = p.lean + this.lurch * 0.35 + this.attack * 0.25;
+    const lean = p.lean + this.lurch * 0.35 + this.attack * 0.25 + 0.3 * run;
 
     // limp: the bad leg's step is shorter and the foot drags
     const sl = this.style?.legs;
-    const o = { stride: p.stride * walk, knee: 0.9 * walk * (sl?.knee ?? 1), bend: sl?.bend ?? 0.12, lean, axis: X };
+    const o = { stride: strideE * walk, knee: 0.9 * walk * (sl?.knee ?? 1) * (1 + 0.55 * run), bend: sl?.bend ?? 0.12, lean, axis: X };
     let phL = ph, phR = (ph + 0.5) % 1;
     const aL = legCycle(rig, 'L', phL, p.limp === 'L' ? { ...o, stride: o.stride * 0.55, knee: o.knee * 0.25 } : o);
     const aR = legCycle(rig, 'R', phR, p.limp === 'R' ? { ...o, stride: o.stride * 0.55, knee: o.knee * 0.25 } : o);
     // body: drop on the bad leg, bob, sway
     const bob = -Math.abs(Math.cos(ph * TAU)) * 0.035 * walk;
     const limpDrop = p.limp ? (p.limp === 'L' ? Math.max(0, -Math.cos(phL * TAU)) : Math.max(0, -Math.cos(phR * TAU))) * 0.04 * walk : 0;
-    rig.setHips(0, bob - limpDrop - 0.03 - this.attack * 0.04, 0);
+    this.hipX = 0; this.hipY = bob * (p.bob ?? 1) - limpDrop - 0.03 - this.attack * 0.04; this.hipZ = 0;
+    // a heavy body rides over the standing leg
+    if (this.style) this.hipX = Math.sin(ph * TAU) * (p.shift ?? 0.025) * walk;
     const sway = Math.sin(ph * TAU) * p.sway * (0.5 + walk);
     rig.rot('root', Z, sway * 0.4);
     rig.rot('root', Y, Math.sin(ph * TAU) * 0.12 * walk);
@@ -248,7 +282,7 @@ export class ZombieAnim {
     rig.rot('jaw', X, -(p.jaw + Math.max(0, Math.sin(this.t * 2.1)) * 0.12 + this.attack * 0.45));
     // arms
     const armSwing = (side) => Math.sin((side === 'L' ? phR : phL) * TAU) * (this.kind === 'runner' ? 0.9 : 0.25) * walk;
-    if (this.style) this.style.pose(this, { ph, phL, phR, walk, lean, aL, aR });
+    if (this.style) { this.style.pose(this, { ph, phL, phR, walk, lean, aL, aR, run }); this.bossBody(); }
     else for (const side of ['L', 'R']) {
       const sg = side === 'L' ? 1 : -1;
       const reaching = p.reach === 'both' || p.reach === side;
@@ -268,6 +302,52 @@ export class ZombieAnim {
         rig.rot(`forearm_${side}`, X, -0.15 - Math.max(0, armSwing(side)) * 0.3);
         rig.rot(`fingers_${side}`, X, 0.35);
       }
+    }
+    rig.setHips(this.hipX, this.hipY, this.hipZ);
+    rig.apply();
+  }
+
+  // What every boss's body does around its blows, whatever it holds: it LOADS into the wind-up (sinks, knees giving,
+  // the chest drawn back, a tremble at the top), drives forward through the swing, and leans into its turns.
+  bossBody() {
+    const rig = this.rig, A = this.attack, K = this.strike, O = this.over;
+    const load = this.style.load ?? 1;
+    const sink = (0.7 * A + K) * load;
+    this.hipY -= 0.075 * sink;
+    for (const sd of ['L', 'R']) { rig.rot(`thigh_${sd}`, X, -0.24 * sink); rig.rot(`shin_${sd}`, X, 0.46 * sink); rig.rot(`foot_${sd}`, X, -0.22 * sink); }
+    rig.rot('spine02', X, (-0.12 * A + 0.2 * K + 0.14 * O) * load);
+    if (A > 0.8 && !this.swinging) { const tr = (A - 0.8) / 0.2 * Math.sin(this.t * 47) * 0.03; rig.rot('spine03', Y, tr); rig.rot('head', Z, tr * 0.7); }
+    const tl = Math.max(-1, Math.min(1, this.turn / 3));
+    rig.rot('root', Z, -0.09 * tl);
+    rig.rot('neck', Y, 0.16 * tl);
+  }
+
+  // A boss does not fold like a man: the knees go first and he drops onto them (the hips fall by a shin's length),
+  // slumps, and then the whole bulk topples (zombie.js tips the root over the knees after ~0.45 s).
+  updateBossDeath(dt) {
+    const rig = this.rig;
+    this.dead += dt;
+    const kn = smooth(Math.min(1, this.dead / 0.42));
+    const slump = smooth(Math.max(0, Math.min(1, (this.dead - 0.25) / 0.6)));
+    const d = this.deathDir;
+    for (const sd of ['L', 'R']) {
+      rig.rot(`thigh_${sd}`, X, -0.12 * kn);
+      rig.rot(`shin_${sd}`, X, 1.62 * kn);
+      rig.rot(`foot_${sd}`, X, -0.75 * kn);
+    }
+    rig.setHips(0, -rig.shinLen * 0.92 * kn, -0.05 * kn);
+    rig.rot('spine03', X, (0.2 + 0.25 * d) * slump);
+    rig.rot('spine02', X, (0.15 + 0.2 * d) * slump);
+    rig.rot('neck', X, 0.45 * slump);
+    rig.rot('head', Z, this.p.headTilt * 1.4 * slump);
+    rig.rot('jaw', X, -0.5);
+    const flop = this.p.flop ??= [this.r() * 0.9, this.r() * 0.9, this.r() * 1.2, this.r() * 1.2];
+    for (const side of ['L', 'R']) {
+      const sg = side === 'L' ? 1 : -1, i = side === 'L' ? 0 : 1;
+      rig.rot(`upperarm_${side}`, Z, -sg * (0.82 - slump * flop[i] * 0.5));
+      rig.rot(`upperarm_${side}`, X, -0.25 * kn - flop[i] * 0.5 * slump * d);
+      rig.rot(`forearm_${side}`, X, -0.3 - flop[i + 2] * 0.6 * slump);
+      rig.rot(`fingers_${side}`, X, 0.6);
     }
     rig.apply();
   }
@@ -327,23 +407,32 @@ function arm(rig, side, { down = 0.78, fwd = 0, twist = 0, elbow = 0, wrist = 0,
 }
 
 // a two-handed overhead swing: raise -> hold -> chop through
-function chop(a) { return -2.7 * a.attack * (1 - a.strike) - 0.55 * a.strike; }
+function chop(a) { return -2.7 * a.attack * (1 - a.strike) - 0.55 * a.strike - 0.45 * (a.over || 0); }
 
 export const BOSS_STYLE = {
   // THE WARDEN: a riot cop who still walks the beat. Upright, a stiff measured march with the knees lifting, the
   // shield held across the body on the left forearm, the baton low in the right hand tapping the shield as he comes.
   // The swing is an overhead baton blow; the charge is head down behind the shield.
   warden: {
-    legs: { knee: 1.35, bend: 0.08 },
-    init(p) { p.lean = 0.12; p.headFwd = 0.08; p.headTilt *= 0.25; p.stride = 0.36; p.timeScale = 0.72; p.limp = null; p.sway = 0.05; p.jaw = 0.08; p.shoulderDrop = 0; },
+    legs: { knee: 1.2, bend: 0.1 },
+    swingT: 0.11, recT: 0.6,
+    init(p) { p.lean = 0.12; p.headFwd = 0.08; p.headTilt *= 0.25; p.stride = 0.36; p.timeScale = 0.72; p.limp = null; p.sway = 0.05; p.jaw = 0.08; p.shoulderDrop = 0; p.bob = 1.3; p.shift = 0.022; },
     pose(a, g) {
-      const rig = a.rig, A = a.attack, K = a.strike, C = Math.min(1, a.charge * 3);
-      rig.rot('spine03', X, 0.25 * C);
-      rig.rot('neck', X, 0.3 * C);
+      const rig = a.rig, A = a.attack, K = a.strike, C = a.chargeS;
+      // the charge is SET first: down low behind the shield, the back foot dug in, the head tucked
+      const set = a.move === 'charge' ? A : 0;
+      a.hipY -= 0.12 * set;
+      rig.rot('thigh_L', X, -0.55 * set); rig.rot('shin_L', X, 0.7 * set); rig.rot('foot_L', X, -0.2 * set);
+      rig.rot('thigh_R', X, 0.25 * set); rig.rot('shin_R', X, 0.55 * set); rig.rot('foot_R', X, -0.4 * set);
+      rig.rot('spine03', X, 0.25 * C + 0.35 * set);
+      rig.rot('spine02', X, 0.15 * set);
+      rig.rot('neck', X, 0.3 * C + 0.2 * set);
+      rig.rot('spine03', Y, 0.3 * set);
       // shield arm: forearm across the chest, raised higher in the charge
-      arm(rig, 'L', { down: 0.7, fwd: -0.75 - 0.35 * C, twist: -0.55, elbow: 1.35 + 0.1 * C, elbowY: 0.5, wrist: -0.2, fist: 1.1 });
+      arm(rig, 'L', { down: 0.7, fwd: -0.75 - 0.35 * Math.max(C, set), twist: -0.55, elbow: 1.35 + 0.1 * C, elbowY: 0.5, wrist: -0.2, fist: 1.1 });
       // baton arm: low and forward; a tap on the shield every few seconds; an overhead blow
       const tap = pulse(a.t, 3.6, 0.5) * (1 - A) * (1 - C);
+      if (set > 0) { arm(rig, 'R', { down: 0.75, fwd: 0.35 * set - 0.25 * (1 - set), twist: 0, elbow: 0.9, fist: 1.2 }); rig.rot('spine03', Y, 0.35 * K); return; }
       arm(rig, 'R', { down: 0.75, fwd: -0.25 + Math.sin(g.phL * Math.PI * 2) * 0.12 * g.walk - 0.7 * tap + chop(a) * 0.95, twist: -0.6 * tap + 0.15 * A, elbow: 0.55 + 0.6 * tap - 0.3 * A, fist: 1.2 });
       rig.rot('spine03', Y, -0.25 * A + 0.35 * K);
     },
@@ -354,7 +443,8 @@ export const BOSS_STYLE = {
   // brought up from the gut: he arches back with his mouth wide, then heaves forward.
   patientzero: {
     legs: { knee: 0.7, bend: 0.18 },
-    init(p, r) { p.lean = 0.72; p.headFwd = 0.5; p.headTilt = 0.38; p.stride = 0.3; p.timeScale = 0.66; p.limp = 'L'; p.sway = 0.13; p.jaw = 0.32; p.shoulderDrop = 0.2; p.spasmT = 1 + r() * 2; },
+    swingT: 0.16, recT: 0.85,
+    init(p, r) { p.bob = 1.0; p.shift = 0.03; p.lean = 0.72; p.headFwd = 0.5; p.headTilt = 0.38; p.stride = 0.3; p.timeScale = 0.66; p.limp = 'L'; p.sway = 0.13; p.jaw = 0.32; p.shoulderDrop = 0.2; p.spasmT = 1 + r() * 2; },
     tick(a, dt) {
       const p = a.p;
       p.spasmT -= dt;
@@ -387,23 +477,40 @@ export const BOSS_STYLE = {
   // sidearm whip of the right hand.
   butcher: {
     legs: { knee: 0.6, bend: 0.16, wide: 0.14 },
-    init(p) { p.lean = -0.06; p.headFwd = 0.02; p.headTilt *= 0.3; p.stride = 0.24; p.timeScale = 0.76; p.limp = null; p.sway = 0.24; p.jaw = 0.18; p.shoulderDrop = 0; },
+    swingT: 0.12, recT: 0.65, load: 1.1,
+    init(p) { p.lean = -0.06; p.headFwd = 0.02; p.headTilt *= 0.3; p.stride = 0.24; p.timeScale = 0.76; p.limp = null; p.sway = 0.24; p.jaw = 0.18; p.shoulderDrop = 0; p.bob = 1.5; p.shift = 0.05; },
     pose(a, g) {
-      const rig = a.rig, A = a.attack, K = a.strike, T = a.throwT;
+      const rig = a.rig, T = 0;
+      // the throw: the right hand cocks the cleaver back behind his ear, the whole bulk twisting away (the wind-up),
+      // then whips it across his body, the shoulders unwinding through and past (the follow-through)
+      const thr = a.move === 'cleaver';
+      const A = thr ? 0 : a.attack, K = thr ? 0 : a.strike;
+      const tA = thr ? a.attack : 0, tK = thr ? a.strike : 0, tO = thr ? a.over : 0;
       rig.rot('thigh_L', Z, 0.14); rig.rot('thigh_R', Z, -0.14);
       rig.rot('foot_L', Z, -0.12); rig.rot('foot_R', Z, 0.12);
-      rig.rot('root', Y, Math.sin(g.ph * Math.PI * 2) * 0.12 * g.walk);
       rig.rot('head', X, -0.15);
+      if (thr) {
+        // the body coils away from the target and unwinds through it; the off hand points at you the whole time
+        rig.rot('spine03', Y, 0.6 * tA - 0.85 * tK - 0.25 * tO);
+        rig.rot('spine02', Y, 0.25 * tA - 0.35 * tK);
+        rig.rot('spine03', X, -0.12 * tA + 0.3 * tK + 0.1 * tO);
+        rig.rot('neck', Y, -0.3 * tA + 0.4 * tK);              // the eyes stay on the target while the chest turns
+        // cocked: the elbow up level with the shoulder and drawn back, the cleaver up beside his head;
+        // the throw: the arm unfolds forward and across, the wrist snapping over
+        arm(rig, 'R', { down: 0.5 - 0.7 * tA + 0.3 * tK, fwd: 1.35 * tA - 1.45 * tK - 0.35 * tO, twist: -0.35 * tA + 0.35 * tK, elbow: 0.7 + 1.2 * tA - 0.75 * tK, wrist: -0.35 * tA + 0.6 * tK, fist: 1.2 });
+        arm(rig, 'L', { down: 0.78, fwd: -1.35 * tA + 0.6 * tK + 0.3 * tO, twist: 0.1 * tA, elbow: 0.15 + 0.3 * tK, fist: 0.9 });
+        return;
+      }
+      rig.rot('root', Y, Math.sin(g.ph * Math.PI * 2) * 0.12 * g.walk);
       rig.rot('jaw', X, -Math.max(0, Math.sin(a.t * 5)) * 0.15);         // chewing
       const sharpen = pulse(a.t + 2, 5.5, 1.1) * (1 - A) * (1 - T);
       const scr = Math.sin(a.t * 22) * 0.12 * sharpen;
-      const throwArm = T > 0 ? -2.4 * smooth(Math.min(1, (1 - T) * 3)) * (T > 0.66 ? 1 : 0) + (T <= 0.66 ? -0.3 - 1.4 * T : 0) : 0;
       for (const side of ['L', 'R']) {
         const sg = side === 'L' ? 1 : -1;
         const sw = Math.sin((side === 'L' ? g.phR : g.phL) * Math.PI * 2) * 0.1 * g.walk;
         arm(rig, side, {
-          down: 0.5 - 0.2 * sharpen, fwd: -0.35 + sw + chop(a) - 0.4 * sharpen + (side === 'R' ? throwArm : 0),
-          twist: -0.75 * sharpen + sg * scr + (side === 'R' && T > 0 ? -0.6 * T : 0), elbow: 0.95 - 0.5 * A + 0.3 * sharpen, wrist: 0.2, fist: 1.25,
+          down: 0.5 - 0.2 * sharpen, fwd: -0.35 + sw + chop(a) - 0.4 * sharpen,
+          twist: -0.75 * sharpen + sg * scr, elbow: 0.95 - 0.5 * A + 0.3 * sharpen, wrist: 0.2, fist: 1.25,
         });
       }
     },
@@ -413,21 +520,51 @@ export const BOSS_STYLE = {
   // dust, the sledgehammer resting on his right shoulder and the free arm swinging wide. The blow is a two-handed
   // overhead slam; the leap is arms up, knees tucked.
   foreman: {
-    legs: { knee: 1.15, bend: 0.1 },
-    init(p) { p.lean = 0.04; p.headFwd = 0.1; p.headTilt *= 0.25; p.stride = 0.42; p.timeScale = 0.68; p.limp = null; p.sway = 0.11; p.jaw = 0.06; p.shoulderDrop = 0; },
+    legs: { knee: 1.05, bend: 0.1 },
+    swingT: 0.14, recT: 0.9, load: 1.45,
+    init(p) { p.lean = 0.04; p.headFwd = 0.1; p.headTilt *= 0.25; p.stride = 0.42; p.timeScale = 0.68; p.limp = null; p.sway = 0.11; p.jaw = 0.06; p.shoulderDrop = 0; p.bob = 1.0; p.shift = 0.03; },
     pose(a, g) {
-      const rig = a.rig, A = Math.max(a.attack, a.air), K = a.strike;
-      rig.rot('spine03', X, -0.14 - 0.35 * A + 0.65 * K);
+      const rig = a.rig;
+      let K = a.strike;
+      // the leap, along its arc (leapU): a push off with the legs driving out straight, a tuck at the top with the
+      // hammer drawn right back over his head, then the legs reach for the ground and the hammer comes over with him
+      const u = a.leapU, air = u >= 0 ? 1 : 0;
+      const push = air ? Math.max(0, 1 - u / 0.25) : 0, tuck = air ? Math.sin(Math.min(1, Math.max(0, (u - 0.1) / 0.75)) * Math.PI) : 0, reach = air ? Math.max(0, (u - 0.72) / 0.28) : 0;
+      // before the leap he SINKS: a deep squat, chest over his knees, the hammer swung down and back to load the jump
+      if (air) a.leapt = true; else if (a.move !== 'leap') a.leapt = false;
+      const crouch = !air && !a.leapt && a.move === 'leap' ? a.attack : 0;
+      // the landing: the body takes the drop through the legs (the slam's own swing comes from strike)
+      const land = a.move === 'leap' && !air ? K : 0;
+      a.hipY -= 0.3 * crouch + 0.16 * land;
+      for (const sd of ['L', 'R']) { rig.rot(`thigh_${sd}`, X, -0.95 * crouch - 0.55 * land); rig.rot(`shin_${sd}`, X, 1.5 * crouch + 0.9 * land); rig.rot(`foot_${sd}`, X, -0.55 * crouch - 0.35 * land); }
+      rig.rot('spine02', X, 0.4 * crouch);
+      // the hammer comes over in the last third of the fall so it meets the ground with his feet
+      const pre = air ? reach * reach : 0;
+      a.preK = pre;
+      const A = air ? 1 - pre : crouch ? 0 : a.attack;
+      rig.rot('spine03', X, -0.14 - 0.35 * A + 0.65 * K + 0.25 * reach);
       rig.rot('spine04', X, -0.06);
       rig.rot('head', Y, Math.sin(g.ph * Math.PI * 2) * 0.12 * g.walk);
       // the stomp: the body drops onto each heel
       const st = Math.pow(Math.abs(Math.cos(g.ph * Math.PI * 2)), 6) * 0.05 * g.walk;
-      rig.setHips(0, -0.035 - st - 0.08 * a.air, 0);
-      if (a.air) { rig.rot('thigh_L', X, -1.0 * a.air); rig.rot('thigh_R', X, -0.8 * a.air); rig.rot('shin_L', X, 1.5 * a.air); rig.rot('shin_R', X, 1.3 * a.air); }
+      a.hipY -= st;
+      if (air) {
+        for (const [sd, k] of [['L', 1], ['R', 0.85]]) {
+          rig.rot(`thigh_${sd}`, X, (-1.05 * tuck + 0.35 * push - 0.3 * reach) * k);
+          rig.rot(`shin_${sd}`, X, (1.55 * tuck + 0.1 * push + 0.2 * reach) * k);
+          rig.rot(`foot_${sd}`, X, 0.4 * push - 0.3 * tuck);
+        }
+      }
+      if (crouch > 0) {
+        arm(rig, 'R', { down: 0.7, fwd: 0.9 * crouch - 0.55 * (1 - crouch), twist: 0.1, elbow: 0.4, fist: 1.3 });
+        arm(rig, 'L', { down: 0.7, fwd: 0.75 * crouch, twist: -0.2, elbow: 0.4, fist: 1.2 });
+        return;
+      }
+      K = Math.max(K, pre);
       const two = Math.max(A, K);
-      arm(rig, 'R', { down: 0.6 - 0.2 * two, fwd: -0.55 * (1 - two) + chop({ attack: A, strike: K }), twist: 0.15 * (1 - two), elbow: 2.05 * (1 - two) + 0.25 * two, wrist: -0.1, fist: 1.3 });
+      arm(rig, 'R', { down: 0.6 - 0.2 * two, fwd: -0.55 * (1 - two) + chop({ attack: A, strike: K, over: a.over }), twist: 0.15 * (1 - two), elbow: 2.05 * (1 - two) + 0.25 * two, wrist: -0.1, fist: 1.3 });
       const sw = Math.sin(g.phR * Math.PI * 2) * 0.5 * g.walk;
-      arm(rig, 'L', { down: 0.72 - 0.15 * two, fwd: sw * (1 - two) + chop({ attack: A, strike: K }), twist: -0.35 * two, elbow: 0.45 + 0.2 * two, fist: 1.1 });
+      arm(rig, 'L', { down: 0.72 - 0.15 * two, fwd: sw * (1 - two) + chop({ attack: A, strike: K, over: a.over }), twist: -0.35 * two, elbow: 0.45 + 0.2 * two, fist: 1.1 });
     },
   },
 
@@ -436,7 +573,8 @@ export const BOSS_STYLE = {
   // both arms flung wide; berserk, everything twitches harder.
   omega: {
     legs: { knee: 1.0, bend: 0.25 },
-    init(p, r) { p.lean = 0.88; p.headFwd = 0.55; p.headTilt = 0.15; p.stride = 0.48; p.timeScale = 1.0; p.limp = null; p.sway = 0.09; p.jaw = 0.38; p.shoulderDrop = 0.25; p.jerkT = r(); },
+    swingT: 0.1, recT: 0.55, load: 1.2,
+    init(p, r) { p.bob = 1.4; p.shift = 0.035; p.lean = 0.88; p.headFwd = 0.55; p.headTilt = 0.15; p.stride = 0.48; p.timeScale = 1.0; p.limp = null; p.sway = 0.09; p.jaw = 0.38; p.shoulderDrop = 0.25; p.jerkT = r(); },
     tick(a, dt) {
       const p = a.p;
       p.jerkT -= dt * (a.enraged ? 2.2 : 1);
@@ -448,14 +586,14 @@ export const BOSS_STYLE = {
       }
     },
     pose(a, g) {
-      const rig = a.rig, A = a.attack, K = a.strike, R = smooth(Math.min(1, a.roar * 1.6));
+      const rig = a.rig, A = a.attack, K = a.strike, R = smooth(a.roarS);
       rig.rot('spine03', X, -0.85 * R);
       rig.rot('spine02', X, -0.5 * R);
       rig.rot('neck', X, -0.6 * R);
       rig.rot('jaw', X, -0.8 * R - 0.3 * A);
       // the big right arm plants with the left foot: a knuckle-walk
       const kn = Math.sin(g.phL * Math.PI * 2) * 0.55 * g.walk;
-      arm(rig, 'R', { down: 0.62 - 1.5 * R, fwd: kn + g.lean * 0.55 + chop(a) * 1.1 - 0.5 * a.charge, twist: 0.1, elbow: 0.12 + 0.2 * A, fist: 1.5 });
+      arm(rig, 'R', { down: 0.62 - 1.5 * R, fwd: kn + g.lean * 0.55 + chop(a) * 1.1 - 0.5 * a.chargeS, twist: 0.1, elbow: 0.12 + 0.2 * A, fist: 1.5 });
       // the small left arm: a claw against the chest
       arm(rig, 'L', { down: 0.55 - 1.4 * R, fwd: -0.55 + g.lean * 0.2 + a.springs.armL.x * 0.04, twist: -0.45 * (1 - R), elbow: 1.5 * (1 - R), wrist: 0.5, fist: 1.2 + Math.sin(a.t * 9) * 0.25 * (a.enraged ? 1 : 0.4) });
     },

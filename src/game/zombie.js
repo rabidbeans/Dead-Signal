@@ -56,9 +56,10 @@ export class Zombie {
     this.char.root.scale.setScalar(scale);
     this.baseScale = scale;
     this.rig = new Rig(this.char);
+    if (this.def.boss) for (const h of ['hand_L', 'hand_R']) this.rig.b[h]?.scale.setScalar(1.04);    // (a giant with cartoon hands reads as balloon gloves)
     this.anim = new ZombieAnim(this.rig, seed, this.def.anim || type);
     // the ordinary dead move a little like who they were
-    if (!this.boss) MODEL_GAIT[this.model]?.(this.anim.p, type);
+    if (!this.def.boss) MODEL_GAIT[this.model]?.(this.anim.p, type);
     // a little colour drift per body so a horde of the same model isn't clones
     const tint = 0.9 + r() * 0.16;
     const tk = this.def.tint || [1, 1, 1];
@@ -328,14 +329,29 @@ export class Zombie {
     const moved = Math.hypot(this.x - this.px, this.z - this.pz);
     const speed = dt > 0 ? moved / dt : 0;
     this.px = this.x; this.pz = this.z;
-    this.anim.attack += ((this.state === 'windup' ? 1 : 0) - this.anim.attack) * Math.min(1, dt * (this.boss ? 6 : 10));
-    // the blow lands: the swing follows through
+    // the wind-up: a boss draws it out (slow away from rest, quicker into the coil, then held trembling until the
+    // blow); the horde just lunges
+    this.windT = this.state === 'windup' ? (this.windT || 0) + dt : 0;
+    if (this.boss && this.state === 'windup') { const u = Math.min(1, this.windT / 0.5); this.anim.attack = Math.max(this.anim.attack * (this.prevState === 'windup' ? 1 : 0), u * u * (3 - 2 * u)); }
+    else this.anim.attack += ((this.state === 'windup' ? 1 : 0) - this.anim.attack) * Math.min(1, dt * (this.boss ? 4 : 10));
+    // the blow lands: the swing follows through (rig.js runs the arc from here)
     if (this.prevState === 'windup' && this.state === 'recover') this.anim.strike = 1;
     this.prevState = this.state;
-    if (this.state !== 'windup' && this.anim.strike < 0.05) this.anim.move = null;
+    if (this.state !== 'windup' && !this.anim.swinging && this.anim.strike < 0.05 && this.anim.attack < 0.1 && !(this.charging > 0)) this.anim.move = null;
     if (this.charging > 0) this.charging -= dt;
     this.anim.charge = Math.max(0, Math.min(1, this.charging > 0 ? 1 : this.anim.charge - dt * 3));
     this.anim.air = this.leap ? 1 : Math.max(0, this.anim.air - dt * 4);
+    this.anim.leapU = this.leap ? Math.min(1, this.leap.t / this.leap.dur) : -1;
+    // a boss's body turns to its new heading over a moment (the AI snaps `face` when it picks a target); the rate of
+    // that turn is what it leans into
+    if (this.boss) {
+      if (this.vface === undefined) this.vface = this.face;
+      let da = this.face - this.vface;
+      da = Math.atan2(Math.sin(da), Math.cos(da));
+      const step = da * Math.min(1, dt * (this.anim.chargeS > 0.3 ? 14 : 7));
+      this.vface += step;
+      this.anim.turn += ((dt > 0 ? step / dt : 0) - this.anim.turn) * Math.min(1, dt * 8);
+    }
     this.anim.enraged = !!this.enraged;
     // Posing 27 bones is the single biggest cost of the horde, so only what you can see is posed every
     // frame: the dead beyond the screen edge every few frames, the long-dead not at all.
@@ -346,7 +362,8 @@ export class Zombie {
     const settled = this.state === 'dead' && this.deadT > 1.8;
     const pose = !settled && (d2 < 324 || this.lodN % (d2 > 676 ? 6 : 2) === 0);
     if (pose) {
-      this.anim.update(this.adt, Math.min(this.amv, 0.2 * (this.adt / Math.max(dt, 1e-3))), this.adt > 0 ? this.amv / this.adt : 0);
+      const sc = this.char.root.scale.x || 1;      // the gait is in the body's own units
+      this.anim.update(this.adt, Math.min(this.amv, 0.2 * (this.adt / Math.max(dt, 1e-3))) / sc, this.adt > 0 ? this.amv / this.adt / sc : 0);
       this.adt = 0; this.amv = 0;
     }
     this.flash = Math.max(0, this.flash - dt / 0.08);
@@ -354,11 +371,23 @@ export class Zombie {
     // the fall: pivot at the feet, onto the ground over ~0.6 s
     const root = this.char.root;
     if (this.state === 'dead') {
-      this.fall = Math.min(1, this.fall + dt / 0.6);
-      const k = this.fall < 1 ? (1 - Math.pow(1 - this.fall, 2.4)) : 1;
-      const bounce = this.fall >= 1 ? 0 : Math.sin(Math.max(0, this.fall - 0.8) / 0.2 * Math.PI) * 0.04;
+      let k, bounce;
+      if (this.boss) {
+        // on its knees first (rig.js), then the whole bulk topples, gathering speed, and lands with a jolt
+        this.fallT = (this.fallT || 0) + dt;
+        const f = Math.max(0, Math.min(1, (this.fallT - 0.45) / 0.8));
+        const was = this.fall;
+        this.fall = f;
+        k = f * f * (1.6 - 0.6 * f);
+        bounce = f >= 1 ? Math.max(0, Math.sin(Math.min(1, (this.fallT - 1.25) / 0.35) * Math.PI)) * 0.06 * Math.max(0, 1 - (this.fallT - 1.25) / 0.35) : 0;
+        if (was < 1 && f >= 1) this.game.bossFx?.thud?.(this);
+      } else {
+        this.fall = Math.min(1, this.fall + dt / 0.6);
+        k = this.fall < 1 ? (1 - Math.pow(1 - this.fall, 2.4)) : 1;
+        bounce = this.fall >= 1 ? 0 : Math.sin(Math.max(0, this.fall - 0.8) / 0.2 * Math.PI) * 0.04;
+      }
       const d = this.anim.deathDir;
-      root.rotation.set(d * (k * 1.45 - bounce), this.face, 0, 'YXZ');
+      root.rotation.set(d * (k * (this.boss ? 1.4 : 1.45) - bounce), this.boss ? (this.vface ?? this.face) : this.face, 0, 'YXZ');
       root.position.set(this.x, this.game.world.groundY(this.x, this.z) + 0.02 + k * 0.08, this.z);
       if (this.deadT > 30) { this.sunk += dt * 0.05; root.position.y -= this.sunk; }
       this.kit?.update(dt);
@@ -374,7 +403,7 @@ export class Zombie {
       if (u >= 1) this.leap = null;
     }
     root.position.set(this.x, y, this.z);
-    root.rotation.set(0, this.face, 0);
+    root.rotation.set(0, this.boss ? this.vface : this.face, 0);
     this.kit?.update(dt);
   }
 

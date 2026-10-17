@@ -129,6 +129,10 @@ export class BossFX {
       if (z) { audio.zombie('scream', z.x, z.z, 1.2); z.flash = 1; }
     } else if (e.a === 'charge') {
       if (z) { z.charging = e.dur; audio.play('gate', { x: z.x, z: z.z, vol: 0.5, rate: 1.5 }); }
+    } else if (e.a === 'skid') {
+      if (z && !g.isHost) { z.anim.springs.spineX.kick(14); z.anim.springs.headX.kick(16); }
+      for (let i = 0; i < 16; i++) g.fx.smoke.emit({ x: e.x + (Math.random() - 0.5), y: 0.15, z: e.z + (Math.random() - 0.5), vx: e.dx * (2 + Math.random() * 3) + (Math.random() - 0.5) * 2, vy: 0.4, vz: e.dz * (2 + Math.random() * 3) + (Math.random() - 0.5) * 2, life: 1.1, s0: 0.4, s1: 1.6, r: 0.5, g: 0.47, b: 0.43, a0: 0.35, a1: 0, drag: 1.8 });
+      audio.play('hard', { x: e.x, z: e.z, vol: 0.5, rate: 0.6 });
     } else if (e.a === 'ring') {
       // a landing spot: a ring and a filling disc
       const r = this.take('ring'), d = this.take('disc');
@@ -145,7 +149,7 @@ export class BossFX {
         this.event({ a: 'ring', x: tx, z: tz, r: 1.9, dur: e.dur + i * 0.12, c: 0x6aff2a });
       });
     } else if (e.a === 'cleaver') {
-      if (z) { audio.play('slide', { x: z.x, z: z.z, vol: 0.9, rate: 0.7 }); z.anim.throwT = 1; }
+      if (z) { audio.play('slide', { x: z.x, z: z.z, vol: 0.9, rate: 0.7 }); z.anim.throwT = 1; z.anim.strike = 1; }
       for (const [dx, dz] of e.d) {
         const m = this.cleaverMeshes.find((q) => !q.visible) || this.cleaverMeshes[0];
         m.visible = true;
@@ -176,6 +180,21 @@ export class BossFX {
       audio.zombie('scream', e.x, e.z, 1.6);
       g.cam.trauma(0.5);
     }
+  }
+
+  // a boss's body hits the ground: a ring of dust, the street shakes, a deep thump (every machine, from zombie.js)
+  thud(z) {
+    const g = this.game, s = z.char.root.scale.x, d = z.anim.deathDir || 1;
+    const fx = Math.sin(z.vface ?? z.face) * d, fz = Math.cos(z.vface ?? z.face) * d;
+    const cx = z.x + fx * 1.0 * s, cz = z.z + fz * 1.0 * s;
+    for (let i = 0; i < 34; i++) {
+      const a = Math.random() * 6.283, r = Math.random() * 0.8 * s;
+      g.fx.smoke.emit({ x: cx + Math.cos(a) * r, y: 0.15, z: cz + Math.sin(a) * r, vx: Math.cos(a) * (2 + Math.random() * 3), vy: 0.3 + Math.random() * 0.6, vz: Math.sin(a) * (2 + Math.random() * 3), life: 1.5, s0: 0.5, s1: 2.0, r: 0.5, g: 0.47, b: 0.43, a0: 0.4, a1: 0, drag: 1.6, spin: 0.3 });
+    }
+    audio.play('thunder', { x: cx, z: cz, vol: 0.7, rate: 1.9 });
+    const dm = g.me ? Math.hypot(g.me.x - cx, g.me.z - cz) : 99;
+    g.cam.trauma(Math.max(0.15, 0.55 - dm * 0.03));
+    buzz([40]);
   }
 
   wave(x, z, r, color, dur) {
@@ -350,7 +369,8 @@ export class BossBrain {
   }
   charging(dt, a) {
     const z = this.z, g = z.game;
-    const step = 10 * dt;
+    // he drives up to speed over the first strides instead of starting at full tilt
+    const step = 10 * dt * Math.min(1, 0.35 + a.t / 0.35);
     const res = g.side?.active ? g.side.resolve(z.x + a.dx * step, z.z + a.dz * step) : g.world.col.resolve(z.x + a.dx * step, z.z + a.dz * step, 0.5);
     const moved = Math.hypot(res.x - z.x, res.z - z.z);
     z.x = res.x; z.z = res.z;
@@ -361,7 +381,13 @@ export class BossBrain {
     }
     if (Math.random() < 0.6) g.fx.smoke.emit({ x: z.x, y: 0.2, z: z.z, vx: -a.dx * 2, vy: 0.4, vz: -a.dz * 2, life: 1.0, s0: 0.5, s1: 1.8, r: 0.5, g: 0.47, b: 0.43, a0: 0.35, a1: 0, drag: 1 });
     // stops at the end of the lane, or against a wall (and is dazed a moment: the time to unload on him)
-    if (a.gone >= a.len || moved < step * 0.3) { g.cam.trauma(0.25); return this.end(moved < step * 0.3 ? 1.4 : 0.8); }
+    if (a.gone >= a.len || moved < step * 0.3) {
+      g.cam.trauma(0.25);
+      // the stop: the body keeps going for a beat (a lurch forward), a skid of dust
+      z.anim.springs.spineX.kick(14); z.anim.springs.headX.kick(16);
+      this.emit({ a: 'skid', x: +z.x.toFixed(2), z: +z.z.toFixed(2), dx: +a.dx.toFixed(3), dz: +a.dz.toFixed(3) });
+      return this.end(moved < step * 0.3 ? 1.4 : 0.8);
+    }
     return true;
   }
 

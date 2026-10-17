@@ -481,3 +481,46 @@ defeat the boss"; "the flashlight is too bright in the hospital level, it's blin
 - **The flashlight indoors** (`indoors(x, z)`, L2 and L4 interiors): the beam eases to 0.25 of its street strength and the lantern
   to ~0.66 (`player.inK`). `/home/user/tools/pw/hosp_light.mjs` (old vs new strength at the same spots; mean luminance and the
   clipped share).
+
+## 2026-10-17 (evening): the bosses, de-clunked
+Sam: "Let's hone in the bosses and their movements and bodies and attacks, they just look very clunky."
+- **What was wrong**: the gait advanced by WORLD metres, so a 1.8x boss took a normal man's steps (short, quick, skating);
+  `strike` jumped from the raised pose to the impact pose in ONE frame (no arc); the wind-up eased OUT (fast start, the
+  opposite of anticipation); `face` snapped when a move began; the death was a stiff plank falling in 0.6 s; bodies were thin
+  men scaled up (bulk 0.02-0.03 m), boots read as bare feet, hands as balloons, the baton stuck up like an antenna and the
+  riot shield's hand poked through it.
+- **rig.js** (ZombieAnim): `moved`/`speed` arrive in the body's OWN units (zombie.js divides by root scale — every zombie).
+  THE SWING TIMELINE: anything setting `strike = 1` starts `st`; `sw` (u², accelerating) carries the raised weapon to the
+  impact pose over `style.swingT`, `over` is a follow-through bump past it, then `strike` eases back over `style.recT`.
+  ⚠️ `strike` is capped at 0.999 inside the timeline (1 is the trigger: an exact 1 restarted the swing every frame).
+  `preK` lets a swing already brought down in the air (the Foreman's) pick up at the impact. `chop()` adds `0.45·over`.
+  `roarS`/`chargeS` ease the scream and the charge in. `bossBody()` (every boss): sinks and bends the knees into the wind-up
+  (`load`), draws the chest back, trembles at the top, drives forward through the blow, leans into turns (`turn`). Hips go
+  through `hipX/hipY/hipZ` (styles ADD to `a.hipY`; one `setHips` at the end) with a weight shift over the standing leg
+  (`p.shift`, `p.bob`). A charging boss RUNS: stride ×1.85, knees ×1.55, lean +0.3. `updateBossDeath`: knees go (hips drop a
+  shin, `rig.shinLen`), slump, then zombie.js topples the root over the knees from 0.45 s, accelerating, and `BossFX.thud`
+  (dust ring, shake, thump) on landing.
+- **Per boss**: the Warden SETS for the charge (low behind the shield, back foot dug in), drives up to speed
+  (`charging`: 35% → 100% over 0.35 s) and lurches at the stop (`skid` event: dust + a body jolt); the Butcher's throw is a
+  real throw (off hand points at you, cleaver cocked behind the head, the body coils and unwinds; the `cleaver` event sets
+  `strike`); the Foreman crouches deep with the hammer swung back before the leap (`a.leapt`), pushes off, tucks, reaches for
+  the ground with the hammer coming over in the last third of the fall (`pre`), and the landing squashes him.
+- **zombie.js**: a boss's wind-up is TIMED (smoothstep over 0.5 s from the windup's start, `windT`), not exponential; the
+  visual heading `vface` turns toward `face` (7/s, 14/s charging) and the root uses it; `anim.move` is cleared only once the
+  swing, the strike, the wind-up and the charge are all over. ⚠️ `this.boss` is set AFTER the rig/anim in the constructor —
+  use `this.def.boss` before it (two lines did not).
+- **bossgear.js**: the baton is a free item along the forearm tipped forward (`batonPose`); the sledgehammer follows the
+  shoulder→fist line through the swing (`hammerPose`), resting on the shoulder only while walking; the riot shield sits over
+  the fist and 0.16 in front of it (k 0.9); the thrown cleaver hides from release (`throwT > 0.25`). Boss hands are 1.04,
+  not the horde's cartoon 1.16.
+- **Bodies** (`variants.py`, rebuilt, ~2 min each): bulk 2-4x (Warden shoulders/chest/arms/legs, Butcher a 0.2 belly, Foreman
+  barrel chest and arms, Omega's arm 0.15 with `lumpy` — knotted, not a balloon — plus hump and neck); the Butcher's apron is
+  stained tan (cream read as underwear); boots are taller and chunkier (`shoes.thick`, `top` 1.42-1.55). build_human.py:
+  `bulk` `lumpy` (sum of three sine waves through the body), arm bulk never reaches the hands, shoes take `thick`, and the
+  preview camera stands back far enough for a boss's head. Known: the sculpt still shows toes through the boots up close
+  (the shoe shell does not erase them); invisible from the game camera.
+- **QA**: `/home/user/tools/pw/boss_strip.mjs <out> <lvl> <walk|attack|special|death> [frames] [step] [q|side|back|game|head]`
+  films a boss driven by the REAL loop (its own AI and moves) and writes JPEGs (`HIDE=1` hides the level and lays a grey
+  floor; `INFO=1` prints state/attack/strike/move per frame); `strip_sheet.py out.png cols 'glob'` tiles them. Fast (about a
+  minute a strip) because frames are copied out through a 2D canvas, not page screenshots. ⚠️ `renderer.domElement.toDataURL`
+  returns black (no preserveDrawingBuffer); `drawImage` onto a 2D canvas in the same task works.

@@ -188,14 +188,15 @@ VARIANTS.update({
     # THE WARDEN: a riot cop the size of a door. Body armour over a long-sleeved uniform, knee and elbow pads, gloves.
     'b_warden': dict(
         seed=201,
-        macro=dict(gender=1.0, age=0.5, muscle=1.0, weight=0.72, height=0.95, proportions=0.7),
-        bulk=[dict(kind='shoulders', amt=0.03), dict(kind='neck', amt=0.022), dict(kind='chest', amt=0.018)],
+        macro=dict(gender=1.0, age=0.5, muscle=1.0, weight=0.9, height=0.95, proportions=0.7),
+        bulk=[dict(kind='shoulders', amt=0.07), dict(kind='neck', amt=0.04), dict(kind='chest', amt=0.06), dict(kind='arm', amt=0.032),
+              dict(kind='legs', amt=0.03), dict(kind='belly', amt=0.035), dict(kind='hump', amt=0.03)],
         skin=dict(ZOMBIE_SKIN, base='#7d8474', livid='#40344a'),
         outfit=dict(
             shirt=dict(color='#34507e', sleeve=2.05, collar=0.01, hem=0.1, thick=0.008, buttons=False),
             vest=dict(color='#2b2f38', open=0.0, pouches=True),
             pants=dict(color='#263552', length=1.97, thick=0.007),
-            shoes=dict(color='#0e0e0e', leather=True, top=1.7),
+            shoes=dict(color='#121212', leather=True, top=1.42, thick=0.024),
             gloves=dict(color='#121212'),
             hair=dict(color='#1d1712', line=0.38, volume=0.002),
             badge=True, pads=True,
@@ -208,7 +209,7 @@ VARIANTS.update({
     'b_patientzero': dict(
         seed=202,
         macro=dict(gender=1.0, age=0.85, muscle=0.0, weight=0.0, height=1.0, proportions=0.1),
-        bulk=[dict(kind='belly', amt=0.11), dict(kind='hump', amt=0.045)],
+        bulk=[dict(kind='belly', amt=0.13), dict(kind='hump', amt=0.07), dict(kind='shoulders', amt=0.015)],
         skin=dict(ZOMBIE_SKIN, base='#9aa27e', livid='#56603a', vein='#3d5a22', veins=1.0, sunken=1.2, socket='#2a3418'),
         outfit=dict(
             gown=dict(color='#9cb4b8', pattern='stripes', color2='#6f8a90', pitch=0.045, length=0.75),
@@ -222,14 +223,15 @@ VARIANTS.update({
     # THE BUTCHER: huge belly, bull neck, thick arms, sleeves rolled, a blood-black apron to the shins.
     'b_butcher': dict(
         seed=203,
-        macro=dict(gender=1.0, age=0.6, muscle=0.7, weight=1.0, height=0.7, proportions=0.4),
-        bulk=[dict(kind='belly', amt=0.13), dict(kind='neck', amt=0.04), dict(kind='arm', amt=0.02), dict(kind='legs', amt=0.012)],
+        macro=dict(gender=1.0, age=0.6, muscle=0.8, weight=1.0, height=0.7, proportions=0.4),
+        bulk=[dict(kind='belly', amt=0.2), dict(kind='neck', amt=0.06), dict(kind='arm', amt=0.045), dict(kind='legs', amt=0.04),
+              dict(kind='shoulders', amt=0.05), dict(kind='chest', amt=0.04), dict(kind='hump', amt=0.03)],
         skin=dict(ZOMBIE_SKIN, base='#a08a7c', livid='#5a3a40'),
         outfit=dict(
             shirt=dict(color='#2e3a5a', sleeve=0.62, collar=0.01, hem=0.1, thick=0.006, buttons=True),
             pants=dict(color='#2c2a2a', pattern='plaid', color2='#1a1818', length=1.97, thick=0.006),
-            shoes=dict(color='#2a221c', leather=True, top=1.75),
-            apron=dict(color='#e2dccb', top=0.16, drop=0.04, bib=0.12, width=0.24, blood=0.9),
+            shoes=dict(color='#2a221c', leather=True, top=1.55, thick=0.022),
+            apron=dict(color='#a39780', top=0.16, drop=0.04, bib=0.12, width=0.26, blood=1.0),
             hair=dict(color='#2e221a', bald=0.9, line=0.4),
         ),
         wounds=[dict(at='forearm_R', r=0.045), dict(at='cheek_L', r=0.04, depth=0.012)],
@@ -239,13 +241,14 @@ VARIANTS.update({
     'b_foreman': dict(
         seed=204,
         macro=dict(gender=1.0, age=0.55, muscle=1.0, weight=0.8, height=0.9, proportions=0.6),
-        bulk=[dict(kind='arm', amt=0.024), dict(kind='shoulders', amt=0.035), dict(kind='neck', amt=0.02), dict(kind='belly', amt=0.025)],
+        bulk=[dict(kind='arm', amt=0.05), dict(kind='shoulders', amt=0.075), dict(kind='neck', amt=0.04), dict(kind='belly', amt=0.05),
+              dict(kind='chest', amt=0.055), dict(kind='legs', amt=0.035), dict(kind='hump', amt=0.03)],
         skin=dict(ZOMBIE_SKIN, base='#8f8670', livid='#4a3a3e'),
         outfit=dict(
             shirt=dict(color='#5a5a52', sleeve=0.5, collar=-0.01, hem=0.12, thick=0.006),
             vest=dict(color='#e8e030', pattern='hivis', open=0.06),
             pants=dict(color='#3a4a66', pattern='denim', length=1.97, thick=0.007),
-            shoes=dict(color='#5a3a20', leather=True, top=1.68),
+            shoes=dict(color='#5a3a20', leather=True, top=1.45, thick=0.026),
             gloves=dict(color='#a88a5a'),
             hair=dict(color='#2a2018', line=0.3, volume=0.003),
         ),
@@ -257,7 +260,8 @@ VARIANTS.update({
     'b_omega': dict(
         seed=205,
         macro=dict(gender=1.0, age=0.4, muscle=1.0, weight=0.35, height=1.0, proportions=0.2),
-        bulk=[dict(kind='arm', side='R', amt=0.085), dict(kind='shoulders', amt=0.045, side='R'), dict(kind='hump', amt=0.07), dict(kind='neck', amt=0.025)],
+        bulk=[dict(kind='arm', side='R', amt=0.15, lumpy=0.9), dict(kind='shoulders', amt=0.09, side='R', lumpy=0.7), dict(kind='shoulders', amt=0.03),
+              dict(kind='hump', amt=0.11, lumpy=0.8), dict(kind='neck', amt=0.045), dict(kind='chest', amt=0.045), dict(kind='legs', amt=0.03), dict(kind='arm', amt=0.02)],
         skin=dict(ZOMBIE_SKIN, base='#6e6676', livid='#3a2a4a', vein='#2a3a1a', veins=0.9, glow='#9aff3a', boil='#d8ff5a', sunken=1.1),
         outfit=dict(
             pants=dict(color='#8aa2a6', length=0.55, thick=0.005, belt=False),

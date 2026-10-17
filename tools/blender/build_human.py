@@ -259,7 +259,7 @@ def inflate(V, Nrm, F, spec):
         d += m['shirt'] * (0.008 + 0.03 * loose)
     d = np.maximum(d, m['pants'] * o.get('pants', {}).get('thick', 0.005) if o.get('pants') else 0)
     d += m['vest'] * 0.012
-    d = np.maximum(d, m['shoes'] * 0.011)
+    d = np.maximum(d, m['shoes'] * o.get('shoes', {}).get('thick', 0.011) if o.get('shoes') else 0)
     d = np.maximum(d, m['gloves'] * 0.003)
     d += m['apron'] * 0.014 + m['straps'] * 0.009
     d += m['hair'] * spec['outfit'].get('hair', {}).get('volume', 0.006)
@@ -282,7 +282,7 @@ def bulk_body(V, Nrm, F, bulk):
         if k == 'belly':
             w = (R['torso'] + 0.4 * R['uleg']) * g((F.z - (F.waist - 0.04)) / 0.16) * smooth(-0.03, 0.09, fwd) * g(x / 0.2)
         elif k == 'arm':
-            w = F.armw * (0.55 + 0.45 * smooth(0.4, 1.3, F.arm_t)) * (1 - 0.5 * R['hand'])
+            w = F.armw * (0.55 + 0.45 * smooth(0.4, 1.3, F.arm_t)) * (1 - R['hand'])      # (a bulked hand is a balloon)
         elif k == 'shoulders':
             w = (R['torso'] + R['uarm'] + R['neck'] * 0.5) * g((F.z - (F.neckz - 0.09)) / 0.11) * g((np.abs(x) - 0.16) / 0.11)
         elif k == 'hump':
@@ -295,6 +295,15 @@ def bulk_body(V, Nrm, F, bulk):
             w = F.legw * (1 - smooth(1.6, 1.9, F.leg_t))
         else:
             continue
+        if b.get('lumpy'):
+            # a mutation is not an even swelling: knots of muscle and tumour pushed out unevenly (a smooth bulge reads
+            # as a balloon)
+            rs = np.random.default_rng(b.get('seed', 7))
+            n = np.zeros(len(P))
+            for f in (19.0, 31.0, 47.0):
+                k = rs.normal(size=3); k /= np.linalg.norm(k)
+                n += np.sin(P @ (k * f) + rs.uniform(0, 6.283)) * (19.0 / f)
+            w = w * np.clip(1 + b['lumpy'] * n / 1.6, 0.25, 2.2)
         d += amt * w * sidew * (1 - R['eye'])
     return V + Nrm * d[:, None]
 
@@ -1195,11 +1204,11 @@ def render_preview(name, low, arm, imgs):
     sc.render.resolution_y = 900
     sc.render.film_transparent = False
     os.makedirs(QA, exist_ok=True)
-    for tag, loc in (('front', (0.35, -2.6, 1.15)), ('top', (1.2, -1.6, 3.6)), ('back', (-0.6, 2.4, 1.4))):
+    for tag, loc in (('front', (0.45, -3.6, 1.2)), ('top', (1.5, -2.2, 4.2)), ('back', (-0.8, 3.3, 1.5))):
         cd = bpy.data.cameras.new('c'); cd.lens = 50
         co = bpy.data.objects.new('c', cd); co.location = loc
         sc.collection.objects.link(co)
-        tgt = bpy.data.objects.new('t', None); tgt.location = (0, 0, 0.9)
+        tgt = bpy.data.objects.new('t', None); tgt.location = (0, 0, 0.95)
         sc.collection.objects.link(tgt)
         con = co.constraints.new('TRACK_TO'); con.target = tgt; con.track_axis = 'TRACK_NEGATIVE_Z'; con.up_axis = 'UP_Y'
         sc.camera = co

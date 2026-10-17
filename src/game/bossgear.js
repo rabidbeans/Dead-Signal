@@ -97,8 +97,8 @@ export class BossKit {
     if (kind === 'warden') {
       wear(b.head, 'riot_helmet', { off: [0, 0.105, 0.012], k: 0.95 });
       // the baton forward out of the fist, the side handle up
-      wear(b.hand_R, 'baton', { y: [0, 0, 1], zf: [-1, 0, 0], at: grip('R'), k: 1.0 });
-      this.shield = free('riot_shield', 0.78, () => this.shieldPose());
+      this.baton = free('baton', 1.0, () => this.batonPose());
+      this.shield = free('riot_shield', 0.9, () => this.shieldPose());
     } else if (kind === 'patientzero') {
       this.pole = free('iv_pole', 1.0, () => this.polePose());
     } else if (kind === 'butcher') {
@@ -172,12 +172,25 @@ export class BossKit {
   shieldPose() {
     const b = this.z.rig.b;
     const el = wp(b.forearm_L, _a.set(0, 0, 0)).clone(), wr = wp(b.hand_L, _b).clone();
-    const c = el.lerp(wr, 0.5).addScaledVector(this.fw, 0.07 * this.s);
+    // centred over the fist and well in front of it: the hand grips the strap BEHIND the shield, never through it
+    const c = el.lerp(wr, 0.72).addScaledVector(this.fw, 0.16 * this.s);
     const o = this.shield;
     o.position.copy(c);
     _d.copy(this.fw).addScaledVector(this.lf, -0.15);
     basis(_c.copy(UP).addScaledVector(this.fw, -0.12), _d, o.quaternion);
     o.position.y -= 0.04 * this.s;
+  }
+
+  // the baton carries on from the forearm, tipped forward: low and ahead while he walks, cocked back over his head
+  // in the wind-up, cracking down through the swing
+  batonPose() {
+    const b = this.z.rig.b;
+    const el = wp(b.forearm_R, _a).clone(), h = wp(b.hand_R, _b).clone(), f = wp(b.fingers_R, _c).clone();
+    const grip = h.clone().lerp(f, 0.55);
+    const d = h.sub(el).normalize().multiplyScalar(0.75).addScaledVector(this.fw, 0.7).normalize();
+    const o = this.baton;
+    o.position.copy(grip);
+    basis(d, this.lf, o.quaternion);
   }
 
   // the IV pole stands on its wheels beside him, leaning into the hand that pushes it
@@ -199,14 +212,15 @@ export class BossKit {
     const z = this.z, b = z.rig.b, an = z.anim;
     const h = wp(b.hand_R, new THREE.Vector3()), f = wp(b.fingers_R, new THREE.Vector3());
     const grip = h.clone().lerp(f, 0.55);
-    // three directions for the shaft: over the shoulder (walking), straight up and a little back (the wind-up),
-    // forward and down into the ground (the slam), blended by where the swing is
-    const A = Math.max(an.attack, an.air), K = an.strike;
-    const wC = Math.max(0, 1 - Math.min(1, (A + K) * 1.6)), wW = A * (1 - K), wS = K;
-    const d = new THREE.Vector3()
-      .addScaledVector(UP, 0.5 * wC + 1.0 * wW - 0.8 * wS)
-      .addScaledVector(this.fw, -0.85 * wC - 0.4 * wW + 1.0 * wS)
-      .addScaledVector(this.lf, 0.12 * wC);
+    // walking, it rests on the shoulder; once the swing starts the shaft simply carries on the line from his shoulder
+    // through his fists, so it travels the same arc as the arms (and overshoots into the ground with them)
+    const sh = wp(b.upperarm_R, new THREE.Vector3());
+    const arm = grip.clone().sub(sh).normalize();
+    const A = Math.max(an.attack, an.leapU >= 0 ? 1 : 0), K = an.strike;
+    const swing = Math.min(1, (A + K) * 1.4);
+    const carry = new THREE.Vector3().addScaledVector(UP, 0.5).addScaledVector(this.fw, -0.85).addScaledVector(this.lf, 0.12).normalize();
+    // in the swing the head leads the hands a little (a heavy head lags only on the way up)
+    const d = carry.multiplyScalar(1 - swing).addScaledVector(arm, swing).addScaledVector(UP, 0.25 * an.attack * (1 - K));
     if (d.lengthSq() < 1e-4) d.copy(UP);
     d.normalize();
     const o = this.hammer;
@@ -224,7 +238,7 @@ export class BossKit {
     z.char.root.updateMatrixWorld(true);
     for (const it of this.free) it.fn(dt);
     // the Butcher's right cleaver leaves his hand when he throws it
-    if (this.clR) this.clR.visible = !(z.anim.throwT > 0.2 && z.anim.throwT < 0.75);
+    if (this.clR) this.clR.visible = !(z.anim.throwT > 0.25);
     // the Foreman's stomp: dust off each footfall, and you feel it close up
     if (z.type === 'foreman' && z.anim.stepEv !== this.lastStep) {
       this.lastStep = z.anim.stepEv;
