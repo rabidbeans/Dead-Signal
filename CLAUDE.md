@@ -524,3 +524,32 @@ Sam: "Let's hone in the bosses and their movements and bodies and attacks, they 
   floor; `INFO=1` prints state/attack/strike/move per frame); `strip_sheet.py out.png cols 'glob'` tiles them. Fast (about a
   minute a strip) because frames are copied out through a 2D canvas, not page screenshots. ⚠️ `renderer.domElement.toDataURL`
   returns black (no preserveDrawingBuffer); `drawImage` onto a 2D canvas in the same task works.
+
+## 2026-10-17 (night): the Warden is a woman, to Sam's reference
+Sam sent a reference (a phone screenshot of a generated picture): a zombie police officer, long copper-red hair streaming,
+a deathly white face with black sockets and one side torn away to the teeth, a dark navy patrol uniform (long sleeves, tie,
+badge, gold-ringed shoulder patches, chest pockets, a gold name bar, a duty belt with a holster), blood soaked into it, hands
+red to the wrists. The picture itself was not saved into the repo.
+- **Body** (`variants.py` b_warden): female macro (gender 0, slim, height 1.0), almost no bulk; pale skin `#d2cec4` with black
+  sockets (`socket`, `sunken` 1.5); `flay` (side R, `at` offsets the patch); `bloody_hands`; `soak` (dried blood blotches over
+  the torso and thighs); `mouthgore` (the run from the mouth, lighter than the rest of the gore); tears 0 (a torn hole shows
+  pale skin: it read as white blobs on the navy).
+- **build_human.py** gained: `outfit.uniform` = { tie, patches, pockets, namebar, duty } (masks in `details()`, raised in
+  `sculpt()`, painted in `paint()`); `face_flay()` (an irregular patch from the cheekbone to the jaw: muscle with its fibres,
+  sinew, a dark rim, the lips gone and the teeth bared one by one, blood running down the jaw and neck); `shoes.boot` (40
+  relax passes on the forefoot — the toes STILL show in the close preview, see the boss pass above) and `shoes.sole`.
+- **The long hair is in the GAME** (`Hair` in bossgear.js): ~110 strands × 10 points rooted on the back, sides and temples
+  of the skull (in the head bone's frame), simulated with DYNAMIC FOLLOW-THE-LEADER (Müller 2012: predict, walk down the
+  strand restoring each length, velocity = the move minus 0.9 × the child's correction). ⚠️ A plain verlet rope with
+  top-down projection gained energy and whipped its lower half upward (measured: a hanging strand's tip rose 0.5 m in a
+  second). The first piece is combed down and back flat to the scalp (the front strands straight down past the face); the
+  strands stay outside spheres on the skull, the neck and the upper back, and above the ground. Drawn as ONE mesh of
+  camera-facing ribbons (normals to the camera), a canvas strand texture, vertex colours darker at the roots, BLENDED and
+  NOT depth-written: the ink outline (depth edges) drew every ribbon as a paper cut-out. It streams out behind her in the
+  charge and keeps simulating after death. `hairPiece()` is in `gearPieces()` so its shader compiles in warmUp.
+- **Gear**: the riot helmet is gone (the hair is the silhouette); a `holster` (boss_gear.py) rides her right hip on the
+  `root` bone; the riot shield hangs at her LEFT SIDE edge-on while she walks and swings round in front of her for the
+  set and the charge (shieldPose blends on `chargeS` / the charge's wind-up; rig.js warden arm L). The shield trait is
+  unchanged (bullets from the front within ±70°). Trait text and comments say she/her.
+- QA: `/home/user/tools/pw/hair_probe.mjs` (strand tips after 3 s: drop and horizontal spread), `hair_probe2.mjs` (one strand
+  stepped alone, its heights every 50 frames — the instability test).

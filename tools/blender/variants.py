@@ -187,22 +187,29 @@ VARIANTS.update({
 VARIANTS.update({
     # THE WARDEN: a riot cop the size of a door. Body armour over a long-sleeved uniform, knee and elbow pads, gloves.
     'b_warden': dict(
+        # THE WARDEN, to Sam's reference (2026-10-17): a woman in a dark navy patrol uniform - long sleeves, a tie, the
+        # badge, gold-ringed shoulder patches, buttoned chest pockets, a name bar, a heavy duty belt - long copper-red hair
+        # (the scalp here; the long hair is strands in the game, bossgear.js), a deathly white face with black sockets,
+        # the right side of it torn away to the teeth, blood soaked into the shirt and trousers, hands red to the wrists.
         seed=201,
-        macro=dict(gender=1.0, age=0.5, muscle=1.0, weight=0.9, height=0.95, proportions=0.7),
-        bulk=[dict(kind='shoulders', amt=0.07), dict(kind='neck', amt=0.04), dict(kind='chest', amt=0.06), dict(kind='arm', amt=0.032),
-              dict(kind='legs', amt=0.03), dict(kind='belly', amt=0.035), dict(kind='hump', amt=0.03)],
-        skin=dict(ZOMBIE_SKIN, base='#7d8474', livid='#40344a'),
+        macro=dict(gender=0.0, age=0.38, muscle=0.6, weight=0.4, height=1.0, proportions=0.9),
+        bulk=[dict(kind='shoulders', amt=0.012), dict(kind='legs', amt=0.008)],
+        skin=dict(ZOMBIE_SKIN, base='#d2cec4', livid='#6a4a58', socket='#160c10', sunken=1.5, veins=0.45, bruise=0.25,
+                  pool=0.35, eye='#c8c6bd', iris='#b4b2a8', pupil='#8c8a82', bloodshot=0.5),
         outfit=dict(
-            shirt=dict(color='#34507e', sleeve=2.05, collar=0.01, hem=0.1, thick=0.008, buttons=False),
-            vest=dict(color='#2b2f38', open=0.0, pouches=True),
-            pants=dict(color='#263552', length=1.97, thick=0.007),
-            shoes=dict(color='#121212', leather=True, top=1.42, thick=0.024),
-            gloves=dict(color='#121212'),
-            hair=dict(color='#1d1712', line=0.38, volume=0.002),
-            badge=True, pads=True,
+            shirt=dict(color='#1b2233', sleeve=2.05, collar=0.012, hem=0.1, thick=0.007, buttons=True),
+            pants=dict(color='#182030', length=1.97, thick=0.006),
+            shoes=dict(color='#0e0e0e', leather=True, top=1.62, thick=0.016, boot=True, sole='#1c1a18'),
+            hair=dict(color='#6a2810', line=0.05, volume=0.013),
+            uniform=dict(tie=True, patches=True, pockets=True, namebar=True, duty=True),
+            badge=True,
         ),
-        wounds=[dict(at='neck_R', r=0.055, depth=0.014), dict(at='cheek_L', r=0.035), dict(at='thigh_L', r=0.05)],
-        gore=1.0, tears=0.18, grime=0.6,
+        flay=dict(side='R', at=[0.0, 0.004, -0.04]),
+        bloody_hands=1.0,
+        soak=0.75,
+        mouthgore=0.45,
+        wounds=[dict(at='neck_L', r=0.04, depth=0.012), dict(at='belly', r=0.05, depth=0.012), dict(at='thigh_L', r=0.05)],
+        gore=1.0, tears=0.0, grime=0.45,
     ),
     # PATIENT ZERO: very tall, starved to the bone, a belly swollen with bile, the gown open down the back, bile
     # running from the mouth instead of blood.

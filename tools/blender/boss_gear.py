@@ -145,6 +145,17 @@ def build():
     tip = sphere('b_tip', 0.022, (0, 0, 0.49), M['black'])
     items.append(join([bat, bgrip, side, tip], 'baton'))
 
+    # a duty holster for her right hip (Sam's reference): the leather body, the retention strap, the pistol grip out of
+    # the top. Origin at the belt, up +Z, the body hanging below it, outward toward -X.
+    hb = box('ho_body', (0.075, 0.055, 0.23), (0, 0, -0.1), M['black'], bevel=0.012)
+    ht = box('ho_toe', (0.06, 0.045, 0.05), (0, 0, -0.22), M['black'], bevel=0.02)
+    hl = box('ho_loop', (0.085, 0.07, 0.04), (0, 0.004, 0.0), M['dark'], bevel=0.006)
+    hs = box('ho_strap', (0.08, 0.06, 0.018), (0, 0, 0.035), M['dark'], bevel=0.005)
+    hg = box('ho_grip', (0.045, 0.034, 0.11), (0, -0.012, 0.075), M['rubber'], bevel=0.008)
+    hg.rotation_euler = (math.radians(-12), 0, 0)
+    hsn = tcyl('ho_snap', 0.008, 0.012, (-0.04, 0, 0.035), M['chrome'], rot=(0, R90, 0))
+    items.append(join([hb, ht, hl, hs, hg, hsn], 'holster'))
+
     # ---- PATIENT ZERO: an IV pole on a five-wheel base, a bag of glowing green bile, the line hanging off it
     pole = tcyl('iv_pole', 0.012, 2.05, (0, 0, 1.05), M['chrome'], rot=(0, 0, 0))
     parts = [pole]

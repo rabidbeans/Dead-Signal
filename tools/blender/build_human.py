@@ -350,7 +350,8 @@ def details(F, m, spec):
     P, o = F.P, spec['outfit']
     n = len(P)
     z, front, x = F.z, F.fwd > 0, P[:, 0]
-    out = {k: np.zeros(n) for k in ('belt', 'buckle', 'buttons', 'placket', 'collar', 'cuff', 'hem', 'sole', 'laces', 'pocket', 'fly', 'badge', 'pantcuff', 'zip', 'pouch', 'molle', 'pad', 'flap')}
+    out = {k: np.zeros(n) for k in ('belt', 'buckle', 'buttons', 'placket', 'collar', 'cuff', 'hem', 'sole', 'laces', 'pocket', 'fly', 'badge', 'pantcuff', 'zip', 'pouch', 'molle', 'pad', 'flap',
+                                    'tie', 'patch', 'patchrim', 'emblem', 'cpocket', 'cflap', 'namebar', 'duty', 'dpouch')}
     pa, sh = o.get('pants'), o.get('shirt')
     if pa:
         top = F.waist + pa.get('rise', 0.0)
@@ -426,7 +427,73 @@ def details(F, m, spec):
         c = F.rig.head('spine01') + np.array([0.09, -0.11, -0.04])
         r = np.linalg.norm(P - c, axis=1)
         out['badge'] = (front & (r < 0.024)).astype(float)
+    # a uniform: the tie down the placket, gold-ringed patches on the shoulders, buttoned chest pockets, a name bar,
+    # a heavy duty belt with pouches
+    un = o.get('uniform')
+    if un and sh:
+        cut = F.neckz - sh.get('collar', 0.02)
+        shirt = m['shirt'] > 0.5
+        if un.get('tie'):
+            top = cut - 0.012
+            bot = F.waist + 0.02
+            u = np.clip((top - z) / max(top - bot, 1e-3), 0, 1)
+            w = np.where(z > top - 0.035, 0.016, 0.011 + 0.013 * u)            # the knot, then widening to the blade
+            w = np.where(z < bot + 0.04, w * np.clip((z - bot) / 0.04, 0, 1), w)  # the pointed tip
+            out['tie'] = (front & shirt & (np.abs(x) < w) & (z < top) & (z > bot)).astype(float)
+        if un.get('patches'):
+            for s_ in ('L', 'R'):
+                sg = 1 if s_ == 'L' else -1
+                c = F.rig.head(f'upperarm_{s_}') + np.array([sg * 0.075, 0.0, -0.075])
+                rr = np.linalg.norm(P - c, axis=1)
+                lat = (F.armw > 0.5) & (sg * F.N[:, 0] > 0.25) & shirt
+                out['patch'] = np.maximum(out['patch'], (lat & (rr < 0.04)).astype(float))
+                out['patchrim'] = np.maximum(out['patchrim'], (lat & (rr > 0.031) & (rr < 0.04)).astype(float))
+                out['emblem'] = np.maximum(out['emblem'], (lat & (rr < 0.013)).astype(float))
+        if un.get('pockets'):
+            for sg in (-1, 1):
+                pc = (np.abs(x - sg * 0.085) < 0.042) & (z < cut - 0.12) & (z > cut - 0.21) & front & shirt
+                out['cpocket'] = np.maximum(out['cpocket'], pc.astype(float))
+                out['cflap'] = np.maximum(out['cflap'], (pc & (z > cut - 0.145)).astype(float))
+        if un.get('namebar'):
+            nb_ = F.rig.head('spine01') + np.array([-0.085, -0.11, -0.035])
+            out['namebar'] = (front & shirt & (np.abs(x - nb_[0]) < 0.032) & (np.abs(z - nb_[2]) < 0.0065)).astype(float)
+        if un.get('duty') and pa:
+            top = F.waist + pa.get('rise', 0.0)
+            body = ((F.R['torso'] + F.legw) > 0.4) & (F.armw < 0.5)
+            band = (m['pants'] > 0.5) & body & (z > top - 0.07) & (z < top + 0.008)
+            out['duty'] = band.astype(float)
+            ang = np.arctan2(x, F.fwd)                       # round the waist: 0 at the front
+            dp = np.zeros(n, bool)
+            for a0 in (0.55, 1.05, 2.4, -0.55, -1.0, -2.5):
+                dp |= band & (np.abs(ang - a0) < 0.16) & (z > top - 0.085)
+            out['dpouch'] = dp.astype(float)
     return out
+
+
+def face_flay(F, spec):
+    """One side of the face torn off: an irregular patch from the cheekbone to the jaw where the skin is gone, the
+    cheek muscle in strands, the lips missing so the teeth show to the back of the jaw."""
+    fs = spec.get('flay')
+    if not fs:
+        return None
+    P = F.P
+    rig = F.rig
+    sg = 1 if fs.get('side', 'R') == 'L' else -1
+    hc = rig.head('head')
+    c = hc + np.array([sg * 0.05, -0.07, 0.035]) + np.array(fs.get('at', [0, 0, 0]))
+    q = (P - c) / np.array([0.062, 0.09, 0.075])
+    rr = np.linalg.norm(q, axis=1) * (1 + 0.3 * fbm(P * 55, 2, seed=301))
+    face = (F.R['head'] > 0.5) & (F.R['eye'] < 0.5) & (F.fwd > hc[1] * -1 - 0.02) & (sg * (P[:, 0] - hc[0]) > -0.012)
+    raw = smooth(1.0, 0.8, rr) * face
+    rim = np.exp(-((rr - 1.0) / 0.09) ** 2) * face
+    mouth = rig.tail('jaw') + np.array([0, 0.004, 0.024])
+    mx = sg * (P[:, 0] - mouth[0])
+    row = (np.abs(P[:, 2] - mouth[2]) < 0.011) & (mx > -0.006) & (mx < 0.05) & face
+    tooth = np.abs(np.sin(P[:, 0] * math.pi / 0.0062)) > 0.28
+    teeth = (row & tooth & (np.abs(P[:, 2] - mouth[2]) > 0.0012)).astype(float)
+    gap = (row & ~(tooth & (np.abs(P[:, 2] - mouth[2]) > 0.0012))).astype(float)
+    fiber = np.sin((P[:, 2] * 0.8 + sg * P[:, 0] * 0.6) * math.pi / 0.0034) * raw
+    return {'raw': raw * (1 - row), 'rim': rim, 'teeth': teeth, 'gap': gap, 'fiber': fiber, 'row': row.astype(float)}
 
 
 def sculpt(F, m, spec):
@@ -460,7 +527,9 @@ def sculpt(F, m, spec):
     d += (dt_['belt'] * 0.0018 + dt_['buckle'] * 0.0017 + dt_['collar'] * 0.003 + dt_['cuff'] * 0.0022 + dt_['hem'] * 0.002 + dt_['pantcuff'] * 0.002
           + dt_['placket'] * 0.0012 + dt_['buttons'] * 0.0024 + dt_['badge'] * 0.002 + dt_['sole'] * 0.0045 + dt_['laces'] * 0.0018
           - dt_['pocket'] * 0.0015 - dt_['fly'] * 0.0013 - dt_['zip'] * 0.001
-          + dt_['pouch'] * 0.008 + dt_['molle'] * 0.0022 + dt_['pad'] * 0.009 + dt_['flap'] * 0.004)
+          + dt_['pouch'] * 0.008 + dt_['molle'] * 0.0022 + dt_['pad'] * 0.009 + dt_['flap'] * 0.004
+          + dt_['tie'] * 0.0022 + dt_['patch'] * 0.0016 + dt_['patchrim'] * 0.0008 + dt_['cflap'] * 0.0018 + dt_['cpocket'] * 0.0008
+          + dt_['namebar'] * 0.0015 + dt_['duty'] * 0.004 + dt_['dpouch'] * 0.011)
     # seams down the outside of the trouser legs and along shirt sides
     seam_x = np.abs(np.abs(P[:, 0]) - (F.rig.head('thigh_L')[0] + 0.07))
     d -= m['pants'] * (F.legw > 0.5) * smooth(0.004, 0.0, seam_x) * 0.0008
@@ -486,6 +555,10 @@ def sculpt(F, m, spec):
         lip = np.exp(-((dist - jag) / (r * 0.18)) ** 2)
         chunks = fbm(P * 160, 2, seed=50) * 0.0015
         d += -crater * (dep + chunks) + lip * 0.0016
+    # half the face torn away: the cheek a crater of muscle, the lips gone, the teeth bared
+    fl = face_flay(F, spec)
+    if fl is not None:
+        d += -fl['raw'] * 0.0032 + fl['rim'] * 0.0016 + fl['teeth'] * 0.0022 - fl['gap'] * 0.0012 + fl['fiber'] * 0.0004
     # pustules: swollen boils across the skin (Subject Omega)
     pu = spec.get('pustules', 0.0)
     pust = np.zeros(len(P))
@@ -545,7 +618,7 @@ def paint(F, m, hm, d, cav, spec):
     below = np.clip((mouth[2] - P[:, 2]) / 0.45, 0, 1)
     lateral = np.abs(P[:, 0] - mouth[0]) / (0.05 + below * 0.12)
     front = F.fwd > -0.02
-    mouthblood = (smooth(0.035, 0.012, dm) + smooth(1.0, 0.3, lateral + (0.4 - drip) * 1.0) * (below > 0) * (1 - below) * front) * gore
+    mouthblood = (smooth(0.035, 0.012, dm) + smooth(1.0, 0.3, lateral + (0.4 - drip) * 1.0) * (below > 0) * (1 - below) * front) * spec.get('mouthgore', gore)
     blood_fresh = np.clip(mouthblood, 0, 1)
     blood_dry = np.zeros(n)
     # ---- wounds -------------------------------------------------------------
@@ -565,6 +638,38 @@ def paint(F, m, hm, d, cav, spec):
         run = smooth(1.0, 0.4, lat) * (1 - under) * (under > 0)
         blood_fresh = np.maximum(blood_fresh, run * gore + inner * 0.3)
         blood_dry = np.maximum(blood_dry, smooth(jag * 3.5, jag, dist) * smooth(-0.2, 0.4, fbm(P * 16, 3, seed=55)) * gore)
+    # blood soaked into the clothes in big dark patches (a uniform that has been through it)
+    sk_ = spec.get('soak', 0.0)
+    if sk_:
+        zone = np.clip(F.R['torso'] + F.legw * 0.7 * (F.leg_t < 1.3) + F.R['uarm'] * 0.4, 0, 1)
+        blot = smooth(0.05, 0.4, fbm(P * 4.5, 4, seed=180)) * smooth(-0.2, 0.3, fbm(P * 13, 3, seed=181))
+        blood_dry = np.maximum(blood_dry, blot * zone * sk_)
+    # hands red to the wrist: it has been clawing at people
+    bh = spec.get('bloody_hands', 0.0)
+    if bh:
+        hand = np.clip(F.R['hand'] * 1.4, 0, 1) * (F.armw > 0.5)
+        up = smooth(1.75, 1.95, F.arm_t) * (F.armw > 0.5)
+        streak = smooth(-0.1, 0.5, fbm(np.stack([P[:, 0] * 60, P[:, 1] * 60, P[:, 2] * 8], 1), 3, seed=185))
+        blood_fresh = np.maximum(blood_fresh, np.clip(hand * 0.9 + (up - hand).clip(0, 1) * streak, 0, 1) * bh)
+    # the flayed face
+    fl = face_flay(F, spec)
+    if fl is not None:
+        strands = np.sin((P[:, 2] * 0.8 + P[:, 0] * 0.6) * math.pi / 0.0034)        # the muscle's fibres
+        musc = mix(np.tile(hexc('#5c0f0d'), (n, 1)), np.tile(hexc('#a3302a'), (n, 1)), smooth(-0.6, 0.6, strands))
+        musc = mix(musc, hexc('#d8b89a'), smooth(0.6, 0.8, fbm(P * 80, 2, seed=302)) * 0.35)          # sinew
+        col = mix(col, musc, np.clip(fl['raw'], 0, 1))
+        col = mix(col, col * 0.5, fl['rim'] * 0.6)
+        col = mix(col, hexc('#d6cbab'), fl['teeth'])
+        col = mix(col, hexc('#2a0907'), fl['gap'] * 0.95)
+        blood_fresh = np.maximum(blood_fresh, fl['rim'] * 0.35 * gore)
+        # it runs from the torn cheek down the jaw and the neck
+        cz = F.rig.head('head')[2]
+        under = np.clip((cz - P[:, 2]) / 0.35, 0, 1) * (P[:, 2] < cz)
+        fsg = 1 if spec['flay'].get('side', 'R') == 'L' else -1
+        hx = F.rig.head('head')[0]
+        side = np.sign(P[:, 0] - hx) == fsg
+        lat = np.abs(P[:, 0] - hx - fsg * 0.04) / 0.05 + (0.3 - drip)
+        blood_fresh = np.maximum(blood_fresh, smooth(0.6, 0.1, lat) * under * (1 - under) * side * (F.fwd > 0) * gore)
     # ---- clothing ----------------------------------------------------------
     cl = m['cloth']
     clothcol = np.zeros((n, 3))
@@ -605,9 +710,16 @@ def paint(F, m, hm, d, cav, spec):
     clothcol = mix(clothcol, hexc('#1f1813'), dt_['belt'] * 0.95)
     clothcol = mix(clothcol, hexc('#6c6c69'), dt_['buckle'])
     clothcol = mix(clothcol, hexc('#d9d1be'), dt_['buttons'] * 0.95)
-    clothcol = mix(clothcol, hexc('#c4bea9'), dt_['sole'] * 0.95)
+    clothcol = mix(clothcol, hexc(o.get('shoes', {}).get('sole', '#c4bea9')), dt_['sole'] * 0.95)
     clothcol = mix(clothcol, hexc('#bdb8a6'), dt_['laces'] * 0.7)
     clothcol = mix(clothcol, hexc('#c9a23a'), dt_['badge'] * 0.95)
+    clothcol = mix(clothcol, hexc('#10141c'), dt_['tie'] * 0.95)
+    clothcol = mix(clothcol, hexc('#1c2a4a'), dt_['patch'] * 0.95)
+    clothcol = mix(clothcol, hexc('#c9a23a'), np.maximum(dt_['patchrim'], dt_['emblem'] * 0.9) * 0.95)
+    clothcol = mix(clothcol, clothcol * 0.62, dt_['cflap'] * 0.7)
+    clothcol = mix(clothcol, hexc('#c9a23a'), dt_['namebar'] * 0.95)
+    clothcol = mix(clothcol, hexc('#0d0d0e'), dt_['duty'] * 0.97)
+    clothcol = mix(clothcol, hexc('#18181a'), dt_['dpouch'] * 0.97)
     clothcol = mix(clothcol, clothcol * 0.55 + 0.02, dt_['pouch'] * 0.9)
     clothcol = mix(clothcol, clothcol * 0.7, dt_['molle'] * 0.8)
     clothcol = mix(clothcol, hexc('#1b1b1a'), dt_['pad'] * 0.95)
@@ -681,6 +793,8 @@ def paint(F, m, hm, d, cav, spec):
     rough = np.where(dt_['buttons'] > 0.5, 0.35, rough)
     rough = np.where(dt_['sole'] > 0.5, 0.75, rough)
     rough = np.where(dt_['badge'] > 0.5, 0.3, rough)
+    rough = np.where((dt_['namebar'] + dt_['patchrim'] + dt_['emblem']) > 0.5, 0.35, rough)
+    rough = np.where(dt_['duty'] > 0.5, 0.42, rough)
     rough = np.where(m['straps'] > 0.5, 0.5, rough)
     if o.get('apron'):
         rough = np.where(m['apron'] > 0.5, 0.55, rough)
@@ -1016,6 +1130,9 @@ def build(name, preview=False):
         # a shoe is a smooth shell, not a sock: relax the toes away
         Vs = shoe_shell(Vs, Fb)
         Vs = relax(base, Vs, smooth(1.8, 2.2, Fb.leg_t) * (Fb.legw > 0.4), 6)
+        if spec['outfit']['shoes'].get('boot'):
+            # a boot's toe box is one smooth shape: melt the toes right into it
+            Vs = relax(base, Vs, smooth(2.2, 2.45, Fb.leg_t) * (Fb.legw > 0.4), 40)
         log('shoe shell moved', int((np.linalg.norm(Vs - Vall, axis=1) > 1e-4).sum()))
         base.data.vertices.foreach_set('co', Vs.ravel())
         base.data.update()

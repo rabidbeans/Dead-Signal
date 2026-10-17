@@ -429,7 +429,10 @@ export const BOSS_STYLE = {
       rig.rot('neck', X, 0.3 * C + 0.2 * set);
       rig.rot('spine03', Y, 0.3 * set);
       // shield arm: forearm across the chest, raised higher in the charge
-      arm(rig, 'L', { down: 0.7, fwd: -0.75 - 0.35 * Math.max(C, set), twist: -0.55, elbow: 1.35 + 0.1 * C, elbowY: 0.5, wrist: -0.2, fist: 1.1 });
+      // the shield hangs at her side from the left hand while she walks (so her face, hair and uniform show), and comes
+      // up across her chest for the charge and the set
+      const up = Math.max(C, set);
+      arm(rig, 'L', { down: 0.84 - 0.14 * up, fwd: -0.12 - 0.98 * up + Math.sin(g.phR * Math.PI * 2) * 0.1 * g.walk * (1 - up), twist: -0.05 - 0.5 * up, elbow: 0.35 + 1.1 * up, elbowY: 0.5 * up, wrist: -0.2, fist: 1.1 });
       // baton arm: low and forward; a tap on the shield every few seconds; an overhead blow
       const tap = pulse(a.t, 3.6, 0.5) * (1 - A) * (1 - C);
       if (set > 0) { arm(rig, 'R', { down: 0.75, fwd: 0.35 * set - 0.25 * (1 - set), twist: 0, elbow: 0.9, fist: 1.2 }); rig.rot('spine03', Y, 0.35 * K); return; }

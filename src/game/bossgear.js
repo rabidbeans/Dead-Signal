@@ -9,11 +9,12 @@
 import * as THREE from 'three';
 import { loadGLB } from './assets.js';
 import { audio } from './audio.js';
+import { mulberry } from './rig.js';
 
 const T = {};
 export async function loadBossGear() {
   const g = await loadGLB('props/boss_gear.glb');
-  for (const name of ['riot_helmet', 'riot_shield', 'baton', 'iv_pole', 'cleaver', 'hardhat', 'sledgehammer', 'shackle', 'chain_link', 'canister']) {
+  for (const name of ['riot_helmet', 'riot_shield', 'baton', 'iv_pole', 'cleaver', 'hardhat', 'sledgehammer', 'shackle', 'chain_link', 'canister', 'holster']) {
     const o = g.scene.getObjectByName(name);
     if (!o) continue;
     o.traverse((m) => {
@@ -37,7 +38,18 @@ const make = (name) => {
 };
 
 // one of everything, for Game.warmUp (so no shader is compiled when the boss walks in)
-export const gearPieces = () => Object.keys(T).map(make).filter(Boolean);
+export const gearPieces = () => [...Object.keys(T).map(make).filter(Boolean), hairPiece()];
+// a scrap of hair with the hair's own material, so its shader is compiled behind the loading screen too
+function hairPiece() {
+  const geo = new THREE.PlaneGeometry(0.1, 0.3);
+  geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(geo.attributes.position.count * 3).fill(0.6), 3));
+  return new THREE.Mesh(geo, hairMaterial(0x6a260d));
+}
+function hairMaterial(color) {
+  // blended, and NOT written to depth: the ink outline (engine.js, edges in the depth buffer) would draw every ribbon
+  // as a paper cut-out; the body still hides the hair behind it (depth TEST stays on)
+  return new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, map: hairTex(), transparent: true, depthWrite: false, alphaTest: 0.04, side: THREE.DoubleSide, roughness: 0.55, metalness: 0 });
+}
 
 const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3(), _d = new THREE.Vector3();
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion();
@@ -95,10 +107,13 @@ export class BossKit {
     };
 
     if (kind === 'warden') {
-      wear(b.head, 'riot_helmet', { off: [0, 0.105, 0.012], k: 0.95 });
+      // (no helmet since her redesign: the hair is the silhouette)
+      this.hair = new Hair(z, { n: 110, seg: 10, len: 0.9, color: 0x6a260d });
+      // her sidearm in its duty holster on the right hip, riding the pelvis
+      wear(b.root, 'holster', { at: wp(b.thigh_R, new THREE.Vector3()), off: [-0.105, 0.075, 0.0], zf: [0, 0, 1], k: 1.0 });
       // the baton forward out of the fist, the side handle up
       this.baton = free('baton', 1.0, () => this.batonPose());
-      this.shield = free('riot_shield', 0.9, () => this.shieldPose());
+      this.shield = free('riot_shield', 0.76, () => this.shieldPose());
     } else if (kind === 'patientzero') {
       this.pole = free('iv_pole', 1.0, () => this.polePose());
     } else if (kind === 'butcher') {
@@ -173,10 +188,13 @@ export class BossKit {
     const b = this.z.rig.b;
     const el = wp(b.forearm_L, _a.set(0, 0, 0)).clone(), wr = wp(b.hand_L, _b).clone();
     // centred over the fist and well in front of it: the hand grips the strap BEHIND the shield, never through it
-    const c = el.lerp(wr, 0.72).addScaledVector(this.fw, 0.16 * this.s);
+    // carried at her side it turns edge-on, its face outward, and only swings round to face the front when she raises
+    // it (the charge and its set)
+    const an = this.z.anim, up = Math.max(an.chargeS, an.move === 'charge' ? an.attack : 0);
+    const c = el.lerp(wr, 0.72).addScaledVector(this.fw, 0.16 * this.s * up).addScaledVector(this.lf, 0.09 * this.s * (1 - up));
     const o = this.shield;
     o.position.copy(c);
-    _d.copy(this.fw).addScaledVector(this.lf, -0.15);
+    _d.copy(this.fw).multiplyScalar(up + 0.25 * (1 - up)).addScaledVector(this.lf, -0.15 * up + (1 - up));
     basis(_c.copy(UP).addScaledVector(this.fw, -0.12), _d, o.quaternion);
     o.position.y -= 0.04 * this.s;
   }
@@ -234,8 +252,9 @@ export class BossKit {
     const rq = z.char.root.quaternion;
     this.fw.set(0, 0, 1).applyQuaternion(rq);
     this.lf.set(1, 0, 0).applyQuaternion(rq);
-    if (z.state === 'dead') { this.fall(dt); return; }
     z.char.root.updateMatrixWorld(true);
+    this.hair?.update(dt);
+    if (z.state === 'dead') { this.fall(dt); return; }
     for (const it of this.free) it.fn(dt);
     // the Butcher's right cleaver leaves his hand when he throws it
     if (this.clR) this.clR.visible = !(z.anim.throwT > 0.25);
@@ -281,8 +300,194 @@ export class BossKit {
   }
 
   dispose() {
+    this.hair?.dispose();
     const s = this.z.game.scene;
     for (const it of this.free) for (const o of it.links || [it.o]) if (o) s.remove(o);
     for (const o of this.worn) o.parent?.remove(o);
   }
+}
+
+// Long hair: strands of points hung off the scalp (a verlet rope each, the first point riding the head bone), kept off
+// the skull and the shoulders, drawn as camera-facing ribbons in ONE mesh. It hangs down her back walking, swings as she
+// turns, streams out behind her in the charge and falls with her. ~550 points: nothing for a phone.
+let HAIR_TEX = null;
+function hairTex() {
+  if (HAIR_TEX) return HAIR_TEX;
+  const c = document.createElement('canvas');
+  c.width = 64; c.height = 256;
+  const g = c.getContext('2d');
+  g.clearRect(0, 0, 64, 256);
+  // a body of hair under the strands, thinning to wisps at the edges and the ends
+  const bg = g.createLinearGradient(0, 0, 64, 0);
+  bg.addColorStop(0, 'rgba(255,255,255,0)'); bg.addColorStop(0.2, 'rgba(255,255,255,0.75)'); bg.addColorStop(0.8, 'rgba(255,255,255,0.75)'); bg.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = bg; g.fillRect(0, 0, 64, 200);
+  const fade = g.createLinearGradient(0, 150, 0, 256);
+  fade.addColorStop(0, 'rgba(0,0,0,0)'); fade.addColorStop(1, 'rgba(0,0,0,1)');
+  g.globalCompositeOperation = 'destination-out'; g.fillStyle = fade; g.fillRect(0, 150, 64, 106); g.globalCompositeOperation = 'source-over';
+  for (let i = 0; i < 70; i++) {
+    const x = 3 + Math.random() * 58, w = 0.8 + Math.random() * 1.8, l = 0.55 + Math.random() * 0.45;
+    const a = 0.55 + Math.random() * 0.45;
+    const gr = g.createLinearGradient(0, 0, 0, 256 * l);
+    gr.addColorStop(0, `rgba(255,255,255,${a})`); gr.addColorStop(0.85, `rgba(255,255,255,${a * 0.8})`); gr.addColorStop(1, 'rgba(255,255,255,0)');
+    g.strokeStyle = gr; g.lineWidth = w;
+    g.beginPath(); g.moveTo(x, 0); g.bezierCurveTo(x + (Math.random() - 0.5) * 6, 90, x + (Math.random() - 0.5) * 8, 170, x + (Math.random() - 0.5) * 10, 256 * l); g.stroke();
+  }
+  HAIR_TEX = new THREE.CanvasTexture(c);
+  HAIR_TEX.colorSpace = THREE.SRGBColorSpace;
+  return HAIR_TEX;
+}
+
+const _h0 = new THREE.Vector3(), _h1 = new THREE.Vector3(), _h2 = new THREE.Vector3(), _h3 = new THREE.Vector3();
+class Hair {
+  constructor(z, { n = 60, seg = 9, len = 0.6, color = 0xa4441a } = {}) {
+    this.z = z;
+    const b = z.rig.b, head = b.head, s = z.char.root.scale.x;
+    this.s = s;
+    z.char.root.updateMatrixWorld(true);
+    const rq = z.char.root.quaternion;
+    const fw = new THREE.Vector3(0, 0, 1).applyQuaternion(rq), lf = new THREE.Vector3(1, 0, 0).applyQuaternion(rq), up = new THREE.Vector3(0, 1, 0);
+    const hs = head.scale.x;
+    // the skull, in the head bone's own frame (so it nods and turns with the head)
+    const cW = wp(head, new THREE.Vector3()).addScaledVector(up, 0.088 * s * hs).addScaledVector(fw, 0.005 * s);
+    this.cL = head.worldToLocal(cW.clone());
+    this.rHead = 0.104 * s * hs;
+    this.roots = []; this.dirs = []; this.backK = [];
+    const rng = mulberry(424);
+    let tries = 0;
+    while (this.roots.length < n && tries++ < 5000) {
+      // a hair line round the back and sides of the head and over the crown, never the face
+      const az = (rng() - 0.5) * Math.PI * 2, el = -0.25 + rng() * 1.55;
+      const d = new THREE.Vector3().addScaledVector(fw, Math.cos(az) * Math.cos(el)).addScaledVector(lf, Math.sin(az) * Math.cos(el)).addScaledVector(up, Math.sin(el));
+      // (the sides come further forward, down to the temples, so the hair frames the face)
+      const sideK = Math.abs(Math.sin(az));
+      if (d.dot(fw) > 0.2 + 0.4 * sideK * (el < 0.55 ? 1 : 0) - 0.45 * Math.max(0, Math.sin(el) - 0.6)) continue;
+      const p = cW.clone().addScaledVector(d, this.rHead * 0.97);
+      this.roots.push(head.worldToLocal(p.clone()));
+      this.backK.push(d.dot(fw) > -0.05 ? 0.05 : 0.6);      // the front strands fall straight down past the face
+      this.dirs.push(head.worldToLocal(p.clone().add(d)).sub(head.worldToLocal(p.clone())).normalize());
+    }
+    this.n = this.roots.length; this.seg = seg;
+    this.len = [];
+    for (let i = 0; i < this.n; i++) this.len.push(len * s * (0.78 + rng() * 0.32) / seg);
+    // points, in the world
+    const P = this.P = new Float32Array(this.n * (seg + 1) * 3), O = this.O = new Float32Array(P.length);
+    for (let i = 0; i < this.n; i++) {
+      const r = head.localToWorld(this.roots[i].clone());
+      for (let k = 0; k <= seg; k++) { const j = (i * (seg + 1) + k) * 3; P[j] = r.x; P[j + 1] = r.y - k * this.len[i]; P[j + 2] = r.z; }       // (O: velocities, from rest)
+    }
+    // the ribbons
+    const nv = this.n * (seg + 1) * 2;
+    const geo = new THREE.BufferGeometry();
+    this.pos = new Float32Array(nv * 3);
+    const uv = new Float32Array(nv * 2), col = new Float32Array(nv * 3), idx = [];
+    const base = new THREE.Color(color);
+    for (let i = 0; i < this.n; i++) {
+      const tone = 0.7 + rng() * 0.5;
+      for (let k = 0; k <= seg; k++) {
+        const v = (i * (seg + 1) + k) * 2, t = k / seg;
+        const u0 = (i % 4) * 0.25;
+        uv.set([u0, t, u0 + 0.25, t], v * 2);
+        const sh = tone * (0.55 + 0.6 * t);         // darker at the roots, lighter at the ends
+        for (const q of [v, v + 1]) col.set([base.r * sh, base.g * sh, base.b * sh], q * 3);
+        if (k < seg) idx.push(v, v + 1, v + 2, v + 1, v + 3, v + 2);
+      }
+    }
+    geo.setAttribute('position', new THREE.BufferAttribute(this.pos, 3).setUsage(THREE.DynamicDrawUsage));
+    geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    const mat = hairMaterial(color);
+    this.nrm = geo.attributes.normal.array;
+    this.mesh = new THREE.Mesh(geo, mat);
+    this.mesh.frustumCulled = false;
+    this.mesh.castShadow = false;
+    z.game.scene.add(this.mesh);
+    this.width = 0.052 * s;
+    this.t = 0;
+  }
+
+  // the body the hair must stay outside: the skull, the neck and the upper back, as spheres in the world
+  bodySpheres() {
+    const b = this.z.rig.b, s = this.s;
+    const list = this.sph ??= [{ c: new THREE.Vector3(), r: 0 }, { c: new THREE.Vector3(), r: 0 }, { c: new THREE.Vector3(), r: 0 }, { c: new THREE.Vector3(), r: 0 }];
+    b.head.localToWorld(list[0].c.copy(this.cL)); list[0].r = this.rHead * 1.04;
+    wp(b.neck, list[1].c); list[1].r = 0.075 * s;
+    wp(b.spine03 || b.spine02, list[2].c); list[2].r = 0.16 * s;
+    wp(b.spine02 || b.spine01, list[3].c); list[3].r = 0.15 * s;
+    return list;
+  }
+
+  update(dt) {
+    if (dt <= 0) return;
+    const z = this.z, head = z.rig.b.head, P = this.P, O = this.O, seg = this.seg;
+    this.back = (this.back ?? new THREE.Vector3()).set(0, 0, -1).applyQuaternion(z.char.root.quaternion);
+    this.t += dt;
+    const h = Math.min(dt, 1 / 30);
+    const sph = this.bodySpheres();
+    const ground = z.game.side?.active ? 0 : z.game.world.groundY(z.x, z.z);
+    // Dynamic follow-the-leader (Mueller et al. 2012, the method made for hair): predict every point, then walk down
+    // the strand putting each one back at its length from the one above, and give each point back the velocity it
+    // was moved by, minus most of what its child was corrected by (that term is what keeps a long strand from
+    // whipping itself up; a plain verlet rope did).
+    const D = this.D ??= new Float32Array(P.length);
+    const ih = 1 / h, gdt = -9.8 * h;
+    const wx = Math.sin(this.t * 0.7) * 0.5 * h, wz = Math.cos(this.t * 0.53) * 0.5 * h;
+    for (let i = 0; i < this.n; i++) {
+      const r = head.localToWorld(_h0.copy(this.roots[i]));
+      const d = _h1.copy(this.dirs[i]).transformDirection(head.matrixWorld);
+      const L = this.len[i];
+      // the comb direction: straight down, and back off the face, flattened onto the scalp
+      _h2.set(0, -1, 0).addScaledVector(this.back, this.backK[i]);
+      _h2.addScaledVector(d, -_h2.dot(d)).normalize();
+      const j0 = i * (seg + 1) * 3;
+      P[j0] = r.x; P[j0 + 1] = r.y; P[j0 + 2] = r.z;
+      for (let k = 1; k <= seg; k++) {
+        const j = j0 + k * 3;
+        // predict (O holds the velocity here)
+        O[j] *= 0.985; O[j + 1] = O[j + 1] * 0.985 + gdt; O[j + 2] *= 0.985;
+        const px = P[j] + (O[j] + wx) * h, py = P[j + 1] + O[j + 1] * h, pz = P[j + 2] + (O[j + 2] + wz) * h;
+        let dx = px - P[j - 3], dy = py - P[j - 2], dz = pz - P[j - 1];
+        // the first piece leaves the scalp combed down and back, lifting off it only a little
+        if (k === 1) { dx = dx * 0.25 + (_h2.x * 0.85 + d.x * 0.15) * L; dy = dy * 0.25 + (_h2.y * 0.85 + d.y * 0.15) * L; dz = dz * 0.25 + (_h2.z * 0.85 + d.z * 0.15) * L; }
+        const len = Math.hypot(dx, dy, dz) || 1e-6, f = L / len;
+        let nx = P[j - 3] + dx * f, ny = P[j - 2] + dy * f, nz = P[j - 1] + dz * f;
+        for (const sp of sph) {
+          const ex = nx - sp.c.x, ey = ny - sp.c.y, ez = nz - sp.c.z, e = Math.hypot(ex, ey, ez);
+          if (e < sp.r && e > 1e-6) { const q = sp.r / e; nx = sp.c.x + ex * q; ny = sp.c.y + ey * q; nz = sp.c.z + ez * q; }
+        }
+        if (ny < ground + 0.02) ny = ground + 0.02;
+        D[j] = nx - px; D[j + 1] = ny - py; D[j + 2] = nz - pz;            // how far the strand moved this point
+        O[j] = (nx - P[j]) * ih; O[j + 1] = (ny - P[j + 1]) * ih; O[j + 2] = (nz - P[j + 2]) * ih;
+        P[j] = nx; P[j + 1] = ny; P[j + 2] = nz;
+      }
+      // the follow-the-leader damping: take back most of the child's correction from each point's velocity
+      for (let k = 1; k < seg; k++) {
+        const j = j0 + k * 3, c = j + 3;
+        O[j] -= 0.9 * D[c] * ih; O[j + 1] -= 0.9 * D[c + 1] * ih; O[j + 2] -= 0.9 * D[c + 2] * ih;
+      }
+    }
+    // ribbons facing the camera
+    const cam = z.game.camera.position, pos = this.pos;
+    for (let i = 0; i < this.n; i++) {
+      for (let k = 0; k <= seg; k++) {
+        const j = (i * (seg + 1) + k) * 3;
+        const a = Math.max(0, k - 1), bq = Math.min(seg, k + 1);
+        const ja = (i * (seg + 1) + a) * 3, jb = (i * (seg + 1) + bq) * 3;
+        _h2.set(P[jb] - P[ja], P[jb + 1] - P[ja + 1], P[jb + 2] - P[ja + 2]);
+        _h3.set(cam.x - P[j], cam.y - P[j + 1], cam.z - P[j + 2]);
+        _h2.cross(_h3).normalize();
+        const t = k / seg, w = this.width * (0.45 + 0.55 * Math.sin(Math.min(1, t * 3) * Math.PI / 2)) * (1 - 0.4 * t) * 0.5;   // fine at the root, fullest a little way down
+        const v = (i * (seg + 1) + k) * 2 * 3;
+        pos[v] = P[j] - _h2.x * w; pos[v + 1] = P[j + 1] - _h2.y * w; pos[v + 2] = P[j + 2] - _h2.z * w;
+        pos[v + 3] = P[j] + _h2.x * w; pos[v + 4] = P[j + 1] + _h2.y * w; pos[v + 5] = P[j + 2] + _h2.z * w;
+        _h3.normalize();
+        this.nrm[v] = this.nrm[v + 3] = _h3.x; this.nrm[v + 1] = this.nrm[v + 4] = _h3.y; this.nrm[v + 2] = this.nrm[v + 5] = _h3.z;
+      }
+    }
+    this.mesh.geometry.attributes.position.needsUpdate = true;
+    this.mesh.geometry.attributes.normal.needsUpdate = true;
+  }
+
+  dispose() { this.z.game.scene.remove(this.mesh); this.mesh.geometry.dispose(); this.mesh.material.dispose(); }
 }
