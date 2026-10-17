@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { prop, surface, tex, propMaterial, instanced, awningMaterial, dirtify } from './assets.js';
 import { populate } from './dress.js';
-import { L, LV, MAZE, ZONES, zoneAt, blockRanges, buildLots, lampSites } from './level.js';
+import { L, LV, MAZE, ZONES, ZONE_HW, zoneAt, blockRanges, buildLots, lampSites } from './level.js';
 import { mulberry } from './rng.js';
 import { Q } from './quality.js';
 
@@ -835,6 +835,8 @@ float wetG = smoothstep(0.25, 0.7, wetMask(vRoughnessMapUv)) * ${amount.toFixed(
     this.col.box(0, b.maxZ + 1, 80, 1, 0, 3);
     this.col.box(b.minX - 1, midZ, 1, len, 0, 3);
     this.col.box(b.maxX + 1, midZ, 1, len, 0, 3);
+    // the wide zones: a solid backstop behind each side, so no gap between buildings ever leads out to the back alley
+    for (const Z of ZONES) for (const sd of [-1, 1]) this.col.box(sd * (ZONE_HW + 3.25), (Z.zTop + Z.zBot) / 2, 3, (Z.zTop - Z.zBot) / 2 + 2, 0, 6);
     this.spawns = [{ x: -3, z: b.maxZ - 2 }, { x: 3, z: b.maxZ - 2 }];
     // (the cross streets are sealed at x ±13.2 by dress.js: the dead come out of the stub in front of the barricade)
     for (const zc of L.cross) this.spawns.push({ x: -11.4, z: zc - 1.5 }, { x: -11.4, z: zc + 1.5 }, { x: 11.4, z: zc - 1.5 }, { x: 11.4, z: zc + 1.5 });

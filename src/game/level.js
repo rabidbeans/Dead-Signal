@@ -31,7 +31,7 @@ const LEVELS = {
   1: {
     id: 1, name: 'DOWNTOWN', kicker: 'LEVEL 1 · DOWNTOWN', finale: 'saferoom',
     objective: 'gate',
-    banner: 'Weave through the barricades, hold the gate, then get past the Warden into the safe room.',
+    banner: 'Weave through the barricades and hold the junction while the gate is cut open. The safe room is at the far end.',
     blurb: 'The first night. Weave through the barricades downtown, hold the junction while the gate is cut, and get past the Warden into the safe room.',
     L: geo(-78, -188),
     holds: [
@@ -49,7 +49,7 @@ const LEVELS = {
   2: {
     id: 2, name: 'ST. MERCY ROW', kicker: 'LEVEL 2 · ST. MERCY ROW', finale: 'saferoom',
     objective: 'power',
-    banner: 'The power is out. Find your way through the dark wards of St. Mercy, throw the three breakers in the courtyard, then put down Patient Zero.',
+    banner: 'The power is out. Find your way through the dark wards of St. Mercy and throw the three breakers in the courtyard.',
     blurb: 'Inside St. Mercy Hospital, blacked out: a maze of wards, corridors and sliding doors, three breakers to throw in the courtyard, and Patient Zero.',
     L: geo(-84, -200),
     holds: [
@@ -66,7 +66,7 @@ const LEVELS = {
   3: {
     id: 3, name: 'LANTERN STREET', kicker: 'LEVEL 3 · LANTERN STREET', finale: 'saferoom',
     objective: 'nests', tanks: true,
-    banner: 'Cross the canal quarter bridge by bridge, burn out the three nests, and watch for the Butcher\'s cleavers. Red gas tanks go off when shot.',
+    banner: 'Cross the canal quarter bridge by bridge and burn out the three nests. Red gas tanks go off when shot.',
     blurb: 'The canal quarter: islands of market stalls joined by narrow footbridges, red gas tanks you can shoot, three pulsing nests breeding the dead, and the Butcher.',
     L: geo(-90, -212),
     holds: [
@@ -83,7 +83,7 @@ const LEVELS = {
   4: {
     id: 4, name: 'THE DOCKS', kicker: 'LEVEL 4 · THE DOCKS', finale: 'saferoom',
     objective: 'dozer',
-    banner: 'Find the keycards in the bonded warehouses to open the locked doors, keep the bulldozer moving, and dodge the Foreman\'s leap.',
+    banner: 'Find the keycards in the bonded warehouses to open the locked doors, and keep the bulldozer moving.',
     blurb: 'The docks\' bonded warehouses: aisles of racking, doors locked until you find their coloured keycard, a bulldozer that only pushes while you stand by it, and the Foreman.',
     L: geo(-96, -224),
     holds: [
@@ -100,7 +100,7 @@ const LEVELS = {
   5: {
     id: 5, name: 'FORT HOPE', kicker: 'LEVEL 5 · FORT HOPE', finale: 'heli',
     objective: 'gate', barrage: true,
-    banner: 'The fort is shelling its own streets. Run the chicanes, hold the fort gate, and stay out of the red rings. Then Subject Omega.',
+    banner: 'The fort is shelling its own streets. Run the chicanes, hold the fort gate, and stay out of the red rings.',
     blurb: 'The overrun fort: tight chicanes, the gate to hold while the guns shell the street (stay out of the red rings), and Subject Omega at the last helicopter.',
     L: geo(-102, -236),
     holds: [
@@ -289,7 +289,7 @@ export function buildLots() {
       if (lot.z1 > Z.zTop + 2) next.push({ ...lot, z0: Z.zTop, northCross: false });
       const z0 = Math.max(lot.z0, Z.zBot), z1 = Math.min(lot.z1, Z.zTop);
       const far = lot.side < 0 ? lot.x0 : lot.x1;
-      if (Math.abs(far) - inner < 4) continue;
+      // (a shallow lot is kept, at least 6 m deep: dropping it left a gap through to the back alley)
       next.push({ ...lot, z0, z1, x0: lot.side < 0 ? Math.min(lot.x0, -inner - 6) : inner, x1: lot.side < 0 ? -inner : Math.max(lot.x1, inner + 6), southCross: false, northCross: false, zone: true });
     }
     out = next;

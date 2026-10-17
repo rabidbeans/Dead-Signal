@@ -100,6 +100,7 @@ export class Game {
     this.players = new Map();
     this.nextZid = 1;
     this.time = 0;
+    this.timers = [];          // after(): beats on the game clock, gone with the game (a setTimeout outlived a retry)
     this.hitstop = 0;
     this.phase = 'intro';
     this.phaseT = 0;
@@ -392,7 +393,7 @@ export class Game {
     const ob = !H.boss && this.objective?.custom ? this.objective.blurb() : null;
     this.hud.banner(H.boss ? TYPES[H.boss].name : H.title, H.boss ? (LV.finale === 'heli' ? 'Kill it to call in the bird' : 'Kill it to open the safe room') : ob || 'Hold the junction while the gate is cut open', 2.8);
     // what makes this boss different, a moment after the banner
-    if (H.boss && TYPES[H.boss].trait) setTimeout(() => this.hud?.toast(TYPES[H.boss].trait), 4600);
+    if (H.boss && TYPES[H.boss].trait) this.after(4.6, () => this.hud?.toast(TYPES[H.boss].trait));
     audio.play('sting', { vol: 0.7, jitter: 0 });
     if (this.role === 'host') this.net.broadcast({ t: 'phase', p: this.phase, hold: this.hold, opened: this.opened });
     this.refreshHud();
@@ -684,7 +685,7 @@ export class Game {
       buzz([0, 25]);
       this.hud.killConfirm();
     }
-    setTimeout(() => this.fx.pool(z.x + dx * 0.6, z.z + dz * 0.6), 450);
+    this.after(0.45, () => this.fx.pool(z.x + dx * 0.6, z.z + dz * 0.6));
     if (this.isHost) this.netEvent({ k: 'zdie', id: z.id, dx, dz, crit: crit ? 1 : 0, by: byId });
     if (z.boss) { this.hud.banner('BOSS DOWN', TYPES[z.type].name, 3); this.cam.trauma(0.6); this.hitstop = 0.18; audio.play('sting', { vol: 0.8, jitter: 0 }); }
     if (this.hold >= 0) this.refreshHud();
@@ -989,6 +990,7 @@ export class Game {
     if (this.hitstop > 0) { this.hitstop -= dtReal; dt = dtReal * 0.05; }
     this.dt = dt;
     this.time += dt;
+    if (this.timers.length) for (let i = this.timers.length - 1; i >= 0; i--) if (this.timers[i].at <= this.time) { const f = this.timers[i].fn; this.timers.splice(i, 1); f(); }
     if (this.opts.attract) { this.updateAttract(dt); return; }
     const me = this.me;
     const inp = this.bot ? this.botInput(dtReal) : this.input.poll(dtReal);
@@ -1215,7 +1217,10 @@ export class Game {
     for (; i < 4; i++) cutaway.uPlayers.value[i].w = 0;
   }
 
+  after(sec, fn) { this.timers.push({ at: this.time + sec, fn }); }
+
   dispose() {
+    this.timers.length = 0;
     this.bank(false);          // quitting keeps what you looted
     this.objective?.dispose();
     this.speech?.dispose();

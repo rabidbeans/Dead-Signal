@@ -7,6 +7,7 @@ import { Rig, SurvivorAnim } from './rig.js';
 import { audio, buzz } from './audio.js';
 import { tex } from './assets.js';
 import { Q } from './quality.js';
+import { indoors } from './zones.js';
 
 import { WEAPONS, WEAPON_IDS, weaponStats, ARMOR_ABSORB, BASE_HP, BASE_SPEED } from './weapons.js';
 const GOD = typeof location !== 'undefined' && new URLSearchParams(location.search).has('god');
@@ -446,11 +447,13 @@ export class Player {
     const tip = this.gunTip.getWorldPosition(_tip);
     this.light.position.set(tip.x + fx * 0.08, Math.max(1.0, tip.y), tip.z + fz * 0.08);
     this.light.target.position.set(this.x + fx * 9, 0, this.z + fz * 9);
-    this.light.intensity = this.dead ? 0 : (this.local ? 560 : 400) * (this.flick ? 0.2 : 1);
+    // indoors the walls are a couple of metres away: at the street's strength the beam whited the hospital out
+    this.inK = (this.inK ?? 1) + ((indoors(this.x, this.z) ? 0.25 : 1) - (this.inK ?? 1)) * Math.min(1, dt * 3);
+    this.light.intensity = this.dead ? 0 : (this.local ? 560 : 400) * this.inK * (this.flick ? 0.2 : 1);
     if (this.lantern) {
       const fl = this.game.fx.flash;
       if (fl.t < 0.06) { this.lantern.position.set(fl.x, fl.y, fl.z); this.lantern.intensity = 30 + 26 * (1 - fl.t / 0.06); }
-      else { this.lantern.position.set(this.x, 2.2 + this.gy, this.z + (this.game.side?.active ? 1.2 : 0)); this.lantern.intensity = this.game.side?.active ? 14 : 30; }
+      else { this.lantern.position.set(this.x, 2.2 + this.gy, this.z + (this.game.side?.active ? 1.2 : 0)); this.lantern.intensity = this.game.side?.active ? 14 : 30 * (0.55 + 0.45 * this.inK); }
     }
     if (this.game.side?.active) { this.game.side.aimVisuals(this); this.laser.material.opacity += (((this.aiming && !this.dead) ? 0.55 : 0) - this.laser.material.opacity) * Math.min(1, dt * 12); this.char.material.userData.uniforms.uFlash.value = Math.max(0, this.char.material.userData.uniforms.uFlash.value - dt * 10); return; }
     // laser

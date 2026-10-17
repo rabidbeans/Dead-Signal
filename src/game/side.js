@@ -163,7 +163,7 @@ export class SideStage {
       this.overlay.classList.add('on');
       audio.play('zap', { vol: 0.9, jitter: 0 });
       audio.play('sting', { vol: 0.8, jitter: 0, rate: 0.7 });
-      setTimeout(() => audio.play('boom1', { vol: 0.6, rate: 1.6 }), 1300);
+      this.g.after(1.3, () => audio.play('boom1', { vol: 0.6, rate: 1.6 }));
       buzz([30, 40, 60]);
     }
     for (const p of g.players.values()) { p.y2 = 0; p.vy2 = 0; p.grounded = true; }
@@ -247,7 +247,7 @@ export class SideStage {
       for (const p of g.players.values()) p.z = this.planeZ(p);
       if (!g.over) {
         g.hud.banner('SIDE-SCROLL', 'Stick up / W / Space to JUMP · stick down to drop', 3.2);
-        setTimeout(() => g.hud?.toast('Omega cannot reach you up high, but it spits acid. Jump its shockwaves!'), 3800);
+        g.after(3.8, () => g.hud?.toast('Omega cannot reach you up high, but it spits acid. Jump its shockwaves!'));
       }
     }
   }

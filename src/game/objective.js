@@ -121,7 +121,7 @@ export function explode(g, x, z, r, zDmg, pDmg) {
     if (d < r) g.hurtPlayer(p, pDmg * (1 - 0.5 * d / r), { x, z }, 2.6);
   }
   // a blast sets off the gas tanks next to it
-  for (const t of g.targets.values()) if (t.alive && t.kind === 'tank' && Math.hypot(t.x - x, t.z - z) < r * 0.9) setTimeout(() => g.objective?.damage(t, 999), 140);
+  for (const t of g.targets.values()) if (t.alive && t.kind === 'tank' && Math.hypot(t.x - x, t.z - z) < r * 0.9) g.after(0.14, () => g.objective?.damage(t, 999));
 }
 
 // ------------------------------------------------------- the objective --

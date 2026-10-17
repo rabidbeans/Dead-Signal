@@ -465,3 +465,19 @@ or like magicka … in level five, the game switches into a 2d side scroller for
   Foreman; in L5's 2D fight the (god-mode) bot killed Omega and the evac finished. Play-view draw calls L2-L4 ~210-250.
   Known: the L5 street bot gets pinned against a hesco wall by a crowd from the start (same on the build before this round).
   Not verified: phones, co-op on two devices for doors/keys/2D, sounds by ear.
+
+## 2026-10-17 (later): sealed edges, no boss tips at the start, a dimmer beam indoors
+Sam: "On level three I was able to go way to the left outside of the map"; "every level when you start some text pops up how to
+defeat the boss"; "the flashlight is too bright in the hospital level, it's blinding".
+- ⚠️ **The wide zones leaked into the back alley** (x 30-34) on L2, L3 and L4: `buildLots` DROPPED any lot shallower than ~15 m
+  inside a zone, leaving gaps between buildings. Shallow lots are now kept (at least 6 m deep), and `World.edges()` adds a solid
+  backstop box behind each side of every zone (x ±(ZONE_HW+0.25 … +6.25)). Check with `/home/user/tools/pw/reach.mjs <lvl>`: it
+  flood-fills the walkable area from the start (doors and gates opened) and prints anything reachable past |x| 22; writes
+  `/tmp/reach_<lvl>.json`. After the fix every level is |x| ≤ 19.5 in the zones (≤ 12 on L1/L5) and reaches the far end.
+- **The start banner's note no longer names the boss** (`banner` in LEVELS: only the level's job). The boss's tip is still the
+  toast a few seconds into the boss fight (`TYPES.trait`).
+- `Game.after(sec, fn)`: timers on the GAME clock that die with the game. The boss-tip toast, Omega's 2D tip, the warp's boom,
+  the tank chain and the blood pool used `setTimeout`, which fired into the next run after a quick retry (the HUD is shared).
+- **The flashlight indoors** (`indoors(x, z)`, L2 and L4 interiors): the beam eases to 0.25 of its street strength and the lantern
+  to ~0.66 (`player.inK`). `/home/user/tools/pw/hosp_light.mjs` (old vs new strength at the same spots; mean luminance and the
+  clipped share).
