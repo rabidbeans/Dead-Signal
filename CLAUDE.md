@@ -566,3 +566,6 @@ red to the wrists. The picture itself was not saved into the repo.
   thumb round the screen and a reversal meant dragging all the way back past it. Past the rim is full speed in the thumb's
   direction (normalised: it was >1 before the fix); full speed from 85% of the radius, a 1.2 curve below; the knob stops at
   the rim.
+- **The camera is 10% further out** (Sam, 2026-10-17): `CamRig` height 14.74 / back 9.35 (was 13.4 / 8.5; `?zoom=` still
+  multiplies them). The moon shadow's square follows to ±14.5 m on mid/low (`Q.moonRange`, was 13) so it does not end
+  inside the wider view. QA scripts that hard-code the play camera (boss_strip 'game' view) still use the old numbers.

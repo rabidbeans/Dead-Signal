@@ -40,8 +40,9 @@ class CameraRig {
     this.t = 0;
     const q = new URLSearchParams(location.search);
     const zoom = parseFloat(q.get('zoom') || '1');
-    this.height = 13.4 * zoom;
-    this.back = 8.5 * zoom;
+    // (Sam, 2026-10-17: 10% further out than the old 13.4 / 8.5)
+    this.height = 14.74 * zoom;
+    this.back = 9.35 * zoom;
   }
   kick(x, z) { this.kickV.x += x * 22; this.kickV.z += z * 22; }
   trauma(a) { this.tr = Math.min(1, this.tr + a); }

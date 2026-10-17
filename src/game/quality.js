@@ -13,13 +13,13 @@ const TIERS = {
   },
   mid: {
     name: 'mid', maxDpr: 1, startDpr: 1, minDpr: 0.62, msaa: 0,
-    pcfSoft: false, basicShadow: true, spotMap: false, moonShadow: 1024, moonRange: 13, spotShadow: false, spotShadowSize: 512,
+    pcfSoft: false, basicShadow: true, spotMap: false, moonShadow: 1024, moonRange: 14.5, spotShadow: false, spotShadowSize: 512,
     env: false, chroma: false, bloomScale: 0.35, aniso: 2, fogSheets: 8, rain: 220, zombieShadows: 6,
     physicalPaint: false, lowTex: true,
   },
   low: {
     name: 'low', maxDpr: 0.75, startDpr: 0.75, minDpr: 0.5, msaa: 0,
-    pcfSoft: false, basicShadow: true, spotMap: false, moonShadow: 0, moonRange: 13, spotShadow: false, spotShadowSize: 512,
+    pcfSoft: false, basicShadow: true, spotMap: false, moonShadow: 0, moonRange: 14.5, spotShadow: false, spotShadowSize: 512,
     env: false, chroma: false, bloomScale: 0.25, aniso: 1, fogSheets: 0, rain: 120, zombieShadows: 0,
     physicalPaint: false, lowTex: true,
   },
