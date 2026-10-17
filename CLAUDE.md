@@ -553,3 +553,16 @@ red to the wrists. The picture itself was not saved into the repo.
   unchanged (bullets from the front within ±70°). Trait text and comments say she/her.
 - QA: `/home/user/tools/pw/hair_probe.mjs` (strand tips after 3 s: drop and horizontal spread), `hair_probe2.mjs` (one strand
   stepped alone, its heights every 50 frames — the instability test).
+
+## 2026-10-17 (late): pause, black flashes, the move stick
+- ⚠️ **Resume never unfroze the game**: `game.paused` was set by the HUD inside `game.update()`, which a paused game never runs.
+  main.js's loop now reads the pause menu itself every frame (`game.paused = hud.paused && solo`) before deciding to update.
+  `/home/user/tools/pw/pause_stick.mjs` (clicks Pause / Resume with the real loop running and checks the game clock).
+- ⚠️ **The "random black flash"**: resizing the canvas clears it. The resolution governor (`engine.budget`) resized AFTER the
+  frame was drawn, and the window `resize` event (a phone fires it when its address bar slides) resized between frames, so
+  each quality step put a black frame on the screen. The governor now runs before `engine.render`, and resize events only set
+  `engine.needResize`, applied at the start of the next `render()`.
+- **The move stick stays where the thumb landed** (no leash; the aim stick keeps its leash): on the leash the base followed the
+  thumb round the screen and a reversal meant dragging all the way back past it. Past the rim is full speed in the thumb's
+  direction (normalised: it was >1 before the fix); full speed from 85% of the radius, a 1.2 curve below; the knob stops at
+  the rim.

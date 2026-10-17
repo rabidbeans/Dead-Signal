@@ -2,9 +2,11 @@
 //
 // From design/research.md:
 //  - both sticks FLOAT: the base appears where the thumb lands (left half
-//    moves, right half aims); radius ~60 px; if the thumb runs past the rim
-//    the base follows on a leash so the thumb never "falls off" the stick.
-//  - RADIAL dead zone (12%), rescaled, with a 1.5 power curve for movement.
+//    moves, right half aims); radius ~60 px.
+//  - the MOVE stick's base then stays put (Sam, 2026-10-17: on a leash it followed the thumb round the screen, so a
+//    reversal meant dragging the thumb all the way back past it, and he slowed down); a thumb past the rim is simply
+//    full speed that way. The aim stick keeps its leash.
+//  - RADIAL dead zone (12%), rescaled; full speed from 85% of the radius, a gentle 1.2 curve below it.
 //  - right stick: past 0.2 it aims, past 0.5 (or held 120 ms) it fires.
 //  - a quick tap on the right side fires one aim-assisted shot.
 //  - pointer ids + setPointerCapture; touch-action: none.
@@ -77,12 +79,14 @@ export class Input {
     s.x = e.clientX; s.y = e.clientY;
     let dx = s.x - s.bx, dy = s.y - s.by;
     const d = Math.hypot(dx, dy);
-    if (d > this.R) {               // leash: drag the base behind the thumb
+    if (d > this.R && s.kind === 'aim') {    // leash (the aim stick only): drag the base behind the thumb
       const k = (d - this.R) / d;
       s.bx += dx * k; s.by += dy * k;
       dx = s.x - s.bx; dy = s.y - s.by;
     }
-    this.hud?.stick(s.kind, s.bx, s.by, s.x, s.y, true);
+    // the knob stops at the rim, wherever the thumb is
+    const k = d > this.R ? this.R / d : 1;
+    this.hud?.stick(s.kind, s.bx, s.by, s.bx + dx * k, s.by + dy * k, true);
   }
 
   up(e) {
@@ -105,7 +109,8 @@ export class Input {
       if (s.kind === 'move') {
         const dz = 0.12;
         if (m > dz) {
-          const k = Math.pow((m - dz) / (1 - dz), 1.5) / m;
+          // (the thumb may be far past the rim now: the direction is the thumb's, the speed tops out at 1)
+          const k = Math.pow(Math.min(1, (m - dz) / (0.85 - dz)), 1.2) / Math.hypot(dx, dy);
           mv = { x: dx * k, y: dy * k };
         }
       } else if (m > 0.2) {

@@ -156,14 +156,19 @@ function loop(now) {
   const dtMs = Math.min(100, now - last);
   last = now;
   const dt = dtMs / 1000;
+  // (the pause menu is read HERE: the HUD used to set game.paused from inside game.update, which a paused game never
+  // runs, so Resume never unfroze it)
+  if (game && game.ready) game.paused = hud.paused && game.role === 'solo';
   if (game && game.ready && !game.paused) {
     // fixed-ish steps (never on a level that is still loading: Game.init is async): a slow phone must not run the dead in slow motion
     const span = Math.min(dt, FAST ? 1 / 8 : 0.1);
     const n = FAST ? 1 : Math.max(1, Math.ceil(span / (1 / 30)));
     for (let i = 0; i < n; i++) game.update(span / n);
   }
-  engine.render(dt);
+  // the resolution governor BEFORE the draw: resizing the canvas clears it, and resizing after the draw put a black
+  // frame on the screen every time the quality stepped (the "random black flash")
   engine.budget(dtMs, now);
+  engine.render(dt);
   requestAnimationFrame(loop);
 }
 

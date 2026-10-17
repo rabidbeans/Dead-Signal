@@ -72,7 +72,9 @@ export class Engine {
     this.frameTimes = [];
     this.lastAdjust = 0;
     this.resize();
-    addEventListener('resize', () => this.resize());
+    // (a resize clears the canvas: done just before the next draw, never between a draw and the screen - a phone fires
+    // these whenever its address bar slides, and each one was a black frame)
+    addEventListener('resize', () => { this.needResize = true; });
   }
 
   resize() {
@@ -121,6 +123,7 @@ export class Engine {
   }
 
   render(dt) {
+    if (this.needResize) { this.needResize = false; this.resize(); }
     this.composer.render(dt);
   }
 }
