@@ -104,7 +104,7 @@ class Particles {
 // --------------------------------------------------------------- streaks --
 // Camera-facing ribbons from A to B: tracers, sparks, rain.
 class Streaks {
-  constructor(scene, max, { additive = true, color = 0xffffff, map = null } = {}) {
+  constructor(scene, max, { additive = true, color = 0xffffff, map = null, taper = true } = {}) {
     this.max = max;
     const base = new THREE.PlaneGeometry(1, 2);
     base.translate(0.5, 0, 0);
@@ -137,7 +137,7 @@ class Streaks {
         }`,
       fragmentShader: `
         uniform vec3 uColor; varying vec4 vC; varying vec2 vUv;
-        void main(){ float across = 1.0 - abs(vUv.y * 2.0 - 1.0); float along = smoothstep(0.0, 0.35, vUv.x);
+        void main(){ float across = 1.0 - abs(vUv.y * 2.0 - 1.0); float along = ${taper ? 'smoothstep(0.0, 0.35, vUv.x)' : '1.0'};
           gl_FragColor = vec4(uColor * vC.rgb, vC.a * across * across * along); }`,
     });
     this.mesh = new THREE.Mesh(g, m);
@@ -233,7 +233,10 @@ export class FX {
     this.fire = new Particles(scene, { map: soft, max: 260, additive: true });
     this.glow = new Particles(scene, { map: soft, max: 64, additive: true });
     this.sparks = new Streaks(scene, 160);
-    this.tracers = new Streaks(scene, 32, { color: 0xffd9a0 });
+    this.tracers = new Streaks(scene, 48, { color: 0xffffff });
+    // lightning (the HORNET's shock rounds): flat, jagged, re-struck every few frames
+    this.bolts = new Streaks(scene, 220, { color: 0xffffff, taper: false });
+    this.boltList = [];
     this.rain = new Streaks(scene, Q.rain + 40, { additive: false, color: 0xa9b8cc });
     this.sparkList = [];
     this.tracerList = [];
@@ -299,9 +302,16 @@ export class FX {
     }
   }
 
-  tracer(x0, y, z0, x1, z1, y1 = y) {
+  // col: [r, g, b] (a prototype gun's rounds are its own colour)
+  tracer(x0, y, z0, x1, z1, y1 = y, col = null) {
     const len = Math.hypot(x1 - x0, z1 - z0, y1 - y) || 1e-3;
-    this.tracerList.push({ x0, z0, y, dx: (x1 - x0) / len, dz: (z1 - z0) / len, dy: (y1 - y) / len, len, d: 0.3, speed: 140 });
+    this.tracerList.push({ x0, z0, y, dx: (x1 - x0) / len, dz: (z1 - z0) / len, dy: (y1 - y) / len, len, d: 0.3, speed: 140, c: col });
+  }
+
+  // a jagged arc of lightning from A to B, struck again every few frames while it lives
+  bolt(x0, y0, z0, x1, y1, z1, col = [0.55, 0.85, 1], life = 0.18) {
+    this.boltList.push({ x0, y0, z0, x1, y1, z1, c: col, t: 0, life, pts: null, rt: 0 });
+    this.glow.emit({ x: x1, y: y1, z: z1, life: 0.12, s0: 0.9, s1: 0.3, r: col[0], g: col[1], b: col[2], a0: 0.9, a1: 0 });
   }
 
   shell(x, y, z, dirx, dirz) {
@@ -376,10 +386,35 @@ export class FX {
       t.d += t.speed * dt;
       const head = Math.min(t.len, t.d), tail = Math.max(0, t.d - 2.2);
       if (tail >= t.len) return false;
-      this.tracers.push({ ax: t.x0 + t.dx * tail, ay: t.y + t.dy * tail, az: t.z0 + t.dz * tail, bx: t.x0 + t.dx * head, by: t.y + t.dy * head, bz: t.z0 + t.dz * head, w: 0.035, r: 1, g: 0.85, b: 0.6, a: 0.9 });
+      const c = t.c;
+      this.tracers.push({ ax: t.x0 + t.dx * tail, ay: t.y + t.dy * tail, az: t.z0 + t.dz * tail, bx: t.x0 + t.dx * head, by: t.y + t.dy * head, bz: t.z0 + t.dz * head, w: c ? 0.05 : 0.035, r: c ? c[0] : 1, g: c ? c[1] : 0.72, b: c ? c[2] : 0.38, a: 0.9 });
       return true;
     });
     this.tracers.flush();
+    // lightning: 7 kinks, re-struck every ~40 ms, a bright core over a wide glow
+    this.bolts.list.length = 0;
+    this.boltList = this.boltList.filter((b) => {
+      b.t += dt; b.rt -= dt;
+      if (b.t > b.life) return false;
+      if (!b.pts || b.rt <= 0) {
+        b.rt = 0.04;
+        const n = 7, pts = [];
+        const L = Math.hypot(b.x1 - b.x0, b.z1 - b.z0) || 1;
+        for (let i = 0; i <= n; i++) {
+          const u = i / n, j = i === 0 || i === n ? 0 : (Math.random() - 0.5) * Math.min(1.2, L * 0.25);
+          pts.push([b.x0 + (b.x1 - b.x0) * u + j * (b.z1 - b.z0) / L, b.y0 + (b.y1 - b.y0) * u + (Math.random() - 0.5) * 0.3 * (i % n ? 1 : 0), b.z0 + (b.z1 - b.z0) * u - j * (b.x1 - b.x0) / L]);
+        }
+        b.pts = pts;
+      }
+      const a = 1 - b.t / b.life;
+      for (let i = 0; i < b.pts.length - 1; i++) {
+        const p = b.pts[i], q = b.pts[i + 1];
+        this.bolts.push({ ax: p[0], ay: p[1], az: p[2], bx: q[0], by: q[1], bz: q[2], w: 0.28, r: b.c[0] * 0.5, g: b.c[1] * 0.5, b: b.c[2] * 0.5, a: 0.6 * a });
+        this.bolts.push({ ax: p[0], ay: p[1], az: p[2], bx: q[0], by: q[1], bz: q[2], w: 0.07, r: 1, g: 1, b: 1, a: a });
+      }
+      return true;
+    });
+    this.bolts.flush();
     // sparks
     this.sparks.list.length = 0;
     this.sparkList = this.sparkList.filter((s) => {

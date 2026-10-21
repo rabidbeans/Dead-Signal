@@ -569,3 +569,44 @@ red to the wrists. The picture itself was not saved into the repo.
 - **The camera is 10% further out** (Sam, 2026-10-17): `CamRig` height 14.74 / back 9.35 (was 13.4 / 8.5; `?zoom=` still
   multiplies them). The moon shadow's square follows to ±14.5 m on mid/low (`Q.moonRange`, was 13) so it does not end
   inside the wider view. QA scripts that hard-code the play camera (boss_strip 'game' view) still use the old numbers.
+
+## Round 9 (2026-10-21): two currencies, prototype guns, mastery, specialties, throwables, the crate
+Sam: "save the money only for upgrading weapons rather than unlocking them. Review all the gold expenditure ... come up with
+a way to still encourage old guns ... packa punched ... add all the other stuff you said too."
+- **Economy** (`save.js`, save format `mig: 2`): CASH buys gun upgrades and the prototype refit, nothing else. Guns are never
+  bought: `save.grant()` owns every gun whose `unlock` level has been beaten. SKILL POINTS (one per `XP_PER_POINT` 60 XP;
+  kills 1, brutes 4, bosses 40, a win 20 + 10 x level) buy the perks (health/armor/speed now cost 1-3 points) and specialty
+  nodes. Scavenger is gone. An older save is migrated once (`migrate()`): bought guns and Scavenger refunded in cash,
+  3 skill points per level beaten, a note at the top of the safehouse (`data.migrated`). Upgrade multipliers `costK`
+  pistol 1 / smg 1.15 / shotgun 1.3 / rifle 1.45 / lmg 1.6. Estimated income: L1 ~$3-4k ... L5 ~$7-8k a run; every
+  upgrade + prototype on all five guns ~$44k, so a campaign maxes two or three guns and replays fill the rest.
+- **Prototype refit** (`PROTO` in weapons.js, the pack-a-punch): needs every upgrade on the gun maxed, then $2.5-4.2k.
+  Pistol THE LAST WORD (x2 dmg, 30% crit, pierces 3 at 85%, ricochets into the next body), SMG HORNET (every 5th hit arcs
+  lightning to 3 more, stuns 0.9 s), shotgun DRAGON'S BREATH (sets bodies alight, fire spreads), rifle SHRAPNEL (explosive
+  tips, r 2.2 at 60%), LMG WARMONGER (double belt, spins up +75% over 1.6 s, pierces 2). The extras run on the SHOOTER's
+  machine as extra `localHit`s (`Player.protoHit`); a stun/burn rides the hit message (`st`, `bn`) and the host applies
+  it (`Game.status`, `Zombie.ignite`, burn ticks in `Zombie.think`, `zfx` event for the flames everywhere). Coloured
+  tracers (`fx.tracer(..., col)`), lightning (`fx.bolt`), `miniBlast`. A prototype's gun glows its colour.
+- **Mastery** (`MASTERY`): kills with a gun (banked per gun in `Game.bank`) earn, free: extended mag (40), red dot (120),
+  suppressor (260: shots no longer set `g.noise`, so sleepers stay asleep; sound `sup0..2`), gold finish (500, +10%).
+  The gear shows on the model (`Player.decorate`, gear.glb `reddot`/`suppressor`, mag scaled, gold materials).
+  `lookBits(W)` travels in 'in' messages, snapshot rows [13] and shot events so friends see (and hear) it.
+- **Specialties** (`skills.js`, `SPECS`, picked in the SURVIVOR tab): MEDIC field dressing (heal circle; each machine heals
+  its own survivor; passive revive x2 on the host, medkits x1.5), GUNNER overdrive (no ammo use, faster, `p.over`), SCOUT
+  dash (`p.dash`, `p.invT`; the host shoves/hurts the dead on the path), ENGINEER sentry (host simulates targets and
+  damage, `tgt` events, every machine draws it firing; gear.glb `sentry_base/head`). Three nodes each (power / size /
+  cooldown, 1-2-3 points). HUD `.skill-btn` (F on desktop). Client events that go up to the host: `UP_EVENTS` in game.js.
+- **Throwables** (`throwables.js`): frag (bounces, 1.7 s), molotov (fire patch 7 s that ignites the dead), pipe bomb (beeps;
+  `g.lure` pulls every awake non-boss within 24 m, zombie.js treats `best.isLure` as a place, not a target). Start with 2
+  frags (engineer 3); ordnance boxes (`SUPPLIES` in level.js, gear.glb `supply`) give more. Thrower sends one `throw`
+  event; everyone flies the same arc; the host deals damage (`explode(..., byId)` credits the thrower). HUD `.throw-btn`
+  (tap throws at the thick of the dead ahead / the aim / the mouse; the arrow or a long press cycles; G / T on desktop).
+- **The crate** (`src/ui/reveal.js`): a gun opened since the last safehouse visit is revealed in its own little scene
+  (own WebGLRenderer on a fresh canvas, disposed on close): latches, lid, light, the gun rising, stats, TEST FIRE, TAKE IT.
+  Timed on the wall clock. Clicking a gun's picture in the safehouse replays it.
+- Assets: `tools/blender/gear_kit.py` -> `props/gear.glb` (sentry, frag, molotov, pipe bomb, red dot, suppressor, crate,
+  hard case, ordnance box); `tools/sfx_gear.py` (sup0-2, throw, glass, ignite, beep, crate).
+- QA flags: `&spec=gunner&sk=power:2,size:1&proto=pistol,smg&kills=pistol:600&sp=9`. Scripts in /home/user/tools/pw:
+  `gear_test.mjs <secs> <query>` (uses the skill and throws every few seconds), `fx_shots.mjs field|gun`,
+  `shop_shots.mjs` (reveal + both tabs), `coop_gear.mjs` (two browsers: a friend's sentry/frag/prototype seen by the host),
+  `income.mjs <lvl>`. Not verified: phone frame rate with sentries and fire patches, sounds by ear.

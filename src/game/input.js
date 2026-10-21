@@ -41,6 +41,9 @@ export class Input {
       if (e.code === 'Digit1') this.slotPressed = 0;
       if (e.code === 'Digit2') this.slotPressed = 1;
       if (e.code === 'KeyQ') this.swapPressed = true;
+      if (e.code === 'KeyF') this.skillPressed = true;
+      if (e.code === 'KeyG') this.throwPressed = true;
+      if (e.code === 'KeyT') this.cyclePressed = true;
     });
     addEventListener('keyup', (e) => this.keys.delete(e.code));
     addEventListener('blur', () => this.reset());
@@ -53,6 +56,7 @@ export class Input {
     this.keys.clear();
     this.mouseDown = false;
     this.reloadPressed = false; this.slotPressed = null; this.swapPressed = false; this.tapShot = false;
+    this.skillPressed = false; this.throwPressed = false; this.cyclePressed = false;
   }
 
   side(e) { return e.clientX < innerWidth * 0.5 ? 'move' : 'aim'; }
@@ -134,6 +138,9 @@ export class Input {
     const rl = this.reloadPressed; this.reloadPressed = false;
     const slot = this.slotPressed; this.slotPressed = null;
     const swap = this.swapPressed; this.swapPressed = false;
-    return { move: mv, aim, firing, tap, reload: rl, slot, swap, jump: k.has('Space'), mouse: this.mouseAim, mouseFiring: this.mouseFiring };
+    const skill = this.skillPressed; this.skillPressed = false;
+    const thr = this.throwPressed; this.throwPressed = false;
+    const cyc = this.cyclePressed; this.cyclePressed = false;
+    return { move: mv, aim, firing, tap, reload: rl, slot, swap, skill, throw: thr, cycle: cyc, jump: k.has('Space'), mouse: this.mouseAim, mouseFiring: this.mouseFiring };
   }
 }

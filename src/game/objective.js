@@ -105,14 +105,14 @@ export function boomFx(g, x, z, r = 4) {
 }
 
 // host: everything inside r takes damage that falls off to half at the edge
-export function explode(g, x, z, r, zDmg, pDmg) {
+export function explode(g, x, z, r, zDmg, pDmg, byId = null) {
   for (const zb of [...g.zombies.values()]) {
     if (!zb.alive) continue;
     const dx = zb.x - x, dz = zb.z - z, d = Math.hypot(dx, dz);
     if (d > r + (zb.def.rad || 0.32)) continue;
     const k = 1 - 0.5 * Math.min(1, d / r), nx = dx / (d || 1), nz = dz / (d || 1);
-    const killed = zb.damage((zb.boss ? 0.35 : 1) * zDmg * k, nx, nz, false, null);
-    if (killed) g.onKill(zb, nx, nz, false, false, null);
+    const killed = zb.damage((zb.boss ? 0.35 : 1) * zDmg * k, nx, nz, false, byId, 2.2);
+    if (killed) g.onKill(zb, nx, nz, false, !!byId && byId === g.me.id, byId);
     else g.netEvent({ k: 'zhit', id: zb.id, dx: nx, dz: nz, crit: 0 });
   }
   for (const p of g.players.values()) {

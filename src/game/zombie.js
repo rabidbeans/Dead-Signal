@@ -38,6 +38,7 @@ const MODEL_GAIT = {
   z_worker: (p) => { p.limp = p.limp || 'R'; p.shoulderDrop += 0.15; },
 };
 
+const _sv = new THREE.Vector3();
 export const SPEED_K = 1.1;      // everything walks 10% faster than the numbers below
 const ATTACK_RANGE = 1.15;
 const WINDUP = 0.5;
@@ -108,6 +109,21 @@ export class Zombie {
     if (this.state === 'dead') { this.deadT += dt; return; }
     this.stateT += dt;
     this.hitT += dt;
+    // on fire (Dragon's Breath): it burns down, and sets the dead it brushes against alight
+    if (this.burn) {
+      const b = this.burn;
+      b.t -= dt; b.tick -= dt;
+      if (b.tick <= 0) {
+        b.tick = 0.25;
+        const killed = this.damage(b.dps * 0.25 * (this.boss ? 0.5 : 1), 0, 0, false, b.by, 0);
+        if (killed) { this.game.onKill(this, 0, 0, false, b.by === this.game.me.id, b.by); return; }
+        if (b.spread) for (const o of this.game.zombies.values()) {
+          if (o === this || !o.alive || o.burn || (o.x - this.x) ** 2 + (o.z - this.z) ** 2 > b.spread * b.spread) continue;
+          if (Math.random() < 0.35) o.ignite({ dps: b.dps, t: b.t0 * 0.6, spread: 0 }, b.by);
+        }
+      }
+      if (b.t <= 0) this.burn = null;
+    }
     // Patient Zero's drip: he heals while nobody is shooting him
     if (this.def.regen && this.hitT > 2.5 && this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + this.maxHp * this.def.regen * dt);
     // nearest living player
@@ -116,6 +132,12 @@ export class Zombie {
       if (!p.alive) continue;
       const d = (p.x - this.x) ** 2 + (p.z - this.z) ** 2;
       if (d < bd) { bd = d; best = p; }
+    }
+    // a pipe bomb beeping nearby: the awake dead turn and go to it instead
+    const lure = this.game.lure;
+    if (lure && !this.boss && !this.idle) {
+      const ld = (lure.x - this.x) ** 2 + (lure.z - this.z) ** 2;
+      if (ld < lure.r * lure.r) { best = lure; bd = ld; }
     }
     this.target = best;
     let dist = Math.sqrt(bd);
@@ -142,7 +164,7 @@ export class Zombie {
     let want = 0, dirx = 0, dirz = 0;
     if (best) {
       const tx = best.x - this.x, tz = best.z - this.z;
-      if (dist < 5) {
+      if (dist < 5 || best.isLure) {
         // close: home in, approaching through a flanking slot
         const a = Math.atan2(tz, tx) + this.slot * Math.min(1, (dist - 1) / 4) * 0.5;
         dirx = Math.cos(a); dirz = Math.sin(a);
@@ -179,7 +201,7 @@ export class Zombie {
     // states
     if (this.state === 'stagger') { want *= 0.15; if (this.stateT > this.staggerFor) this.setState('walk'); }
     const reach = this.def.reach || ATTACK_RANGE, windup = (this.def.windup || WINDUP) * (this.overtime ? 0.68 : 1);
-    if (this.state === 'walk' && best && dist < reach) {
+    if (this.state === 'walk' && best && !best.isLure && dist < reach) {
       this.setState('windup');
       this.game.emit({ k: 'windup', id: this.id });
     }
@@ -227,6 +249,16 @@ export class Zombie {
   }
 
   setState(s) { this.state = s; this.stateT = 0; }
+
+  // host: set it alight (everyone sees the flames through a zfx event)
+  ignite(o, by) {
+    if (!this.alive) return;
+    const t = o.t * (this.boss ? 0.6 : 1);
+    if (this.burn) { this.burn.t = Math.max(this.burn.t, t); this.burn.by = by; return; }
+    this.burn = { dps: o.dps, t, t0: t, tick: 0.1, spread: o.spread || 0, by };
+    this.burnT = t;
+    this.game.netEvent({ k: 'zfx', id: this.id, f: 'b', t: +t.toFixed(1) });
+  }
 
   wake() {
     if (!this.idle) return;
@@ -368,6 +400,28 @@ export class Zombie {
     }
     this.flash = Math.max(0, this.flash - dt / 0.08);
     this.char.material.userData.uniforms.uFlash.value = this.flash;
+    // burning: flames licking up the body, a char tint; shocked: blue crackle
+    const g = this.game;
+    if (this.burnT > 0) {
+      this.burnT -= dt;
+      const sc = this.char.root.scale.x, gy = g.world.groundY(this.x, this.z);
+      const n = this.alive ? 2 : 1;
+      for (let i = 0; i < n; i++) if (Math.random() < dt * 22) {
+        g.fx.fire.emit({ x: this.x + (Math.random() - 0.5) * 0.45 * sc, y: gy + (0.3 + Math.random() * 1.2) * sc, z: this.z + (Math.random() - 0.5) * 0.45 * sc, vx: (Math.random() - 0.5) * 0.4, vy: 1.4 + Math.random(), vz: (Math.random() - 0.5) * 0.4, life: 0.35 + Math.random() * 0.25, s0: 0.42 * sc, s1: 0.06, r: 1, g: 0.42 + Math.random() * 0.25, b: 0.1, a0: 0.85, a1: 0 });
+      }
+      if (Math.random() < dt * 5) g.fx.smoke.emit({ x: this.x, y: gy + 1.7 * sc, z: this.z, vx: 0, vy: 1.0, vz: 0, life: 1.6, s0: 0.3, s1: 1.4, r: 0.08, g: 0.07, b: 0.07, a0: 0.35, a1: 0, drag: 0.6 });
+      const t = this.char.material.userData.uniforms.uTint.value;
+      t.multiplyScalar(1 - Math.min(0.5, dt * 0.25));
+      if (t.r < 0.45) t.setRGB(0.45, 0.42, 0.4);
+    }
+    if (this.shockT > 0) {
+      this.shockT -= dt;
+      if (Math.random() < dt * 14) {
+        const sc = this.char.root.scale.x, gy = g.world.groundY(this.x, this.z), y0 = gy + (0.5 + Math.random()) * sc;
+        g.fx.bolt(this.x + (Math.random() - 0.5) * 0.5, y0, this.z + (Math.random() - 0.5) * 0.5, this.x + (Math.random() - 0.5) * 0.7, y0 + (Math.random() - 0.3) * 0.6, this.z + (Math.random() - 0.5) * 0.7, undefined, 0.08);
+      }
+      this.anim.hit(_sv.set((Math.random() - 0.5) * 0.3, 0, (Math.random() - 0.5) * 0.3), 0.15);
+    }
     // the fall: pivot at the feet, onto the ground over ~0.6 s
     const root = this.char.root;
     if (this.state === 'dead') {

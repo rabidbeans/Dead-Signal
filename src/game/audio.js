@@ -10,6 +10,7 @@ const LIST = [
   'scream0', 'scream1', 'death0', 'death1', 'hurt0', 'hurt1', 'thunder0', 'thunder1',
   'rain', 'wind', 'siren', 'sting', 'heart', 'click',
   'boom0', 'boom1', 'incoming', 'power', 'zap', 'engine', 'squelch0', 'squelch1', 'burst',
+  'sup0', 'sup1', 'sup2', 'throw', 'glass', 'ignite', 'beep', 'crate',
 ];
 
 class Audio {

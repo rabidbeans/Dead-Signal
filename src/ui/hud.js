@@ -1,6 +1,19 @@
 // The in-game HUD: DOM over the canvas (crisp text, cheap to update).
 import * as THREE from 'three';
-import { WEAPONS } from '../game/weapons.js';
+import { WEAPONS, MASTERY, PROTO } from '../game/weapons.js';
+import { SPECS } from '../game/skills.js';
+import { NADES } from '../game/throwables.js';
+
+// small icons for the skill and throw buttons (drawn, so they stay crisp on any screen)
+export const ICONS = {
+  medic: '<svg viewBox="0 0 24 24"><path d="M9 3h6v6h6v6h-6v6H9v-6H3V9h6z"/></svg>',
+  gunner: '<svg viewBox="0 0 24 24"><path d="M5 21V10l2-4 2 4v11zM11 21V8l2-5 2 5v13zM17 21V10l2-4 2 4v11z"/></svg>',
+  scout: '<svg viewBox="0 0 24 24"><path d="M3 5l7 7-7 7V5zm8 0l7 7-7 7V5z"/><path d="M19 4h2v16h-2z"/></svg>',
+  engineer: '<svg viewBox="0 0 24 24"><path d="M7 7h9v6H7zM16 9h6v2h-6zM10 13h3v3l5 6h-3l-3-4-3 4H6l4-6z"/></svg>',
+  frag: '<svg viewBox="0 0 24 24"><circle cx="11" cy="14" r="7"/><path d="M9 5h4v3H9zM13 5l6 4-1 1-6-3z"/><circle cx="7" cy="5" r="2" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>',
+  molotov: '<svg viewBox="0 0 24 24"><path d="M10 9h4v2l2 3v8H8v-8l2-3z"/><path d="M11 3c2 2-1 3 1 5 1-1 2-2 1-4 2 1 2 4 0 5h-3c-1-2 0-4 1-6z"/></svg>',
+  pipe: '<svg viewBox="0 0 24 24"><path d="M3 10h3V8h12v2h3v4h-3v2H6v-2H3z"/><path d="M10 6h4v2h-4z"/><circle cx="12" cy="5" r="1.4"/></svg>',
+};
 
 const ICON = (id) => `${import.meta.env.BASE_URL}assets/weapons/${WEAPONS[id].icon}`;
 
@@ -31,6 +44,8 @@ export class HUD {
       </div>
       <button class="reload-btn" aria-label="Reload"><svg viewBox="0 0 24 24"><path d="M12 5V2L7 6l5 4V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z"/></svg><span>RELOAD</span></button>
       <button class="swap-btn hidden" aria-label="Switch weapon"><img class="swap-icon" alt=""><span>SWITCH GUN</span></button>
+      <button class="skill-btn hidden" aria-label="Skill"><i class="sk-icon"></i><em class="sk-n"></em><b class="sk-cd"></b><span class="sk-name"></span></button>
+      <button class="throw-btn hidden" aria-label="Throw"><i class="th-icon"></i><em class="th-n"></em><span class="th-name"></span><u class="th-cycle">⟳</u></button>
       <div class="stick move"><div class="knob"></div></div>
       <div class="stick aim"><div class="knob"></div></div>
       <div class="reload-ring"><svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="17"/></svg></div>
@@ -64,6 +79,8 @@ export class HUD {
       down: $('.down-msg', root), downSub: $('.down-sub', root), bleed: $('.bleed i', root), toast: $('.toast', root), hint: $('.hint', root),
       pause: $('.pause', root), pauseMenu: $('.pause-menu', root), end: $('.end', root),
       reloadBtn: $('.reload-btn', root),
+      skillBtn: $('.skill-btn', root), skIcon: $('.sk-icon', root), skN: $('.sk-n', root), skCd: $('.sk-cd', root), skName: $('.sk-name', root),
+      throwBtn: $('.throw-btn', root), thIcon: $('.th-icon', root), thN: $('.th-n', root), thName: $('.th-name', root), thCycle: $('.th-cycle', root),
       marks: [...root.querySelectorAll('.mk')],
     };
     this.vig = 0;
@@ -78,6 +95,18 @@ export class HUD {
     this.onRetry = null;
     this.el.reloadBtn.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); this.onReload?.(); });
     this.el.swapBtn.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); this.onSwap?.(); });
+    this.el.skillBtn.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); this.onSkill?.(); });
+    // the throw button: a tap throws, the little arrow (or a long press) changes what you throw
+    this.el.throwBtn.addEventListener('pointerdown', (e) => {
+      e.stopPropagation(); e.preventDefault();
+      if (e.target === this.el.thCycle) { this.onCycle?.(); return; }
+      this._thDown = performance.now();
+      clearTimeout(this._thHold);
+      this._thHold = setTimeout(() => { this._thDown = 0; this.onCycle?.(); }, 420);
+    });
+    const thUp = (e) => { e.stopPropagation(); clearTimeout(this._thHold); if (this._thDown) { this._thDown = 0; this.onThrow?.(); } };
+    this.el.throwBtn.addEventListener('pointerup', thUp);
+    this.el.throwBtn.addEventListener('pointercancel', () => { clearTimeout(this._thHold); this._thDown = 0; });
     this.el.pause.addEventListener('click', () => this.el.pauseMenu.classList.remove('hidden'));
     $('.resume', root).addEventListener('click', () => this.el.pauseMenu.classList.add('hidden'));
     $('.quit', root).addEventListener('click', () => this.onQuit?.());
@@ -103,7 +132,10 @@ export class HUD {
   weapon(p) {
     const W = p.W;
     this.el.wIcon.src = ICON(W.id);
-    this.el.wName.textContent = W.name.toUpperCase();
+    this.el.wName.textContent = (W.proto ? PROTO[W.id].name : W.name).toUpperCase();
+    this.el.wIcon.classList.toggle('gold', !!W.gold);
+    this.el.wIcon.classList.toggle('proto', !!W.proto);
+    if (W.proto) this.el.weapon.style.setProperty('--pc', '#' + PROTO[W.id].color.toString(16).padStart(6, '0')); else this.el.weapon.style.removeProperty('--pc');
     this.el.swapBtn.classList.toggle('hidden', p.order.length < 2);
     // the switch button shows the gun you would switch TO, so it can never be mistaken for reload
     if (p.order.length > 1) {
@@ -223,7 +255,7 @@ export class HUD {
     const cp = s.checkpoint || 0;
     const next = win && !s.last;
     const note = win
-      ? (s.last ? 'You made it out of the city. Fort Hope is behind you, and so is the dead city.' : 'The safehouse is open: spend the cash on guns, armor and speed, then on to the next level.')
+      ? (s.last ? 'You made it out of the city. Fort Hope is behind you, and so is the dead city.' : 'The safehouse is open: upgrade your guns with the cash and your survivor with skill points, then on to the next level.')
       : (cp > 0 ? `You made it past checkpoint ${cp} of ${s.gates}.` : 'You never got past the first gate.');
     $('.panel', e).innerHTML = `
       <div class="end-kicker">${win ? s.name : (why || 'THE ROUTE CLAIMED ANOTHER')}</div>
@@ -235,6 +267,9 @@ export class HUD {
         <div class="cashbox"><b>$${s.cash}</b><span>LOOTED</span></div>
       </div>
       <p class="next">${note}</p>
+      ${s.newGun ? `<div class="end-new">NEW WEAPON UNLOCKED · <b>${WEAPONS[s.newGun].name.toUpperCase()}</b> <small>waiting in the safehouse</small></div>` : ''}
+      ${(s.mastered || []).map((m) => `<div class="end-new mast">MASTERY · <b>${WEAPONS[m.id].name.toUpperCase()}</b> earned the ${MASTERY.find((q) => q.key === m.att)?.name.toLowerCase()}</div>`).join('')}
+      ${s.xp ? `<div class="end-xp">+${s.xp} XP${s.points ? ` · <b>+${s.points} SKILL POINT${s.points > 1 ? 'S' : ''}</b>` : ''}</div>` : ''}
       <div class="wallet">WALLET <b>$${s.wallet}</b></div>
       <div class="end-buttons">
         ${!win && cp > 0 ? '<button class="btn primary retry-cp">FROM CHECKPOINT</button>' : ''}
@@ -247,6 +282,30 @@ export class HUD {
     $('.retry-cp', e)?.addEventListener('click', () => this.onRetry?.(true));
     $('.safe', e).addEventListener('click', () => this.onSafehouse?.());
     $('.menu', e).addEventListener('click', () => this.onQuit?.());
+  }
+
+  // the skill and throw buttons
+  gear(game) {
+    const sv = game.skills?.view(), E = this.el;
+    E.skillBtn.classList.toggle('hidden', !sv);
+    if (sv) {
+      const S = SPECS[sv.spec];
+      if (E.skillBtn.dataset.spec !== sv.spec) { E.skillBtn.dataset.spec = sv.spec; E.skIcon.innerHTML = ICONS[sv.spec]; E.skName.textContent = S.skill; E.skillBtn.style.setProperty('--c', S.color); }
+      E.skillBtn.style.setProperty('--p', sv.frac.toFixed(3));
+      E.skillBtn.classList.toggle('ready', sv.ready);
+      const cd = sv.ready ? '' : String(sv.secs);
+      if (E.skCd.textContent !== cd) E.skCd.textContent = cd;
+      const n = sv.charges ? '×' + sv.charges : '';
+      if (E.skN.textContent !== n) E.skN.textContent = n;
+    }
+    const tv = game.nades?.view();
+    E.throwBtn.classList.toggle('hidden', !tv);
+    if (tv) {
+      if (E.throwBtn.dataset.kind !== tv.kind) { E.throwBtn.dataset.kind = tv.kind; E.thIcon.innerHTML = ICONS[tv.kind]; E.thName.textContent = NADES[tv.kind].name; E.throwBtn.style.setProperty('--c', NADES[tv.kind].color); }
+      const n = String(tv.n);
+      if (E.thN.textContent !== n) E.thN.textContent = n;
+      E.throwBtn.classList.toggle('empty', tv.n <= 0);
+    }
   }
 
   reset() {
@@ -323,6 +382,7 @@ export class HUD {
       this.el.bossBar.classList.toggle('hidden', !bz);
       if (bz) { this.el.bossName.textContent = bz.def.name; this.el.bossFill.style.width = Math.max(0, bz.hp / bz.maxHp * 100).toFixed(1) + '%'; }
     }
+    if (this._sk === undefined || (this._sk -= dt) < 0) { this._sk = 0.08; this.gear(game); }
     if (this.bannerT > 0) { this.bannerT -= dt; if (this.bannerT <= 0) this.el.banner.classList.remove('on'); }
     game.paused = this.paused && game.role === 'solo';
   }

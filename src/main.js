@@ -8,6 +8,7 @@ import * as THREE from 'three';
 import { Engine, isTouch } from './game/engine.js';
 import { loadCharacters, loadProps, ZOMBIES, SURVIVORS, loadWeapon, BOSS_MODELS } from './game/assets.js';
 import { loadBossGear } from './game/bossgear.js';
+import { loadGear } from './game/gear.js';
 import { Game } from './game/game.js';
 import { HUD, escapeHtml } from './ui/hud.js';
 import { Input } from './game/input.js';
@@ -49,7 +50,7 @@ function show(screen) {
 async function boot() {
   const bar = document.querySelector('.load-bar i');
   let done = 0;
-  const steps = [loadCharacters(ZOMBIES), loadProps(), ...['pistol', 'smg', 'shotgun', 'rifle', 'lmg'].map(loadWeapon)];
+  const steps = [loadCharacters(ZOMBIES), loadProps(), loadGear(), ...['pistol', 'smg', 'shotgun', 'rifle', 'lmg'].map(loadWeapon)];
   steps.forEach((p) => p.then(() => { done++; bar.style.width = (done / steps.length * 100) + '%'; }));
   await Promise.all(steps);
   $('name').value = store.get('name', '');
@@ -71,6 +72,12 @@ async function boot() {
     if (qs.get('kit')) for (const k of qs.get('kit').split(',')) if (save.data.weapons[k]) { save.data.weapons[k].owned = true; save.data.equipped = k; }
     if (qs.has('cash')) save.data.cash = +qs.get('cash');
     if (qs.get('perks')) for (const kv of qs.get('perks').split(',')) { const [k, v] = kv.split(':'); save.data.perks[k] = +v; }
+    // ?spec=gunner picks a specialty, ?proto=pistol,smg refits guns, ?kills=pistol:300 sets mastery, ?sp=9 skill points
+    if (qs.get('spec')) save.data.spec = qs.get('spec');
+    if (qs.get('proto')) for (const k of qs.get('proto').split(',')) if (save.data.weapons[k]) save.data.weapons[k].proto = true;
+    if (qs.get('kills')) for (const kv of qs.get('kills').split(',')) { const [k, v] = kv.split(':'); if (save.data.weapons[k]) save.data.weapons[k].kills = +v; }
+    if (qs.get('sk')) for (const kv of qs.get('sk').split(',')) { const [k, v] = kv.split(':'); if (save.data.spec) save.data.skills[save.data.spec][k] = +v; }
+    if (qs.has('sp')) save.data.sp = +qs.get('sp');
     save.write();
     await startGame(soloPlayers(), 'me', { checkpoint: +(qs.get('cp') || 0), level: +(qs.get('lvl') || 1) });
     if (qs.has('bot')) game.bot = true;
@@ -198,6 +205,9 @@ async function startGame(players, localId, opts = {}) {
   hud.onQuit = () => quit();
   hud.onRetry = (fromCp) => retry(fromCp);
   hud.onSwap = () => game?.me.cycleWeapon();
+  hud.onSkill = () => game?.skills?.use();
+  hud.onThrow = () => game?.nades?.throw({ mouse: null });
+  hud.onCycle = () => game?.nades?.cycle();
   hud.onSafehouse = () => openShop(game.level, !!game.won);
   if (isTouch) {
     try { await document.documentElement.requestFullscreen?.({ navigationUI: 'hide' }); } catch (e) { /* iOS */ }

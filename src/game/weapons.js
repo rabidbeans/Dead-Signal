@@ -17,7 +17,7 @@ export const WEAPONS = {
     spreadBase: deg(2.0), spreadAdd: deg(0.55), spreadMax: deg(6.5), spreadRecover: deg(10), spreadMove: deg(1.6),
     range: 25, assistAcquire: deg(9), assistHold: deg(15), assistRange: 11, assistBend: 0.5, magnet: 0.35,
     kick: 0.06, trauma: 0.045, recoil: 11, shot: 'smg', shellVol: 0.12, duck: 0.8, price: 1400,
-    magStep: 6, tip: [0.365, 0.052, 0], spare: [-0.112, 0.105, 0], unlock: 1, costK: 1.3,
+    magStep: 6, tip: [0.365, 0.052, 0], spare: [-0.112, 0.105, 0], unlock: 1, costK: 1.15,
   },
   // a new gun opens in the safehouse for every level you beat (`unlock` = the level to beat)
   shotgun: {
@@ -29,7 +29,7 @@ export const WEAPONS = {
     spreadBase: deg(11), spreadAdd: 0, spreadMax: deg(11), spreadRecover: deg(20), spreadMove: deg(2),
     range: 16, assistAcquire: deg(14), assistHold: deg(20), assistRange: 10, assistBend: 0.4, magnet: 0.3,
     kick: 0.5, trauma: 0.26, recoil: 42, shot: 'shotgun', shellVol: 0.35, duck: 0.3, price: 2600,
-    magStep: 2, tip: [0.623, 0.03, 0], spare: [-0.116, 0.01, 0.034], unlock: 2, costK: 1.6,
+    magStep: 2, tip: [0.623, 0.03, 0], spare: [-0.116, 0.01, 0.034], unlock: 2, costK: 1.3,
     pump: 0.25, noDrop: true, snd: { release: null, magout: 'mag_in', magin: 'mag_in', rack: 'pump' },
   },
   rifle: {
@@ -38,7 +38,7 @@ export const WEAPONS = {
     spreadBase: deg(1.0), spreadAdd: deg(0.35), spreadMax: deg(3.5), spreadRecover: deg(9), spreadMove: deg(1.2),
     range: 34, assistAcquire: deg(9), assistHold: deg(15), assistRange: 13, assistBend: 0.55, magnet: 0.35,
     kick: 0.1, trauma: 0.06, recoil: 15, shot: 'rifle', shellVol: 0.14, duck: 0.7, price: 4200,
-    magStep: 6, tip: [0.606, 0.058, 0], spare: [-0.11, 0.12, 0], unlock: 3, costK: 2.0,
+    magStep: 6, tip: [0.606, 0.058, 0], spare: [-0.11, 0.12, 0], unlock: 3, costK: 1.45,
   },
   lmg: {
     id: 'lmg', name: 'M-60 Hailstorm', model: 'lmg', icon: 'lmg_icon.webp', blurb: 'A hundred-round belt. Heavy: you move slower.',
@@ -46,47 +46,109 @@ export const WEAPONS = {
     spreadBase: deg(1.8), spreadAdd: deg(0.3), spreadMax: deg(5), spreadRecover: deg(6), spreadMove: deg(2.5),
     range: 32, assistAcquire: deg(9), assistHold: deg(15), assistRange: 12, assistBend: 0.5, magnet: 0.35,
     kick: 0.12, trauma: 0.08, recoil: 18, shot: 'lmg', shellVol: 0.16, duck: 0.6, price: 6500,
-    magStep: 20, tip: [0.7425, 0.05, 0], spare: [-0.145, 0.09, 0], unlock: 4, costK: 2.4, moveK: 0.86,
+    magStep: 20, tip: [0.7425, 0.05, 0], spare: [-0.145, 0.09, 0], unlock: 4, costK: 1.6, moveK: 0.86,
     snd: { release: 'mag_release', magout: 'belt', magin: 'mag_in', rack: 'slide' },
   },
 };
 export const WEAPON_IDS = Object.keys(WEAPONS);
 
-// Four upgrades per gun. cost[i] is the price of level i+1 (times the gun's `costK`).
+// Four upgrades per gun, bought with cash: the ONLY thing cash buys now (guns open by beating levels, the survivor is
+// levelled with skill points). cost[i] is the price of level i+1, times the gun's `costK`.
 export const WEAPON_UPGRADES = [
   { key: 'dmg', name: 'Damage', desc: '+10% damage a round', max: 5, cost: [150, 250, 400, 600, 900] },
   { key: 'mag', name: 'Magazine', desc: 'more rounds before a reload', max: 3, cost: [120, 220, 360] },
   { key: 'reload', name: 'Fast hands', desc: '-10% reload time', max: 3, cost: [100, 180, 300] },
   { key: 'acc', name: 'Stability', desc: '-12% spread', max: 3, cost: [100, 180, 300] },
 ];
-export const SMG_COST_K = 1.3;
 
-// Survivor perks. `unit` is what one level gives.
-export const PERKS = [
-  { key: 'hp', name: 'Health', unit: '+20 max health', max: 5, cost: [200, 300, 450, 650, 900] },
-  { key: 'armor', name: 'Armor', unit: '+25 armor, refilled every level', max: 5, cost: [250, 380, 560, 800, 1100] },
-  { key: 'speed', name: 'Movement speed', unit: '+5% speed', max: 4, cost: [250, 400, 650, 950] },
-  { key: 'cash', name: 'Scavenger', unit: '+15% cash from kills', max: 3, cost: [300, 550, 900] },
+// The PROTOTYPE refit (the game's pack-a-punch): once every upgrade on a gun is maxed, the gunsmith rebuilds it into a
+// one-off with its own trick, so an early gun is still worth carrying at the end (Sam: "come up with a way to still
+// encourage old guns ... the pistol is super good fully upgraded"). Each one does something no other gun does.
+export const PROTO = {
+  pistol: {
+    name: 'THE LAST WORD', color: 0xffc23a, cost: 2500,
+    desc: 'Double damage. Every round punches through three bodies, then ricochets into the next one along.',
+    dmgK: 2.0, crit: 0.3, pierce: 3, pierceK: 0.85, ricochet: { r: 7, k: 0.7 },
+  },
+  smg: {
+    name: 'HORNET', color: 0x55c8ff, cost: 3000,
+    desc: 'Shock rounds: every fifth hit arcs lightning into three more of the dead and stuns them all.',
+    dmgK: 1.25, rateK: 1.12, shock: { every: 5, n: 3, r: 5.5, k: 2.6, stun: 0.9 },
+  },
+  shotgun: {
+    name: "DRAGON'S BREATH", color: 0xff6a1e, cost: 3400,
+    desc: 'Incendiary shells: whatever it hits goes up in flames, and the fire spreads to the dead beside them.',
+    dmgK: 1.3, burn: { dps: 34, t: 4, spread: 1.4 },
+  },
+  rifle: {
+    name: 'SHRAPNEL', color: 0xff3a2e, cost: 3800,
+    desc: 'Explosive tips: every hit bursts and tears into everything around it.',
+    dmgK: 1.2, blast: { r: 2.2, k: 0.6 },
+  },
+  lmg: {
+    name: 'WARMONGER', color: 0xa6ff3c, cost: 4200,
+    desc: 'A double belt that spins up faster the longer you hold the trigger, and rounds that go through two bodies.',
+    dmgK: 1.15, magK: 2, spin: { k: 0.75, t: 1.6 }, pierce: 2, pierceK: 0.7,
+  },
+};
+
+// MASTERY: kills with a gun earn it attachments, for free (the guns you actually use get better on their own).
+export const MASTERY = [
+  { kills: 40, key: 'extmag', name: 'Extended magazine', desc: '+30% rounds in a magazine' },
+  { kills: 120, key: 'reddot', name: 'Red-dot sight', desc: '-15% spread, and the aim assist reaches further' },
+  { kills: 260, key: 'suppressor', name: 'Suppressor', desc: 'your shots no longer wake the sleeping dead' },
+  { kills: 500, key: 'gold', name: 'Gold finish', desc: '+10% damage, and it gleams' },
 ];
+export const masteryOf = (kills = 0) => MASTERY.filter((m) => kills >= m.kills).map((m) => m.key);
+
+// Survivor perks: bought with SKILL POINTS now (earned by killing the dead and getting out), not cash.
+export const PERKS = [
+  { key: 'hp', name: 'Health', unit: '+20 max health', max: 5, cost: [1, 1, 2, 2, 3] },
+  { key: 'armor', name: 'Armor', unit: '+25 armor, refilled every level', max: 5, cost: [1, 1, 2, 2, 3] },
+  { key: 'speed', name: 'Movement speed', unit: '+5% speed', max: 4, cost: [1, 2, 2, 3] },
+];
+// what each perk used to cost in cash (the old Scavenger perk is refunded from this when a save is upgraded)
+export const OLD_SCAVENGER = [300, 550, 900];
 
 export const BASE_HP = 100;
 export const BASE_SPEED = 3.6;
 export const ARMOR_ABSORB = 0.6;     // armor takes this share of every hit until it is gone
 
-// the stats of a gun with its upgrades applied
-export function weaponStats(id, lv = {}) {
+// the stats of a gun with its upgrades applied; `x` = { kills, proto } (mastery attachments and the prototype refit)
+export function weaponStats(id, lv = {}, x = {}) {
   const b = WEAPONS[id];
   const l = (k) => lv[k] || 0;
-  return {
+  const att = masteryOf(x.kills || 0);
+  const has = (k) => att.includes(k);
+  const P = x.proto ? PROTO[id] : null;
+  const acc = (1 - 0.12 * l('acc')) * (has('reddot') ? 0.85 : 1);
+  const st = {
     ...b,
-    dmg: b.dmg * (1 + 0.10 * l('dmg')),
-    mag: b.mag + b.magStep * l('mag'),
+    dmg: b.dmg * (1 + 0.10 * l('dmg')) * (has('gold') ? 1.1 : 1) * (P?.dmgK || 1),
+    mag: Math.round((b.mag + b.magStep * l('mag')) * (has('extmag') ? 1.3 : 1) * (P?.magK || 1)),
     reload: b.reload * (1 - 0.10 * l('reload')),
-    spreadBase: b.spreadBase * (1 - 0.12 * l('acc')),
-    spreadAdd: b.spreadAdd * (1 - 0.12 * l('acc')),
-    spreadMax: b.spreadMax * (1 - 0.12 * l('acc')),
+    spreadBase: b.spreadBase * acc,
+    spreadAdd: b.spreadAdd * acc,
+    spreadMax: b.spreadMax * acc,
+    assistRange: b.assistRange * (has('reddot') ? 1.25 : 1),
+    att, proto: P ? id : null, gold: has('gold'), quiet: has('suppressor'),
   };
+  if (P) {
+    if (P.rateK) { st.autoInterval /= P.rateK; st.tapInterval /= P.rateK; }
+    if (P.crit) st.critChance = P.crit;
+    if (P.pierce) { st.pierce = P.pierce; st.pierceK = P.pierceK; }
+    for (const k of ['ricochet', 'shock', 'burn', 'blast', 'spin']) if (P[k]) st[k] = P[k];
+  }
+  return st;
 }
+
+// what a friend's machine needs to draw a gun right: gold, prototype, and the attachments (also its sound)
+export function lookBits(W) {
+  return (W.gold ? 1 : 0) | (W.proto ? 2 : 0) | (W.att?.includes('extmag') ? 4 : 0) | (W.att?.includes('reddot') ? 8 : 0) | (W.quiet ? 16 : 0);
+}
+
+// every upgrade on the gun maxed: the prototype refit is on offer
+export function maxedOut(lv = {}) { return WEAPON_UPGRADES.every((u) => (lv[u.key] || 0) >= u.max); }
 
 export function upgradeCost(weaponId, key, level) {
   const u = WEAPON_UPGRADES.find((x) => x.key === key);

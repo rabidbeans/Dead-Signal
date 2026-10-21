@@ -17,6 +17,7 @@ import { genInterior, genCanals, zoneBlocked } from './layout.js';
 export const L = {};
 export const HOLDS = [];
 export const MEDKITS = [];
+export const SUPPLIES = [];          // ordnance boxes: [x, z, kind]
 export const AMBUSH = [];
 export const MAZE = [];          // barricade rows: { z, gx (gap centre x), gw (gap width), kind, seed }
 export const LANES = [];         // walls ALONG the street: { x, z0 (south end), z1 (north end), kind, brk: [south, north] | null, seed }
@@ -232,6 +233,20 @@ export function setLevel(n) {
     kits.push([x, +zz.toFixed(1)]);
   });
   MEDKITS.splice(0, MEDKITS.length, ...kits);
+  // ordnance boxes (frags, molotovs, pipe bombs): one in each stretch, a molotov box and a pipe bomb box nearer the end
+  const sup = [];
+  const sz = [[d.L.start.z - 34, 'frag'], [d.L.cross[0] + 16, 'molotov'], [d.L.gate[0] - 30, 'frag'], [d.L.lz.z + 26, 'pipe']];
+  sz.forEach(([z, kind], i) => {
+    const Z = zoneAt(z);
+    if (Z?.kind === 'interior') {
+      const r = Z.rooms.filter((q) => q.kind !== 'corridor' && !q.keyRoom && !q.medkit).sort((a, b) => Math.abs(a.cz - z) - Math.abs(b.cz - z))[0];
+      if (r) { sup.push([+(r.cx + 1.2).toFixed(1), +r.cz.toFixed(1), kind]); return; }
+    }
+    let zz = z, x = i % 2 ? -3.4 : 3.4;
+    for (let k = 0; k < 40 && inMaze(x, zz, 0.9); k++) { if (k % 2) zz -= 1.5; x = -x; }
+    sup.push([x, +zz.toFixed(1), kind]);
+  });
+  SUPPLIES.splice(0, SUPPLIES.length, ...sup);
   // ambushes: one a little way into each stretch, bigger every level
   const ak = d.ambK || 1, an = (b) => Math.round((b + 1.5 * d.id) * ak);
   AMBUSH.splice(0, AMBUSH.length, { z: d.L.start.z - 30, n: an(6) }, { z: d.L.cross[0] + 30, n: an(8), brutes: d.id >= 3 ? 1 : 0 },

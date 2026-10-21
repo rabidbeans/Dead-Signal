@@ -9,7 +9,8 @@ import { tex } from './assets.js';
 import { Q } from './quality.js';
 import { indoors } from './zones.js';
 
-import { WEAPONS, WEAPON_IDS, weaponStats, ARMOR_ABSORB, BASE_HP, BASE_SPEED } from './weapons.js';
+import { WEAPONS, WEAPON_IDS, weaponStats, ARMOR_ABSORB, BASE_HP, BASE_SPEED, PROTO, lookBits } from './weapons.js';
+import { gear } from './gear.js';
 const GOD = typeof location !== 'undefined' && new URLSearchParams(location.search).has('god');
 
 // what a survivor with nothing bought has (also what a friend's machine assumes about a remote player)
@@ -18,6 +19,10 @@ export const defaultLoadout = () => ({
 });
 
 const GUN_TURN = new THREE.Quaternion();     // the gun's own frame already has x forward
+const rgb = (hex) => [((hex >> 16) & 255) / 255, ((hex >> 8) & 255) / 255, (hex & 255) / 255];
+const GOLD = new THREE.Color(0xd8a640);
+// where a red-dot sits on each gun (x along the gun, found on the model's top at that point)
+const SIGHT_X = { pistol: -0.01, smg: 0.02, shotgun: 0.05, rifle: 0.02, lmg: 0.06 };
 const sm01 = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
 const _tip = new THREE.Vector3(), _loc = new THREE.Vector3(), _mz = new THREE.Vector3();
 
@@ -42,6 +47,12 @@ export class Player {
     this.maxArmor = lo.maxArmor; this.armor = lo.maxArmor;
     this.speed = lo.speed;
     this.cashMul = lo.cashMul;
+    this.spec = lo.spec || null;
+    this.over = null;          // the gunner's overdrive { t, rateK, dmgK }
+    this.dash = null;          // the scout's dash in progress
+    this.invT = 0;             // untouchable (a dash)
+    this.spinT = 0;            // the Warmonger spinning up
+    this.shockN = 0;           // the Hornet's hit counter
     this.down = false;
     this.downT = 0;
     this.reviveT = 0;
@@ -113,8 +124,53 @@ export class Player {
     }
     prop.visible = false;
     game.scene.add(prop);
-    return { id, W: stats, gun, tip, slide, mag, magProp: prop, ammo: stats.mag };
+    const k = { id, W: stats, gun, tip, slide, mag, magProp: prop, ammo: stats.mag, bits: 0, mats: null, adds: [] };
+    this.decorate(k, lookBits(stats));
+    return k;
   }
+
+  // how a gun looks: gold, the prototype's glow, the attachments its kills have earned. `bits` = lookBits().
+  decorate(k, bits) {
+    if (k.bits === bits) return;
+    k.bits = bits;
+    const gun = k.gun;
+    for (const a of k.adds) a.parent?.remove(a);
+    k.adds = [];
+    // materials of its own once it is not stock (the model's are shared by every copy)
+    if (bits & 3 && !k.mats) {
+      k.mats = [];
+      gun.traverse((o) => { if (o.isMesh) { o.material = Array.isArray(o.material) ? o.material.map((m) => m.clone()) : o.material.clone(); k.mats.push(...[].concat(o.material)); } });
+    }
+    if (k.mats) for (const m of k.mats) {
+      m.userData.base ??= { c: m.color.clone(), metal: m.metalness, rough: m.roughness, e: m.emissive?.clone() };
+      const B = m.userData.base;
+      const glowy = B.e && B.e.getHex() !== 0;
+      m.color.copy(bits & 1 && !glowy ? GOLD : B.c);
+      m.metalness = bits & 1 && !glowy ? 1 : B.metal;
+      m.roughness = bits & 1 && !glowy ? 0.3 : B.rough;
+      if (m.emissive && !glowy) m.emissive.setHex(bits & 2 ? PROTO[k.id].color : 0x000000);
+      m.emissiveIntensity = bits & 2 && !glowy ? 0.25 : m.emissiveIntensity;
+    }
+    k.glow = bits & 2 ? PROTO[k.id].color : null;
+    // attachments
+    const mag = k.mag;
+    if (mag) mag.scale.y = bits & 4 ? 1.3 : 1;
+    if (bits & 8) {
+      const rd = gear('reddot', { shadow: false });
+      rd.position.set(SIGHT_X[k.id] ?? 0, topAt(gun, SIGHT_X[k.id] ?? 0, k.id), 0);
+      gun.add(rd); k.adds.push(rd);
+    }
+    if (bits & 16) {
+      const sp = gear('suppressor', { shadow: false });
+      sp.position.copy(k.tip.position).x -= 0.005;
+      sp.scale.setScalar(k.id === 'pistol' || k.id === 'smg' ? 0.9 : 1.15);
+      gun.add(sp); k.adds.push(sp);
+      k.tip.position.x = WEAPONS[k.id].tip[0] + 0.16 * sp.scale.x;
+    } else k.tip.position.x = WEAPONS[k.id].tip[0];
+  }
+
+  // a friend's gun: what his machine says it looks like
+  applyLook(id, bits) { const k = this.kit[id]; if (k) this.decorate(k, bits); }
 
   // draw a gun: swap the model, the hold and the sounds. Ammo stays with the gun.
   setWeapon(id, instant = false) {
@@ -161,6 +217,13 @@ export class Player {
     const k = Math.min(1, dt * 14);
     this.vx += (ax - this.vx) * k;
     this.vz += (az - this.vz) * k;
+    if (this.invT > 0) this.invT -= dt;
+    // the scout's dash overrides the stick for a fifth of a second
+    if (this.dash) {
+      this.vx = this.dash.vx; this.vz = this.dash.vz;
+      this.dash.t -= dt;
+      if (this.dash.t <= 0) { this.vx *= 0.35; this.vz *= 0.35; this.dash = null; }
+    }
     let nx = this.x + this.vx * dt, nz = this.z + this.vz * dt;
     const res = g.world.col.resolve(nx, nz, 0.33);
     // zombies are solid
@@ -211,7 +274,12 @@ export class Player {
     }
     if (inp.reload && this.ammo < W.mag && this.reloadT <= 0 && this.drawT <= 0) this.startReload();
     const wantFire = (inp.firing && this.aiming) || inp.tap || inp.mouseFiring;
-    const interval = inp.tap || inp.mouseFiring ? W.tapInterval : W.autoInterval;
+    let interval = inp.tap || inp.mouseFiring ? W.tapInterval : W.autoInterval;
+    if (this.over) interval /= this.over.rateK;                        // the gunner's overdrive
+    if (W.spin) {                                                      // the Warmonger spins up the longer you hold it
+      this.spinT = wantFire && this.reloadT <= 0 ? Math.min(W.spin.t, this.spinT + dt) : Math.max(0, this.spinT - dt * 2);
+      interval /= 1 + W.spin.k * this.spinT / W.spin.t;
+    }
     if (wantFire && this.cool <= 0 && this.reloadT <= 0 && this.drawT <= 0) {
       // a tap with no aim yet: shoot the best target in front
       if (inp.tap && !inp.aim) {
@@ -259,7 +327,10 @@ export class Player {
   fire(dirx, dirz) {
     const g = this.game;
     const W = this.W;
-    this.ammo--;
+    if (!this.over) this.ammo--;                // overdrive: no reloads
+    if (this.local) g.stats.shots++;
+    const dmgK = (this.spec === 'gunner' ? 1.08 : 1) * (this.over?.dmgK || 1);
+    const col = W.proto ? rgb(PROTO[W.id].color) : null;
     // aim assist: acquire inside ±10°, keep inside ±16°, bend the shot
     let t = this.assistTarget;
     if (t && (!t.alive || !this.inCone(t, dirx, dirz, W.assistHold))) t = null;
@@ -308,16 +379,16 @@ export class Player {
         if (perp < tg.r) { hd = along - Math.sqrt(Math.max(0, tg.r * tg.r - perp * perp)); hit = tg; }
       }
       const hx = mz.x + dx * hd, hz = mz.z + dz * hd;
-      g.fx.tracer(mz.x + dx * 0.4, mz.y, mz.z + dz * 0.4, hx, hz);
+      g.fx.tracer(mz.x + dx * 0.4, mz.y, mz.z + dz * 0.4, hx, hz, mz.y, col);
       if (hit) {
         const fall = W.falloff ? 1 - W.falloff * Math.min(1, hd / W.range) : 1;
-        const h = hits.get(hit) || { dmg: 0, dx, dz, hx, hz };
-        h.dmg += W.dmg * fall; hits.set(hit, h);
+        const h = hits.get(hit) || { dmg: 0, dx, dz, hx, hz, first: true };
+        h.dmg += W.dmg * dmgK * fall; hits.set(hit, h);
         // through the first body and into the next, weaker
         if (!hit.isTarget) for (let k = 1; k <= (W.pierce || 0) && k < line.length; k++) {
-          const b = line[k], f2 = (W.falloff ? 1 - W.falloff * Math.min(1, b.d / W.range) : 1) * 0.6;
+          const b = line[k], f2 = (W.falloff ? 1 - W.falloff * Math.min(1, b.d / W.range) : 1) * (W.pierceK ?? 0.6);
           const h2 = hits.get(b.z) || { dmg: 0, dx, dz, hx: mz.x + dx * b.d, hz: mz.z + dz * b.d };
-          h2.dmg += W.dmg * f2; hits.set(b.z, h2);
+          h2.dmg += W.dmg * dmgK * f2; hits.set(b.z, h2);
         }
       } else if (wall.d < W.range && (pellets === 1 || i % 2 === 0)) {
         g.fx.hard(hx, mz.y, hz, wall.nx, wall.nz, dx, dz);
@@ -337,21 +408,80 @@ export class Player {
       const sh = g.fx.shell(mz.x - dx * 0.12, mz.y + 0.05, mz.z - dz * 0.12, dx, dz);
       sh.cb = (s) => audio.play('shell', { x: s.x, z: s.z, vol: W.shellVol });
     }
-    audio.play(W.shot, { vol: 1, jitter: 0.035 });
-    g.noise = { x: this.x, z: this.z, t: g.time };
+    if (W.quiet) audio.play('sup', { vol: 0.9, jitter: 0.04, rate: W.pellets ? 0.75 : W.id === 'pistol' ? 1.1 : 0.95 });
+    else audio.play(W.shot, { vol: 1, jitter: 0.035 });
+    if (!W.quiet) g.noise = { x: this.x, z: this.z, t: g.time };      // a suppressor does not wake the sleeping dead
     audio.duck(W.duck, 150);
     buzz([pellets > 1 ? 30 : 12]);
     g.hud.ammo(this);
+    const extra = {};          // what the prototype did, for the friends' screens
+    const struck = new Set(hits.keys());
     for (const [hit, h] of hits) {
       if (hit.isTarget) { g.targetHit(this, hit, h.dmg, h.dx, h.dz); continue; }
-      const crit = Math.random() < (pellets > 1 ? 0.06 : 0.12) || (hit === t && Math.random() < 0.1);
+      const crit = Math.random() < (W.critChance ?? (pellets > 1 ? 0.06 : 0.12)) || (hit === t && Math.random() < 0.1);
       g.fx.flesh(h.hx, 1.25, h.hz, h.dx, h.dz, pellets > 1 ? 1.5 : 1, crit);
       audio.play('flesh', { x: h.hx, z: h.hz, vol: 0.7 });
       hit.hitFx(h.dx, h.dz, crit);
       buzz([6]);
-      g.localHit(this, hit, h.dmg * (crit ? W.crit : 1), h.dx, h.dz, crit, W.knock || 1);
+      const opt = W.burn ? { burn: W.burn } : null;
+      if (W.burn) hit.burnT = Math.max(hit.burnT || 0, W.burn.t);       // (shown at once; the host keeps the real fire)
+      g.localHit(this, hit, h.dmg * (crit ? W.crit : 1), h.dx, h.dz, crit, W.knock || 1, opt);
+      if (h.first) this.protoHit(hit, h, struck, extra, col);
     }
-    g.netEvent({ k: 'shot', pid: this.id, wp: WEAPON_IDS.indexOf(W.id), x: +mz.x.toFixed(2), z: +mz.z.toFixed(2), y: +mz.y.toFixed(2), dx: +dx.toFixed(3), dz: +dz.toFixed(3), hx: +first.hx.toFixed(2), hz: +first.hz.toFixed(2), w: first.w, nx: +first.nx.toFixed(2), nz: +first.nz.toFixed(2) });
+    g.netEvent({ k: 'shot', pid: this.id, wp: WEAPON_IDS.indexOf(W.id), x: +mz.x.toFixed(2), z: +mz.z.toFixed(2), y: +mz.y.toFixed(2), dx: +dx.toFixed(3), dz: +dz.toFixed(3), hx: +first.hx.toFixed(2), hz: +first.hz.toFixed(2), w: first.w, nx: +first.nx.toFixed(2), nz: +first.nz.toFixed(2), lf: this.cur.bits, ...extra });
+  }
+
+  // a prototype's trick, off the body a round struck first (the ricochet, the shock arc, the shrapnel burst)
+  protoHit(hit, h, struck, extra, col) {
+    const g = this.game, W = this.W;
+    const near = (x, z, r, n) => {
+      const out = [];
+      for (const o of g.zombies.values()) {
+        if (!o.alive || struck.has(o)) continue;
+        const d = (o.x - x) ** 2 + (o.z - z) ** 2;
+        if (d < r * r) out.push({ o, d });
+      }
+      return out.sort((a, b) => a.d - b.d).slice(0, n).map((q) => q.o);
+    };
+    if (W.ricochet) {
+      const o = near(hit.x, hit.z, W.ricochet.r, 1)[0];
+      if (o) {
+        struck.add(o);
+        const d = Math.hypot(o.x - hit.x, o.z - hit.z) || 1, dx = (o.x - hit.x) / d, dz = (o.z - hit.z) / d;
+        g.fx.tracer(hit.x, 1.2, hit.z, o.x, o.z, 1.2, col);
+        g.fx.hard(hit.x, 1.25, hit.z, -dx, -dz, dx, dz);
+        o.hitFx(dx, dz, false);
+        g.localHit(this, o, W.dmg * W.ricochet.k, dx, dz, false, 1);
+        (extra.rc ??= []).push([+hit.x.toFixed(2), +hit.z.toFixed(2), +o.x.toFixed(2), +o.z.toFixed(2)]);
+      }
+    }
+    if (W.shock && ++this.shockN % W.shock.every === 0) {
+      const S = W.shock, chain = near(hit.x, hit.z, S.r, S.n);
+      let px = hit.x, pz = hit.z;
+      g.localHit(this, hit, 0.01, h.dx, h.dz, false, 0.2, { st: S.stun });
+      for (const o of chain) {
+        struck.add(o);
+        g.fx.bolt(px, 1.3, pz, o.x, 1.3, o.z);
+        const d = Math.hypot(o.x - px, o.z - pz) || 1;
+        o.hitFx((o.x - px) / d, (o.z - pz) / d, true);
+        g.localHit(this, o, W.dmg * S.k, (o.x - px) / d, (o.z - pz) / d, false, 0.3, { st: S.stun });
+        px = o.x; pz = o.z;
+      }
+      g.fx.bolt(hit.x, 2.2, hit.z, hit.x, 0.3, hit.z, undefined, 0.12);
+      audio.play('zap', { x: hit.x, z: hit.z, vol: 0.8, rate: 1.3 });
+      extra.ch = [[+hit.x.toFixed(2), +hit.z.toFixed(2)], ...chain.map((o) => [+o.x.toFixed(2), +o.z.toFixed(2)])];
+    }
+    if (W.blast) {
+      const B = W.blast;
+      for (const o of near(h.hx, h.hz, B.r, 12)) {
+        struck.add(o);
+        const d = Math.hypot(o.x - h.hx, o.z - h.hz) || 1;
+        o.hitFx((o.x - h.hx) / d, (o.z - h.hz) / d, false);
+        g.localHit(this, o, W.dmg * B.k, (o.x - h.hx) / d, (o.z - h.hz) / d, false, 1.6);
+      }
+      miniBlast(g, h.hx, h.hz, B.r);
+      extra.bl = [+h.hx.toFixed(2), +h.hz.toFixed(2)];
+    }
   }
 
   inCone(z, dx, dz, cone) {
@@ -368,24 +498,30 @@ export class Player {
   // a remote player's shot, drawn here
   remoteShot(e) {
     const g = this.game;
-    g.fx.muzzle(e.x, e.y, e.z, e.dx, e.dz);
-    g.fx.tracer(e.x + e.dx * 0.4, e.y, e.z + e.dz * 0.4, e.hx, e.hz, e.hy ?? e.y);
-    g.fx.shell(e.x, e.y + 0.05, e.z, e.dx, e.dz);
     const id = WEAPON_IDS[e.wp] || 'pistol';
     if (this.cur.id !== id) this.setWeapon(id, true);
-    audio.play(WEAPONS[id].shot, { x: e.x, z: e.z, vol: 0.9 });
+    if (e.lf !== undefined) this.applyLook(id, e.lf);
+    const col = e.lf & 2 ? rgb(PROTO[id].color) : null;
+    g.fx.muzzle(e.x, e.y, e.z, e.dx, e.dz);
+    g.fx.tracer(e.x + e.dx * 0.4, e.y, e.z + e.dz * 0.4, e.hx, e.hz, e.hy ?? e.y, col);
+    g.fx.shell(e.x, e.y + 0.05, e.z, e.dx, e.dz);
+    if (e.lf & 16) audio.play('sup', { x: e.x, z: e.z, vol: 0.7 });
+    else audio.play(WEAPONS[id].shot, { x: e.x, z: e.z, vol: 0.9 });
+    for (const r of e.rc || []) g.fx.tracer(r[0], 1.2, r[1], r[2], r[3], 1.2, col);
+    if (e.ch) { for (let i = 1; i < e.ch.length; i++) g.fx.bolt(e.ch[i - 1][0], 1.3, e.ch[i - 1][1], e.ch[i][0], 1.3, e.ch[i][1]); audio.play('zap', { x: e.ch[0][0], z: e.ch[0][1], vol: 0.6, rate: 1.3 }); }
+    if (e.bl) miniBlast(g, e.bl[0], e.bl[1], 2.2);
     this.anim.fire(false, WEAPONS[id].recoil);
     const P = WEAPONS[id].pellets || 1;
     for (let i = 1; i < P; i++) {
       const a = Math.atan2(e.dz, e.dx) + ((i + Math.random()) / P - 0.5) * WEAPONS[id].spreadBase, d = 4 + Math.random() * 8;
       g.fx.tracer(e.x + e.dx * 0.4, e.y, e.z + e.dz * 0.4, e.x + Math.cos(a) * d, e.z + Math.sin(a) * d);
     }
-    if (WEAPONS[id].pump) setTimeout(() => { audio.play('pump', { x: this.x, z: this.z, vol: 0.6 }); this.anim.slide = 0.085; }, WEAPONS[id].pump * 1000);
+    if (WEAPONS[id].pump) g.after(WEAPONS[id].pump, () => { audio.play('pump', { x: this.x, z: this.z, vol: 0.6 }); this.anim.slide = 0.085; });
     if (e.w === 1) { g.fx.hard(e.hx, e.y, e.hz, e.nx, e.nz, e.dx, e.dz); audio.play('hard', { x: e.hx, z: e.hz, vol: 0.4 }); }
   }
 
   hurt(dmg, fromX, fromZ, kb = 0.35) {
-    if (!this.alive) return;
+    if (!this.alive || this.invT > 0) return;
     if (GOD) dmg *= 0.15;          // QA only (?god): the level flow can be walked end to end
     // armor takes a share of every hit until it is spent
     if (this.armor > 0) {
@@ -442,6 +578,11 @@ export class Player {
     this.gun.quaternion.copy(this.anim.gunQuat).multiply(GUN_TURN);
     this.gun.visible = !this.dead;
     this.updateGunParts(dt);
+    // a prototype's glow breathes (and flares on every shot)
+    if (this.cur.glow && this.cur.mats) {
+      const e = 0.22 + 0.12 * Math.sin(this.game.time * 3.1) + this.anim.recoil.x * 0.02;
+      for (const m of this.cur.mats) if (m.emissive && !(m.userData.base.e && m.userData.base.e.getHex() !== 0)) m.emissiveIntensity = Math.max(0.1, e);
+    }
     // a weapon light: it rides the muzzle, so the arms never shadow it
     const fx = Math.sin(this.face), fz = Math.cos(this.face);
     const tip = this.gunTip.getWorldPosition(_tip);
@@ -548,4 +689,40 @@ export class Player {
     if (this.lantern) s.remove(this.lantern);
     this.light.dispose?.();
   }
+}
+
+// the top of a gun model at a point along it (where a sight can sit), in the gun's own frame
+const _top = new Map();
+function topAt(gun, x, id) {
+  const key = id + ':' + x;
+  if (_top.has(key)) return _top.get(key);
+  let top = 0.05;
+  const inv = new THREE.Matrix4().copy(gun.matrixWorld).invert(), m = new THREE.Matrix4(), v = new THREE.Vector3();
+  gun.updateMatrixWorld(true);
+  gun.traverse((o) => {
+    if (!o.isMesh || o.parent?.name === 'gun_mag' || o.name === 'gun_mag') return;
+    m.multiplyMatrices(inv, o.matrixWorld);
+    const pos = o.geometry.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i).applyMatrix4(m);
+      if (Math.abs(v.x - x) < 0.03 && Math.abs(v.z) < 0.02 && v.y > top) top = v.y;
+    }
+  });
+  _top.set(key, top);
+  return top;
+}
+
+// the Shrapnel round bursting: a little blast of fire and grit (no shake, no hitstop: it is every hit)
+export function miniBlast(g, x, z, r) {
+  const y = g.world.groundY(x, z) + 1.0;
+  for (let i = 0; i < 9; i++) {
+    const a = Math.random() * 6.283, s = 2 + Math.random() * 4;
+    g.fx.fire.emit({ x, y, z, vx: Math.cos(a) * s, vy: Math.random() * 3, vz: Math.sin(a) * s, life: 0.22 + Math.random() * 0.15, s0: 0.5, s1: 1.1 * r / 2, r: 1, g: 0.45 + Math.random() * 0.25, b: 0.12, a0: 0.9, a1: 0, drag: 4 });
+  }
+  for (let i = 0; i < 7; i++) {
+    const a = Math.random() * 6.283, s = 5 + Math.random() * 7;
+    g.fx.sparkList.push({ x, y, z, vx: Math.cos(a) * s, vy: 1 + Math.random() * 3, vz: Math.sin(a) * s, t: 0, max: 0.2 + Math.random() * 0.2 });
+  }
+  g.fx.smoke.emit({ x, y, z, vx: 0, vy: 0.6, vz: 0, life: 1.0, s0: 0.5, s1: 1.8, r: 0.2, g: 0.18, b: 0.16, a0: 0.4, a1: 0, drag: 1 });
+  audio.play('boom', { x, z, vol: 0.32, rate: 1.7, maxDist: 40 });
 }
