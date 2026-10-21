@@ -14,7 +14,7 @@ import { mulberry } from './rig.js';
 const T = {};
 export async function loadBossGear() {
   const g = await loadGLB('props/boss_gear.glb');
-  for (const name of ['riot_helmet', 'riot_shield', 'baton', 'iv_pole', 'cleaver', 'hardhat', 'sledgehammer', 'shackle', 'chain_link', 'canister', 'holster']) {
+  for (const name of ['riot_helmet', 'riot_shield', 'baton', 'iv_pole', 'cleaver', 'hardhat', 'sledgehammer', 'shackle', 'chain_link', 'canister', 'holster', 'combat_helmet']) {
     const o = g.scene.getObjectByName(name);
     if (!o) continue;
     o.traverse((m) => {
@@ -120,6 +120,11 @@ export class BossKit {
       // a cleaver in each fist, the blade forward, the edge down
       this.clR = wear(b.hand_R, 'cleaver', { y: [0, 0, 1], zf: [1, 0, 0], at: grip('R'), k: 1.25 });
       this.clL = wear(b.hand_L, 'cleaver', { y: [0, 0, 1], zf: [1, 0, 0], at: grip('L'), k: 1.25 });
+    } else if (kind === 'screamer') {
+      // long black hair hanging over her face, thrown back when she screams
+      this.hair = new Hair(z, { n: 64, seg: 8, len: 0.72, color: 0x0c0909 });
+    } else if (kind === 'soldier') {
+      wear(b.head, 'combat_helmet', { off: [0, 0.105, 0.0], k: 1.02 });
     } else if (kind === 'foreman') {
       wear(b.head, 'hardhat', { off: [0, 0.11, 0.005], k: 0.95 });
       this.hammer = free('sledgehammer', 1.15, () => this.hammerPose());

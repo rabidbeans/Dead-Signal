@@ -610,3 +610,28 @@ a way to still encourage old guns ... packa punched ... add all the other stuff 
   `gear_test.mjs <secs> <query>` (uses the skill and throws every few seconds), `fx_shots.mjs field|gun`,
   `shop_shots.mjs` (reveal + both tabs), `coop_gear.mjs` (two browsers: a friend's sentry/frag/prototype seen by the host),
   `income.mjs <lvl>`. Not verified: phone frame rate with sentries and fire patches, sounds by ear.
+- **One new zombie per map** (`TYPES` in zombie.js with `special: true`, `LV.specials` = `SPECIALS.slice(0, level)` so
+  every earlier kind keeps turning up; `Game.mix(type, p)` swaps one in at 6-10% in holds / ambushes / trickle /
+  sleepers, the newest most often, and the FIRST AMBUSH always brings the map's own one; `Game.introduce` toasts its
+  `tip` the first time one is within 18 m):
+  L1 BLOATER (230 hp, slow; `def.pop`: on death a blast that hurts the dead around it and a gas cloud that hurts the
+  living, `specials.burst` + host `bloaterBurst` via `explode`), L2 SCREAMER (stops, rears back, screams: wakes sleepers
+  within 28 m, hastes the dead within 18 m for 6 s (`hasteT`), calls two runners, then backs off; simulated long hair via
+  bossgear `Hair`), L3 SPITTER (keeps 5.5-13 m, lobs acid that pools: `spit` event, host puddle damage), L4 LEAPER
+  (crouch 0.55 s, pounce, PIN: `pinPid` / `p.pinnedBy`; the pinned survivor cannot move or shoot, every tap is a heave
+  (`Game.struggle`, `struggle` message); freed by 55 damage, 8 heaves, 4 s or its death), L5 SOLDIER (`def.armor` 0.3:
+  bullets from the front glance off unless crit; combat helmet = boss_gear.glb `combat_helmet` via BossKit).
+  Brains: `Zombie.special()` (host). Events `{k:'zev', a, id, ...}` drawn by `SpecialFX` (`src/game/specials.js`) on
+  every machine. Poses: `SPECIAL_POSE` in rig.js (its arms replace the default arm swing). Bodies: variants.py
+  `z_bloater z_screamer z_spitter z_leaper z_soldier` (9.5k tris, 1024 maps), `SPECIAL_MODELS` in assets.js (never in
+  the ordinary ZOMBIES pool). ⚠️ `def.burst` is the LURCHER's dash speed: the bloater's blast is `def.pop`.
+  QA: `/home/user/tools/pw/special_shots.mjs <type> <lvl> <prefix> [close]` (spawns one, lets it act, screenshots).
+- **Hidden power weapons** (`power: true` in `WEAPONS`; `GUN_IDS` = every gun, the index the network sends; `WEAPON_IDS`
+  = the ownable five; `POWER_IDS`): one LOCKED HARD CASE a level (`CASES` in level.js, `src/game/cases.js`; gear.glb
+  `case_base/case_lid`; stand at it 1.5 s while the ring fills; a `case` event opens it everywhere, the opener gets the
+  gun): L1 X-Bolt CROSSBOW (12 silent bolts, 320 dmg, pierce 8), L2/L4 Hellfire FLAMETHROWER (140 ticks of fuel, a cone
+  6.8 m that burns and ignites, `Player.flameFire/flameJet`, a looping `flame` sound; friends see it from every 4th tick's
+  `shot` event with `fl`), L3/L5 Thumper 40mm LAUNCHER (10 rounds through the throwables code, `n: 'gl'`, burst on
+  contact). No reloads: empty = dropped (`dropPower`), never carried to the next level. Models
+  `tools/blender/power_guns.py`, grips in `WEAPON_RIG`, sounds xbow/flame/gl in `tools/sfx_gear.py`.
+  QA: `power_test.mjs <lvl>` (opens the case, fires into a crowd, empties it), `flame_dbg.mjs`.

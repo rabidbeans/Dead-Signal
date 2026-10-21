@@ -147,6 +147,18 @@ export class ZombieAnim {
       this.p.lean = 0.3 + r() * 0.1; this.p.stride = 0.36; this.p.reach = 'both'; this.p.reachAmt = 0.6;
       this.p.timeScale = 0.62 + r() * 0.1; this.p.limp = null; this.p.sway = 0.14; this.p.shoulderDrop = 0.1;
     }
+    else if (kind === 'bloater') {      // a swollen waddle: upright, rolling side to side, short steps
+      this.p.lean = 0.05 + r() * 0.08; this.p.stride = 0.22; this.p.reach = 'none'; this.p.timeScale = 0.6 + r() * 0.1;
+      this.p.sway = 0.2; this.p.limp = null; this.p.headFwd = 0.05; this.p.jaw = 0.25;
+    } else if (kind === 'screamer') {   // light, twitchy, head lolling, arms loose
+      this.p.lean = 0.25 + r() * 0.15; this.p.reach = 'none'; this.p.headTilt *= 1.4; this.p.timeScale = 1.1;
+    } else if (kind === 'spitter') {    // bent forward, the swollen throat leading
+      this.p.lean = 0.55 + r() * 0.1; this.p.headFwd = 0.5; this.p.reach = 'none'; this.p.jaw = 0.35; this.p.stride = 0.32;
+    } else if (kind === 'leaper') {     // low and long, knuckles near the floor, like something that hunts
+      this.p.lean = 0.85; this.p.stride = 0.46; this.p.reach = 'none'; this.p.limp = null; this.p.timeScale = 1.2; this.p.sway = 0.05; this.p.headFwd = -0.1;
+    } else if (kind === 'soldier') {    // still almost upright, arms up as if the rifle were still there
+      this.p.lean = 0.15; this.p.stride = 0.34; this.p.reach = 'none'; this.p.limp = r() < 0.3 ? 'R' : null; this.p.sway = 0.05; this.p.headTilt *= 0.5;
+    }
     // the five bosses each move their own way (BOSS_STYLE below)
     this.style = BOSS_STYLE[kind] || null;
     if (this.style) this.style.init(this.p, r);
@@ -283,7 +295,7 @@ export class ZombieAnim {
     // arms
     const armSwing = (side) => Math.sin((side === 'L' ? phR : phL) * TAU) * (this.kind === 'runner' ? 0.9 : 0.25) * walk;
     if (this.style) { this.style.pose(this, { ph, phL, phR, walk, lean, aL, aR, run }); this.bossBody(); }
-    else for (const side of ['L', 'R']) {
+    else if (!SPECIAL_POSE[this.kind]) for (const side of ['L', 'R']) {
       const sg = side === 'L' ? 1 : -1;
       const reaching = p.reach === 'both' || p.reach === side;
       const spring = side === 'L' ? S.armL.x : S.armR.x;
@@ -303,6 +315,7 @@ export class ZombieAnim {
         rig.rot(`fingers_${side}`, X, 0.35);
       }
     }
+    SPECIAL_POSE[this.kind]?.(this, { ph, phL, phR, walk, lean });
     rig.setHips(this.hipX, this.hipY, this.hipZ);
     rig.apply();
   }
@@ -686,6 +699,24 @@ export const WEAPON_RIG = {
     rack: [0.218, 0.04], rackY: 0.028, rackBack: 0.12,
   },
 };
+// the power weapons: shouldered like the rifle
+Object.assign(WEAPON_RIG, {
+  crossbow: {
+    gripR: [-0.075, 0.0, 0.022], gripL: [0.22, -0.005, -0.036], handL: { down: 0.35, yaw: 0.15 },
+    stance: { aimed: { p: [-0.1, -0.09, 0.24], pitch: 0, roll: 0 }, ready: { p: [-0.1, -0.27, 0.2], pitch: -0.5, roll: 0 } },
+    well: [0.2, -0.012], rack: [-0.07, -0.045], rackBack: -0.12,
+  },
+  flamer: {
+    gripR: [-0.075, 0.0, 0.022], gripL: [0.3, -0.02, -0.036], handL: { down: 0.9, yaw: 0.1 },
+    stance: { aimed: { p: [-0.12, -0.12, 0.22], pitch: -0.05, roll: 0 }, ready: { p: [-0.1, -0.28, 0.2], pitch: -0.45, roll: 0 } },
+    well: [0.24, -0.012], rack: [-0.07, -0.045], rackBack: -0.12,
+  },
+  launcher: {
+    gripR: [-0.075, 0.0, 0.022], gripL: [0.39, 0.0, -0.036], handL: { down: 0.9, yaw: 0.1 },
+    stance: { aimed: { p: [-0.1, -0.1, 0.22], pitch: 0, roll: 0 }, ready: { p: [-0.1, -0.28, 0.2], pitch: -0.45, roll: 0 } },
+    well: [0.175, -0.012], rack: [-0.07, -0.045], rackBack: -0.12,
+  },
+});
 // A reload, as fractions of its length. Poses are relative to the shoulders.
 export const RELOAD_EVENTS = [
   { u: 0.10, name: 'release' }, { u: 0.20, name: 'magout' }, { u: 0.50, name: 'magin' }, { u: 0.70, name: 'rack' },
@@ -921,3 +952,66 @@ export function mulberry(seed) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+
+// ------------------------------------------------------- the special dead --
+// Poses layered over the shared gait for the five new kinds (zombie.js / specials.js set move, roar, throwT, air).
+const SPECIAL_POSE = {
+  bloater(a, { ph, walk, lean }) {
+    const rig = a.rig;
+    // legs apart round the belly, the arms held out over it
+    rig.rot('thigh_L', Z, -0.12); rig.rot('thigh_R', Z, 0.12);
+    rig.rot('foot_L', Z, 0.1); rig.rot('foot_R', Z, -0.1);
+    rig.rot('spine03', X, -0.12);
+    for (const sd of ['L', 'R']) {
+      const sg = sd === 'L' ? 1 : -1;
+      arm(rig, sd, { down: 0.74 + 0.04 * Math.sin(ph * TAU + sg), fwd: -0.3 + lean * 0.5 - a.attack * 1.0, twist: -0.2, elbow: 0.55, fist: 0.5 });
+    }
+    a.hipY -= 0.02 + Math.abs(Math.sin(ph * TAU)) * 0.03 * walk;
+  },
+  screamer(a, { lean }) {
+    const rig = a.rig, R = a.roarS;
+    if (a.move === 'scream' || R > 0.02) {
+      // rear back, arms flung wide, the head thrown back, the jaw torn open
+      const k = Math.max(R, a.move === 'scream' ? 0.35 : 0);
+      rig.rot('spine03', X, -0.55 * k); rig.rot('spine02', X, -0.3 * k);
+      rig.rot('neck', X, -0.5 * k); rig.rot('head', X, -0.45 * k + Math.sin(a.t * 60) * 0.04 * R);
+      rig.rot('jaw', X, -1.1 * k);
+      for (const sd of ['L', 'R']) arm(rig, sd, { down: 0.8 - 0.95 * k, fwd: lean * 0.5 * (1 - k) + 0.4 * k, elbow: 0.25, fist: 0.2, twist: 0.3 * k });
+    } else {
+      for (const sd of ['L', 'R']) arm(rig, sd, { down: 0.82, fwd: lean * 0.55 + Math.sin(a.t * 1.7 + (sd === 'L' ? 0 : 2)) * 0.1 - a.attack * 1.1, elbow: 0.3, fist: 0.3 });
+    }
+  },
+  spitter(a, { lean }) {
+    const rig = a.rig;
+    // the spit: the head draws back, the throat swells, then the whole neck snaps forward
+    const back = a.move === 'spit' ? Math.min(1, a.moveT / 0.55) : 0, snap = a.strike;
+    rig.rot('neck', X, -0.4 * back + 0.6 * snap);
+    rig.rot('head', X, -0.35 * back + 0.3 * snap);
+    rig.rot('jaw', X, -0.2 * back - 0.9 * snap);
+    rig.rot('spine03', X, -0.15 * back + 0.25 * snap);
+    for (const sd of ['L', 'R']) arm(rig, sd, { down: 0.72, fwd: lean * 0.5 + 0.25 * back - a.attack * 1.0, elbow: 0.55, fist: 0.8 });
+  },
+  leaper(a, { ph, walk, lean }) {
+    const rig = a.rig;
+    const crouch = a.move === 'crouch' ? Math.min(1, a.moveT / 0.35) : 0, air = a.air, pin = a.move === 'pin' ? 1 : 0;
+    // always low: knees bent, hips dropped, knuckles near the floor
+    const low = 0.45 + 0.4 * crouch;
+    for (const sd of ['L', 'R']) { rig.rot(`thigh_${sd}`, X, -0.55 * low - 0.6 * air); rig.rot(`shin_${sd}`, X, 1.0 * low + 0.9 * air); rig.rot(`foot_${sd}`, X, -0.4 * low); }
+    a.hipY -= 0.22 * low;
+    rig.rot('neck', X, -0.5 - 0.2 * crouch); rig.rot('head', X, -0.3);
+    for (const sd of ['L', 'R']) {
+      const sg = sd === 'L' ? 1 : -1;
+      if (air > 0.05) arm(rig, sd, { down: 0.35, fwd: -1.6 * air, elbow: 0.2, fist: 0.2 });
+      else if (pin) arm(rig, sd, { down: 0.55, fwd: lean * 0.3 - 0.4 + Math.sin(a.t * 14 + sg) * 0.4, elbow: 1.0, fist: 1.2 });
+      else arm(rig, sd, { down: 0.72, fwd: lean * 0.45 - 0.1 - 0.3 * crouch + Math.sin((ph + (sg > 0 ? 0 : 0.5)) * TAU) * 0.35 * walk, elbow: 0.25, fist: 1.0 });
+    }
+    if (pin) { rig.rot('jaw', X, -0.5 - Math.max(0, Math.sin(a.t * 9)) * 0.4); rig.rot('head', X, 0.2 + Math.sin(a.t * 9) * 0.15); }
+  },
+  soldier(a, { lean }) {
+    const rig = a.rig;
+    // the arms still hold a rifle that is not there: the right hand at the hip, the left forward under it
+    arm(rig, 'R', { down: 0.62, fwd: lean * 0.5 - 0.45 - a.attack * 0.9, elbow: 1.3, twist: 0.25, fist: 1.2 });
+    arm(rig, 'L', { down: 0.55, fwd: lean * 0.5 - 0.9 - a.attack * 0.7, elbow: 0.8, twist: -0.25, fist: 1.0 });
+    rig.rot('spine03', Y, -0.15);
+  },
+};

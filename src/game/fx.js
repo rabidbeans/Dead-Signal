@@ -230,7 +230,7 @@ export class FX {
     this.mist = new Particles(scene, { map: tex('tex/smoke.webp'), max: 160 });
     this.drops = new Particles(scene, { map: soft, max: 400 });
     this.smoke = new Particles(scene, { map: tex('tex/smoke.webp'), max: 220 });
-    this.fire = new Particles(scene, { map: soft, max: 260, additive: true });
+    this.fire = new Particles(scene, { map: soft, max: 520, additive: true });
     this.glow = new Particles(scene, { map: soft, max: 64, additive: true });
     this.sparks = new Streaks(scene, 160);
     this.tracers = new Streaks(scene, 48, { color: 0xffffff });

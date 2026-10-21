@@ -7,6 +7,9 @@ import { Rig, ZombieAnim, mulberry } from './rig.js';
 import { audio } from './audio.js';
 import { LV } from './level.js';
 import { BossBrain } from './boss.js';
+import { bloaterBurst } from './specials.js';
+// (the burst runs a beat later: it is set off from inside a damage call, and it deals damage of its own)
+const bloaterBurstLater = (g, z) => g.after(0.05, () => bloaterBurst(g, z));
 
 export const TYPES = {
   // research: shamblers 0.6-1.0 m/s turning 90-150°/s; lurchers burst to ~3 m/s for 0.4-0.8 s every 3-6 s
@@ -16,6 +19,17 @@ export const TYPES = {
   // the brute (level 2): a hulking, slow, hard-hitting body that shrugs off a stagger. A long wind-up tells you the blow
   // is coming, and it is a big one.
   brute: { hp: 380, speed: [0.85, 1.05], turn: 2.0, dmg: 28, scale: 1.32, rad: 0.5, reach: 1.55, windup: 0.8, recover: 1.2, stagger: 0.12, knock: 0.22, models: ['z_trucker', 'z_burned', 'z_worker'] },
+  // one new kind of the dead for each map (specials.js says what each does). `tip` is said the first time you meet one.
+  bloater: { hp: 230, speed: [0.72, 0.9], turn: 2.0, dmg: 14, scale: 1.08, rad: 0.48, reach: 1.3, windup: 0.7, stagger: 0.35, knock: 0.45, models: ['z_bloater'], anim: 'bloater', xp: 3, special: true,
+    tip: 'BLOATER: it bursts into poison gas when it dies. Pop it far away, or in the middle of a crowd.', pop: { r: 3.4, zDmg: 150, pDmg: 16 } },
+  screamer: { hp: 95, speed: [1.15, 1.4], turn: 3.4, dmg: 10, models: ['z_screamer'], anim: 'screamer', xp: 3, special: true, kit: true,
+    tip: 'SCREAMER: if she screams, everything nearby wakes up and comes running. Kill her first.', scream: { cd: 12, range: 15, wake: 28, haste: 18, adds: 2 } },
+  spitter: { hp: 120, speed: [1.0, 1.25], turn: 3.0, dmg: 12, models: ['z_spitter'], anim: 'spitter', xp: 3, special: true,
+    tip: 'SPITTER: it keeps its distance and spits acid. Do not stand in the green.', spit: { cd: 3.4, min: 5.5, max: 13, r: 1.7, dps: 12, life: 5, dur: 0.9 } },
+  leaper: { hp: 115, speed: [1.55, 1.9], turn: 4.2, dmg: 8, models: ['z_leaper'], anim: 'leaper', xp: 3, special: true,
+    tip: 'LEAPER: it pounces and pins you down. A friend can shoot it off; alone, tap the screen to struggle free.', pounce: { cd: 5, min: 3.2, max: 9, wind: 0.55, dur: 0.5, dps: 12, hold: 4, breakDmg: 55 } },
+  soldier: { hp: 270, speed: [1.0, 1.25], turn: 2.6, dmg: 20, models: ['z_soldier'], anim: 'soldier', xp: 4, special: true, kit: true, armor: 0.3, stagger: 0.4, knock: 0.6,
+    tip: 'SOLDIER: body armour turns bullets from the front. Flank it, burn it, blow it up, or go for the head.' },
   // the bosses: one guarding the end of each level, each with its own special move (boss.js). Huge, and they barely flinch.
   warden: { boss: true, name: 'THE WARDEN', trait: 'Riot shield: bullets from the front glance off. Flank her, or shoot her while she is dazed after a charge.', hp: 1150, speed: [0.9, 1.0], turn: 2.2, dmg: 24, scale: 1.7, rad: 0.85, reach: 2.1, windup: 0.85, recover: 1.3, stagger: 0.03, knock: 0.06, models: ['b_warden'], shield: 0.3 },
   patientzero: { boss: true, name: 'PATIENT ZERO', trait: 'Hooked to his drip: he heals if you stop shooting. Keep the pressure on.', hp: 3000, speed: [1.0, 1.1], turn: 2.4, dmg: 32, scale: 1.7, rad: 0.9, reach: 2.2, windup: 0.8, recover: 1.2, stagger: 0.02, knock: 0.05, models: ['b_patientzero'], regen: 0.006 },
@@ -91,7 +105,8 @@ export class Zombie {
     // client interpolation buffer
     this.buf = [];
     this.place();
-    if (this.boss) { try { this.kit = new BossKit(this); } catch (e) { console.warn('boss kit', e); } }
+    if (this.boss || this.def.kit) { try { this.kit = new BossKit(this); } catch (e) { console.warn('boss kit', e); } }
+    this.specT = 1.5 + r() * 2.5;     // a special's move: seconds until it may use it
     this.prevState = this.state;
     this.hitT = 99;          // seconds since it was last shot (Patient Zero's drip)
     this.mut = 0;            // Omega's mutations so far
@@ -153,6 +168,9 @@ export class Zombie {
       this.brain ??= new BossBrain(this);
       if (this.brain.think(dt, best, dist)) return;
     }
+    // the special dead: their own move (it takes over the body while it runs)
+    if (this.def.special && (this.pinPid || (best && !best.isLure))) { if (this.special(dt, best, dist)) return; }
+    if (this.hasteT > 0) this.hasteT -= dt;
     // rescue: a body that has not got anywhere for 3 s is put back on the road
     this.stuckT = (this.stuckT || 0) + dt;
     if (this.stuckT > 3) {
@@ -172,7 +190,9 @@ export class Zombie {
         const f = this.game.world.nav.dir(this.x, this.z);
         if (f) { dirx = f.x; dirz = f.z; } else { dirx = tx / dist; dirz = tz / dist; }
       }
-      want = this.speed * (this.enraged ? 1.45 : 1);
+      want = this.speed * (this.enraged ? 1.45 : 1) * (this.hasteT > 0 ? 1.35 : 1);
+      // a spitter keeps its distance; a screamer that has screamed backs off
+      if (!best.isLure && ((this.type === 'spitter' && dist < this.def.spit.min) || (this.type === 'screamer' && this.screamed && dist < 9))) { dirx = -dirx; dirz = -dirz; want *= 0.85; }
       // the Butcher smells blood: a wounded survivor brings him on faster
       if (this.type === 'butcher' && best.hp < best.maxHp * 0.4) want *= 1.35;
       // a long way behind its prey (someone ran past it): it hurries, so a horde builds up on your heels
@@ -250,6 +270,118 @@ export class Zombie {
 
   setState(s) { this.state = s; this.stateT = 0; }
 
+  // host: a special's move. Returns true while the move owns the body this frame.
+  special(dt, best, dist) {
+    const g = this.game, d = this.def;
+    this.specT -= dt;
+    const see = (p) => { const dd = Math.hypot(p.x - this.x, p.z - this.z) || 1; return g.world.col.ray(this.x, this.z, (p.x - this.x) / dd, (p.z - this.z) / dd, dd).d >= dd - 0.3; };
+    const faceTo = (x, z) => { this.face = Math.atan2(x - this.x, z - this.z); };
+    const ev = (o) => { const e = { k: 'zev', id: this.id, ...o }; g.emit(e); g.specials?.event(e); };
+    if (this.type === 'spitter') {
+      const S = d.spit;
+      if (this.state === 'spit') {
+        if (best) faceTo(best.x, best.z);
+        if (this.stateT > 0.6 && !this.spat && best) {
+          this.spat = true;
+          // aim where they will be
+          const lead = 0.6;
+          const tx = best.x + (best.vx || 0) * lead, tz = best.z + (best.vz || 0) * lead;
+          ev({ a: 'spit', x0: +this.x.toFixed(2), z0: +this.z.toFixed(2), x1: +tx.toFixed(2), z1: +tz.toFixed(2), dur: S.dur, r: S.r, life: S.life, dps: S.dps });
+        }
+        if (this.stateT > 1.0) this.setState('walk');
+        return true;
+      }
+      if (this.state === 'walk' && this.specT <= 0 && best && dist > S.min * 0.7 && dist < S.max && see(best)) {
+        this.specT = S.cd; this.spat = false; this.setState('spit'); ev({ a: 'spitwind' });
+        return true;
+      }
+    } else if (this.type === 'screamer') {
+      const S = d.scream;
+      if (this.state === 'scream') {
+        if (best) faceTo(best.x, best.z);
+        if (this.stateT > 0.9 && !this.screamDone) {
+          this.screamDone = true; this.screamed = true;
+          ev({ a: 'scream', x: +this.x.toFixed(2), z: +this.z.toFixed(2) });
+          for (const o of g.zombies.values()) {
+            if (!o.alive || o === this) continue;
+            const dd = (o.x - this.x) ** 2 + (o.z - this.z) ** 2;
+            if (o.idle && dd < S.wake * S.wake) o.wake();
+            if (dd < S.haste * S.haste) o.hasteT = 6;
+          }
+          for (let k = 0; k < S.adds; k++) g.spawnZombie('runner');
+        }
+        if (this.stateT > 1.8) this.setState('walk');
+        return true;
+      }
+      if (this.state === 'walk' && this.specT <= 0 && best && dist < S.range && see(best)) {
+        this.specT = S.cd; this.screamDone = false; this.setState('scream'); ev({ a: 'screamwind' });
+        return true;
+      }
+    } else if (this.type === 'leaper') {
+      const P = d.pounce;
+      // on top of somebody: hold them down, chew; a friend's bullets (or the struggle) knock it off
+      if (this.pinPid) {
+        const p = g.players.get(this.pinPid);
+        this.pinT += dt;
+        if (!p || !p.alive || this.pinT > P.hold || this.pinHp0 - this.hp >= P.breakDmg || (this.pinStruggle || 0) >= 1) { this.unpin(); return true; }
+        const bx = p.x - Math.sin(p.face) * 0.45, bz = p.z - Math.cos(p.face) * 0.45;
+        this.x += (bx - this.x) * Math.min(1, dt * 12); this.z += (bz - this.z) * Math.min(1, dt * 12);
+        faceTo(p.x, p.z);
+        this.pinTick = (this.pinTick || 0) - dt;
+        if (this.pinTick <= 0) { this.pinTick = 0.5; g.hurtPlayer(p, P.dps * 0.5, this, 0); }
+        return true;
+      }
+      if (this.pounce) {
+        const L = this.pounce;
+        L.t += dt;
+        const u = Math.min(1, L.t / L.dur);
+        const res = g.world.col.resolve(L.x0 + (L.x1 - L.x0) * u, L.z0 + (L.z1 - L.z0) * u, 0.3);
+        this.x = res.x; this.z = res.z;
+        if (u >= 1) {
+          this.pounce = null;
+          // whoever it lands on is pinned
+          let hit = null, hd = 1.5;
+          for (const p of g.players.values()) { if (!p.alive || p.pinnedBy) continue; const dd = Math.hypot(p.x - this.x, p.z - this.z); if (dd < hd) { hd = dd; hit = p; } }
+          if (hit) { this.pinPid = hit.id; this.pinT = 0; this.pinHp0 = this.hp; this.pinStruggle = 0; this.setState('walk'); ev({ a: 'pin', pid: hit.id, x: +hit.x.toFixed(2), z: +hit.z.toFixed(2) }); }
+          else { this.staggerFor = 0.9; this.setState('stagger'); }
+        }
+        return true;
+      }
+      if (this.state === 'crouch') {
+        if (best) faceTo(best.x, best.z);
+        if (this.stateT > P.wind && best) {
+          const dd = Math.hypot(best.x - this.x, best.z - this.z) || 1;
+          const reach = Math.min(dd + 0.4, P.max + 1);
+          const x1 = this.x + (best.x - this.x) / dd * reach, z1 = this.z + (best.z - this.z) / dd * reach;
+          this.pounce = { x0: this.x, z0: this.z, x1, z1, t: 0, dur: P.dur };
+          this.setState('walk');
+          ev({ a: 'pounce', x0: +this.x.toFixed(2), z0: +this.z.toFixed(2), x1: +x1.toFixed(2), z1: +z1.toFixed(2), dur: P.dur });
+        }
+        return true;
+      }
+      if (this.state === 'walk' && this.specT <= 0 && best && !best.pinnedBy && dist > P.min && dist < P.max && see(best)) {
+        this.specT = P.cd; this.setState('crouch'); ev({ a: 'crouch' });
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // host: let go of whoever it had pinned (shot off, struggled off, or it died)
+  unpin() {
+    const g = this.game, pid = this.pinPid;
+    if (!pid) return;
+    this.pinPid = null;
+    const e = { k: 'zev', id: this.id, a: 'unpin', pid };
+    if (g.isHost) { g.emit(e); }
+    g.specials?.event(e);
+    if (this.alive) {
+      const p = g.players.get(pid);
+      if (p) { const dx = this.x - p.x, dz = this.z - p.z, l = Math.hypot(dx, dz) || 1; this.knock.x += dx / l * 9; this.knock.z += dz / l * 9; }
+      this.staggerFor = 1.2; this.setState('stagger');
+    }
+  }
+
   // host: set it alight (everyone sees the flames through a zfx event)
   ignite(o, by) {
     if (!this.alive) return;
@@ -273,7 +405,8 @@ export class Zombie {
     if (!this.alive) return false;
     this.wake();
     this.hitT = 0;
-    if (this.blocks(dirx, dirz)) dmg *= this.def.shield;     // the Warden's riot shield
+    if (byId) this.lastBy = byId;
+    if (this.blocks(dirx, dirz) && !(crit && this.def.armor)) dmg *= this.def.shield ?? this.def.armor;     // the Warden's riot shield, a soldier's plates (a headshot goes round them)
     const before = this.hp / this.maxHp;
     this.hp -= dmg;
     if (this.boss && this.hp > 0) this.bossHurt(before, this.hp / this.maxHp);
@@ -291,7 +424,7 @@ export class Zombie {
 
   // the Warden's shield turns bullets that hit her from the front (not while she is dazed or charging)
   blocks(dirx, dirz) {
-    if (!this.def.shield || this.state === 'stagger' || this.charging > 0 || this.state === 'dead') return false;
+    if (!(this.def.shield || this.def.armor) || (dirx === 0 && dirz === 0) || this.state === 'stagger' || this.charging > 0 || this.state === 'dead') return false;
     return dirx * Math.sin(this.face) + dirz * Math.cos(this.face) < -0.35;
   }
 
@@ -339,6 +472,8 @@ export class Zombie {
     this.deadT = 0;
     this.hp = 0;
     this.game.speech?.hostLine(this, 'die', this.boss ? 1 : 0.05);
+    if (this.def.pop) { this.game.specials?.burst(this.x, this.z, this.def.pop.r); if (this.game.isHost) bloaterBurstLater(this.game, this); }
+    if (this.pinPid) this.unpin();
     const c = Math.cos(this.face), s = Math.sin(this.face);
     const lz = dirx * s + dirz * c;          // + when shot from behind
     this.anim.deathDir = lz >= 0 ? 1 : -1;   // fall the way the bullet pushes
@@ -453,7 +588,7 @@ export class Zombie {
       const lp = this.leap;
       lp.t += dt;
       const u = Math.min(1, lp.t / lp.dur);
-      y += 4 * 2.6 * u * (1 - u);
+      y += 4 * (lp.h ?? 2.6) * u * (1 - u);
       if (u >= 1) this.leap = null;
     }
     root.position.set(this.x, y, this.z);

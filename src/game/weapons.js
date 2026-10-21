@@ -50,7 +50,35 @@ export const WEAPONS = {
     snd: { release: 'mag_release', magout: 'belt', magin: 'mag_in', rack: 'slide' },
   },
 };
-export const WEAPON_IDS = Object.keys(WEAPONS);
+// the hidden POWER weapons: found in a locked case in a level, a handful of shots, gone when empty (never bought,
+// never upgraded, never carried to the next level)
+Object.assign(WEAPONS, {
+  crossbow: {
+    id: 'crossbow', name: 'X-Bolt Crossbow', model: 'crossbow', icon: 'crossbow_icon.webp', blurb: 'Silent. One bolt goes through everything in a line.', power: true, mode: 'bolt',
+    dmg: 320, crit: 1.4, mag: 12, tapInterval: 0.85, autoInterval: 0.9, reload: 9, pierce: 8, pierceK: 0.92, quiet: true,
+    spreadBase: deg(0.4), spreadAdd: 0, spreadMax: deg(0.6), spreadRecover: deg(8), spreadMove: deg(0.8),
+    range: 34, assistAcquire: deg(9), assistHold: deg(14), assistRange: 15, assistBend: 0.6, magnet: 0.3,
+    kick: 0.25, trauma: 0.1, recoil: 22, shot: 'xbow', shellVol: 0, duck: 0.85, magStep: 0, tip: [0.56, 0.076, 0], spare: [0, 0, 0], noDrop: true, noShell: true,
+  },
+  flamer: {
+    id: 'flamer', name: 'Hellfire Flamethrower', model: 'flamer', icon: 'flamer_icon.webp', blurb: 'A river of fire. Everything in front of you burns.', power: true, mode: 'flame',
+    dmg: 9, crit: 1, mag: 140, tapInterval: 0.06, autoInterval: 0.06, reload: 9, flame: { len: 6.8, cone: 0.34, burn: { dps: 32, t: 3.2, spread: 1.3 } },
+    spreadBase: deg(4), spreadAdd: 0, spreadMax: deg(4), spreadRecover: deg(8), spreadMove: deg(0),
+    range: 7, assistAcquire: deg(16), assistHold: deg(22), assistRange: 7, assistBend: 0.6, magnet: 0.3,
+    kick: 0.01, trauma: 0.02, recoil: 2, shot: 'flame', shellVol: 0, duck: 0.9, magStep: 0, tip: [0.765, 0.05, 0], spare: [0, 0, 0], noDrop: true, noShell: true,
+  },
+  launcher: {
+    id: 'launcher', name: 'Thumper 40mm', model: 'launcher', icon: 'launcher_icon.webp', blurb: 'Six-shot grenade launcher. Rounds burst on whatever they hit.', power: true, mode: 'gl',
+    dmg: 0, crit: 1, mag: 10, tapInterval: 0.6, autoInterval: 0.7, reload: 9,
+    spreadBase: deg(1), spreadAdd: 0, spreadMax: deg(1), spreadRecover: deg(8), spreadMove: deg(1),
+    range: 26, assistAcquire: deg(12), assistHold: deg(18), assistRange: 16, assistBend: 0.7, magnet: 0.3,
+    kick: 0.4, trauma: 0.18, recoil: 34, shot: 'gl', shellVol: 0, duck: 0.6, magStep: 0, tip: [0.585, 0.09, 0], spare: [0, 0, 0], noDrop: true, noShell: true,
+  },
+});
+// every gun the game knows (the network sends an index into this) and the ones a survivor can own
+export const GUN_IDS = Object.keys(WEAPONS);
+export const WEAPON_IDS = GUN_IDS.filter((id) => !WEAPONS[id].power);
+export const POWER_IDS = GUN_IDS.filter((id) => WEAPONS[id].power);
 
 // Four upgrades per gun, bought with cash: the ONLY thing cash buys now (guns open by beating levels, the survivor is
 // levelled with skill points). cost[i] is the price of level i+1, times the gun's `costK`.
@@ -156,4 +184,4 @@ export function upgradeCost(weaponId, key, level) {
 }
 
 // what a zombie is worth
-export const BOUNTY = { shambler: 10, lurcher: 16, runner: 14, brute: 60, warden: 400, patientzero: 600, butcher: 800, foreman: 1000, omega: 1500 };
+export const BOUNTY = { shambler: 10, lurcher: 16, runner: 14, brute: 60, bloater: 25, screamer: 30, spitter: 25, leaper: 30, soldier: 35, warden: 400, patientzero: 600, butcher: 800, foreman: 1000, omega: 1500 };

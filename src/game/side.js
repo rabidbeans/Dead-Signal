@@ -17,7 +17,7 @@ import { surface, tex, prop } from './assets.js';
 import { container } from './kit.js';
 import { signTexture } from './world.js';
 import { mulberry } from './rng.js';
-import { WEAPON_IDS } from './weapons.js';
+import { GUN_IDS } from './weapons.js';
 
 const G = 27, JUMP_V = 10.4;
 const HALF = 23;                  // the stage runs X0 ± HALF
@@ -477,7 +477,7 @@ export class SideStage {
       buzz([6]);
       g.localHit(p, hit, h.dmg * (crit ? W.crit : 1), dxn, 0, crit, W.knock || 1);
     }
-    g.netEvent({ k: 'shot', pid: p.id, wp: WEAPON_IDS.indexOf(W.id), x: +mz.x.toFixed(2), z: +mz.z.toFixed(2), y: +mz.y.toFixed(2), dx: +first.dx.toFixed(3), dz: 0, hx: +first.hx.toFixed(2), hz: +mz.z.toFixed(2), hy: +first.hy.toFixed(2), w: first.w, nx: 0, nz: 0 });
+    g.netEvent({ k: 'shot', pid: p.id, wp: GUN_IDS.indexOf(W.id), x: +mz.x.toFixed(2), z: +mz.z.toFixed(2), y: +mz.y.toFixed(2), dx: +first.dx.toFixed(3), dz: 0, hx: +first.hx.toFixed(2), hz: +mz.z.toFixed(2), hy: +first.hy.toFixed(2), w: first.w, nx: 0, nz: 0 });
   }
 
   // a remote survivor's laser and light follow his 2D aim

@@ -101,3 +101,51 @@ if __name__ == '__main__':
     write('ignite', ignite(), peak=0.85)
     write('beep', beep(), peak=0.45)
     write('crate', crate(), peak=0.8)
+
+
+def xbow():
+    """A crossbow: the string's snap, the limbs' thrum, the bolt hissing off."""
+    r = np.random.RandomState(51)
+    d = 0.6
+    snap = mixl(burst(0.02, 800, 6000, 0.004, seed=5) * 1.0, modes([(1100, 0.03, 1), (2300, 0.02, 0.5)], 0.06, seed=6) * 0.6)
+    tt = t(0.4)
+    thrum = np.sin(2 * np.pi * 95 * tt + 3 * np.sin(2 * np.pi * 7 * tt)) * env_exp(0.4, 0.09, 0.002) * 0.7
+    hiss = bp(r.randn(int(0.25 * SR)), 1500, 6000) * env_exp(0.25, 0.08, 0.01) * 0.25
+    x = mixl(snap, at(np.zeros(1), thrum, 0.004), at(np.zeros(1), hiss, 0.01))
+    return reverb(pad(x, int(d * SR)), rt=0.6, wet=0.15, bright=3000, seed=51)[: int(d * SR)]
+
+
+def flame(d=3.0):
+    """A flamethrower's roar (a seamless loop): low turbulent rumble, a hiss on top, crackle."""
+    r = np.random.RandomState(61)
+    n = int(d * SR)
+    roar = lp(r.randn(n), 500) * 1.0 + bp(r.randn(n), 600, 2500) * 0.35 + hp(r.randn(n), 4000) * 0.08
+    roar *= 1 + 0.25 * lp(r.randn(n), 8)
+    cr = np.zeros(n)
+    for k in range(200):
+        when = int(r.rand() * (n - 400))
+        cr[when:when + 260] += hp(r.randn(260), 2500) * env_exp(260 / SR, 0.0015, 0.0001) * (0.2 + r.rand() * 0.4)
+    x = sat(roar * 1.5, 1.5) + cr * 0.5
+    # crossfade the ends so it loops without a click
+    f = int(0.2 * SR)
+    x[:f] = x[:f] * np.linspace(0, 1, f) + x[-f:] * np.linspace(1, 0, f)
+    return x[: n - f]
+
+
+def gl():
+    """A 40 mm launcher: a hollow 'bloop' and the action."""
+    r = np.random.RandomState(71)
+    d = 0.7
+    tt = t(0.25)
+    f = 70 + 110 * np.exp(-tt / 0.03)
+    bloop = np.sin(2 * np.pi * np.cumsum(f) / SR) * env_exp(0.25, 0.07, 0.002)
+    pop = bp(r.randn(int(0.06 * SR)), 300, 2500) * env_exp(0.06, 0.012, 0.0005)
+    clack = modes([(1700, 0.02, 1), (2900, 0.015, 0.6)], 0.06, seed=7)
+    x = mixl(sat(bloop * 2, 2) * 1.0, pop * 0.7, at(np.zeros(1), clack * 0.3, 0.08))
+    return reverb(pad(x, int(d * SR)), rt=0.9, wet=0.2, bright=2500, seed=71)[: int(d * SR)]
+
+
+if __name__ == '__main__':
+    write('xbow', xbow(), peak=0.8)
+    write('flame', flame(), peak=0.7)
+    write('gl', gl(), peak=0.85)

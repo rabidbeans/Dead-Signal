@@ -279,3 +279,93 @@ VARIANTS.update({
         gore=0.7, tears=0.0, grime=0.5,
     ),
 })
+
+# ---- one new kind of the dead per map (2026-10-21, Sam: "We can add one new zombie per new map")
+VARIANTS.update({
+    # L1  THE BLOATER: a man swollen with gas until his shirt split; boils across the belly. It bursts when it dies.
+    'z_bloater': dict(
+        seed=301,
+        macro=dict(gender=1.0, age=0.6, muscle=0.3, weight=1.0, height=0.8, proportions=0.3),
+        bulk=[dict(kind='belly', amt=0.24, lumpy=0.5), dict(kind='chest', amt=0.05), dict(kind='neck', amt=0.06),
+              dict(kind='arm', amt=0.04), dict(kind='legs', amt=0.04), dict(kind='hump', amt=0.03)],
+        skin=dict(ZOMBIE_SKIN, base='#868a5e', livid='#4a4a22', vein='#3a5016', veins=1.0, boil='#d6c25a', sunken=1.1, bruise=0.6),
+        outfit=dict(
+            pants=dict(color='#3b3a44', length=1.95, thick=0.006, belt=True),
+            shoes=dict(color='#2a221c', leather=True, top=1.7),
+            hair=dict(color='#3a3226', bald=0.7, line=0.3, volume=0.004),
+        ),
+        pustules=1.0,
+        bile=('#7a8a18', '#4a5a0c'),
+        mouthgore=0.6,
+        wounds=[dict(at='belly', r=0.06, depth=0.014), dict(at='neck_R', r=0.04)],
+        gore=0.8, tears=0.5, grime=0.8,
+    ),
+    # L2  THE SCREAMER: a starved patient, long black hair hanging over her face, the mouth torn wide. She screams the
+    # whole ward awake.
+    'z_screamer': dict(
+        seed=302,
+        macro=dict(gender=0.0, age=0.35, muscle=0.05, weight=0.0, height=1.0, proportions=0.7),
+        skin=dict(ZOMBIE_SKIN, base='#9ea29c', livid='#4a3a4e', socket='#120a10', sunken=1.6, veins=0.9, pool=0.45),
+        outfit=dict(
+            gown=dict(color='#a8aca4', pattern='stripes', color2='#7e8c90', pitch=0.06, length=0.8),
+            hair=dict(color='#0e0b0b', line=0.02, volume=0.006),
+        ),
+        ribs=True,
+        mouthgore=1.0,
+        wounds=[dict(at='forearm_L', r=0.04, depth=0.012), dict(at='neck_L', r=0.035)],
+        gore=0.8, tears=0.4, grime=0.5,
+    ),
+    # L3  THE SPITTER: thin, his throat swollen into a sac of acid, green running from the mouth and down the chest.
+    'z_spitter': dict(
+        seed=303,
+        macro=dict(gender=1.0, age=0.45, muscle=0.35, weight=0.1, height=0.9, proportions=0.5),
+        bulk=[dict(kind='neck', amt=0.09, lumpy=0.8), dict(kind='hump', amt=0.03)],
+        skin=dict(ZOMBIE_SKIN, base='#7f8c68', livid='#3f4a28', vein='#5a8a1a', veins=1.0, boil='#c8ff4a', sunken=1.2),
+        outfit=dict(
+            shirt=dict(color='#3c4a52', sleeve=2.0, collar=-0.02, hem=0.08, thick=0.01, zip=True),
+            pants=dict(color='#2a2c2a', pattern='denim', length=1.97, thick=0.006),
+            shoes=dict(color='#5a5248', top=1.72),
+            hair=dict(color='#1a1612', line=0.1, volume=0.008),
+        ),
+        pustules=0.5,
+        bile=('#8aaa10', '#4a6a08'),
+        mouthgore=1.0,
+        wounds=[dict(at='chest_L', r=0.045), dict(at='cheek_L', r=0.035, depth=0.012)],
+        gore=0.6, tears=0.35, grime=0.6,
+    ),
+    # L4  THE LEAPER: wiry, shirtless, the ribs and tendons showing, long-limbed. It crouches, then flies at you and
+    # pins you down until someone shoots it off.
+    'z_leaper': dict(
+        seed=304,
+        macro=dict(gender=1.0, age=0.3, muscle=0.85, weight=0.0, height=1.0, proportions=0.9),
+        bulk=[dict(kind='arm', amt=0.012), dict(kind='legs', amt=0.012), dict(kind='shoulders', amt=0.02)],
+        skin=dict(ZOMBIE_SKIN, base='#8a7f78', livid='#4a2a30', vein='#2a1a1e', veins=1.0, sunken=1.3, bruise=0.6),
+        outfit=dict(
+            pants=dict(color='#3a3e2a', pattern='camo', color2='#2a2c1e', length=1.6, thick=0.006, belt=True),
+            shoes=dict(color='#1a1816', top=1.75),
+            hair=dict(color='#2a221a', line=0.4, volume=0.003),
+        ),
+        ribs=True,
+        wounds=[dict(at='back', r=0.07, depth=0.014), dict(at='chest_L', r=0.05), dict(at='forearm_R', r=0.05), dict(at='thigh_L', r=0.05)],
+        gore=1.0, tears=0.6, grime=0.9,
+    ),
+    # L5  THE SOLDIER: one of the fort's garrison, still in his plate carrier and helmet (the helmet is gear.glb's
+    # combat_helmet, worn in the game). The plates turn bullets from the front.
+    'z_soldier': dict(
+        seed=305,
+        macro=dict(gender=1.0, age=0.4, muscle=0.85, weight=0.55, height=1.0, proportions=0.6),
+        bulk=[dict(kind='chest', amt=0.03), dict(kind='shoulders', amt=0.02)],
+        skin=dict(ZOMBIE_SKIN, base='#8a8c7a'),
+        outfit=dict(
+            shirt=dict(color='#4a5238', pattern='camo', color2='#33392a', sleeve=2.05, collar=-0.02, hem=0.15, thick=0.012),
+            vest=dict(color='#3a3f2c', open=0.0, pouches=True),
+            pants=dict(color='#4a5238', pattern='camo', color2='#33392a', length=1.97, thick=0.008),
+            shoes=dict(color='#3a2e22', leather=True, top=1.6, thick=0.018, boot=True, sole='#1c1a18'),
+            gloves=dict(color='#2a2a22'),
+            hair=dict(color='#1d1814', line=0.32, volume=0.002),
+            pads=True, cargo=True,
+        ),
+        wounds=[dict(at='neck_L', r=0.05, depth=0.012), dict(at='cheek_L', r=0.03), dict(at='forearm_R', r=0.04)],
+        gore=0.9, tears=0.3, grime=0.75,
+    ),
+})

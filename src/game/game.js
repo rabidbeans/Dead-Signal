@@ -5,12 +5,13 @@ import { World, NavField, cutaway } from './world.js';
 import { FX } from './fx.js';
 import { Player } from './player.js';
 import { save } from './save.js';
-import { WEAPONS, WEAPON_IDS, BOUNTY, lookBits } from './weapons.js';
+import { WEAPONS, GUN_IDS, BOUNTY, lookBits } from './weapons.js';
 import { Skills, SPEC_IDS } from './skills.js';
 import { gearAll } from './gear.js';
 import { Zombie, TYPES } from './zombie.js';
 import { audio, buzz } from './audio.js';
-import { loadWeapon, tex, makeCharacter, ZOMBIES, BOSS_MODELS } from './assets.js';
+import { loadWeapon, tex, makeCharacter, ZOMBIES, BOSS_MODELS, SPECIAL_MODELS } from './assets.js';
+import { SpecialFX } from './specials.js';
 import { nightEnvironment, isTouch } from './engine.js';
 import { perlin1 } from './noise.js';
 import { dressGround, tickFog } from './dress.js';
@@ -23,10 +24,11 @@ import { Objective, ring, beam } from './objective.js';
 import { tickZones, takeKey, dressKeys, indoors, KEY_COLORS } from './zones.js';
 
 // a client's own events that go up to the host (and on to everyone else)
-const UP_EVENTS = new Set(['shot', 'reload', 'skill', 'throw']);
+const UP_EVENTS = new Set(['shot', 'reload', 'skill', 'throw', 'case']);
 // picking a downed teammate back up: stand this close for this long
 const REVIVE_R = 2.4, REVIVE_T = 2.5;
-import { L, LV, HOLDS, AMBUSH, MAZE, HOLD_TRIGGER, HOLD_RADIUS, MEDKITS, SUPPLIES, ZONE_HW, setLevel, zoneAt } from './level.js';
+import { L, LV, HOLDS, AMBUSH, MAZE, HOLD_TRIGGER, HOLD_RADIUS, MEDKITS, SUPPLIES, CASES, ZONE_HW, setLevel, zoneAt } from './level.js';
+import { Cases } from './cases.js';
 import { Throwables } from './throwables.js';
 import { mulberry } from './rng.js';
 import { Q } from './quality.js';
@@ -146,7 +148,7 @@ export class Game {
     this.fx.roofed = indoors;
     this.corpses = [];
     this.gunModels = {};
-    await Promise.all(WEAPON_IDS.map(async (id) => { this.gunModels[id] = await loadWeapon(WEAPONS[id].model); }));
+    await Promise.all(GUN_IDS.map(async (id) => { this.gunModels[id] = await loadWeapon(WEAPONS[id].model); }));
     this.cam = new CameraRig(this.camera);
     dressGround(this);
     this.engine.onLowTier = () => { this.world.moon.castShadow = false; if (this.groundFog) this.groundFog.pts.visible = false; this.hud.toast?.('Performance mode'); };
@@ -177,6 +179,9 @@ export class Game {
       // the level's own objective at the junction (breakers, nests, the bulldozer) and its hazards (gas tanks, shells)
       this.objective = new Objective(this);
       this.skills = new Skills(this);
+      this.specials = new SpecialFX(this);
+      this.cases = new Cases(this, CASES.filter(([x, z]) => this.opened === 0 || z < L.gate[this.opened - 1] + 4));
+      this.introduced = new Set();
       this.nades = new Throwables(this);
       this.nades.laySupplies(SUPPLIES.filter(([x, z]) => z > L.lz.z && (this.opened === 0 || z < L.gate[this.opened - 1] + 4)));
       if (cp > 0) this.objective.skip();
@@ -202,7 +207,7 @@ export class Game {
     const me = this.me;
     if (!this.opts.attract) {
       const boss = HOLDS.find((h) => h.boss)?.boss;
-      [...ZOMBIES, ...(boss ? [BOSS_MODELS[boss]] : [])].forEach((name, i) => {
+      [...ZOMBIES, ...SPECIAL_MODELS, ...(boss ? [BOSS_MODELS[boss]] : [])].forEach((name, i) => {
         try {
           const c = makeCharacter(name);
           c.root.position.set(me.x - 2.5 + i * 0.55, 0, me.z - 3);
@@ -480,7 +485,7 @@ export class Game {
         if (this.spawnT <= 0 && this.holdSpawned < want && hunting < cap && !this.side?.warping) {
           this.spawnT = (this.side?.active ? 2.2 : endless ? 1.0 : 0.25) + Math.random() * 0.5;
           const roll = Math.random();
-          let type = roll < H.runner ? 'runner' : roll < H.runner + H.lurch ? 'lurcher' : 'shambler';
+          let type = this.mix(roll < H.runner ? 'runner' : roll < H.runner + H.lurch ? 'lurcher' : 'shambler', 0.08);
           // the brutes lumber in at even points through the hold
           if (this.holdBrutes < this.holdBruteN && this.holdSpawned >= this.holdTotal * (this.holdBrutes + 1) / (this.holdBruteN + 1)) { type = 'brute'; this.holdBrutes++; this.hud.toast('Something big is coming…'); }
           this.spawnZombie(type);
@@ -529,7 +534,8 @@ export class Game {
         const x = cx + (rng() - 0.5) * 3, zz = z + (rng() - 0.5) * 3;
         if (!free(x, zz)) continue;
         const r = rng();
-        this.pop.push({ x, z: zz, type: r < LV.brutePop && z < L.cross[0] - 40 ? 'brute' : r < 0.12 + LV.brutePop ? 'lurcher' : 'shambler', seed: (rng() * 1e6) | 0, home: rng() < 0.65, done: false });
+        const sp = LV.specials?.length && rng() < 0.06 ? LV.specials[Math.floor(rng() * LV.specials.length)] : null;
+        this.pop.push({ x, z: zz, type: sp || (r < LV.brutePop && z < L.cross[0] - 40 ? 'brute' : r < 0.12 + LV.brutePop ? 'lurcher' : 'shambler'), seed: (rng() * 1e6) | 0, home: rng() < 0.65, done: false });
       }
     }
   }
@@ -547,15 +553,50 @@ export class Game {
       if (this.ambushed.has(i) || lead.z > a.z) return;
       this.ambushed.add(i);
       if (this.opened > 0 && L.gate[this.opened - 1] > a.z + 6) return;        // already behind us
-      for (let k = 0; k < a.n + 2 * (this.players.size - 1); k++) this.spawnZombie(Math.random() < (LV.ambRunner ?? 0.35) ? 'runner' : Math.random() < 0.3 ? 'lurcher' : 'shambler');
+      for (let k = 0; k < a.n + 2 * (this.players.size - 1); k++) this.spawnZombie(this.mix(Math.random() < (LV.ambRunner ?? 0.35) ? 'runner' : Math.random() < 0.3 ? 'lurcher' : 'shambler', 0.1));
+      // the first ambush brings this map's own new horror, so you meet it early
+      if (i === 0 && LV.specials?.length) this.spawnZombie(LV.specials.at(-1));
       for (let k = 0; k < (a.brutes || 0); k++) this.spawnZombie('brute');
     });
     // a trickle, so the road never feels safe
     this.trickleT -= dt;
     if (this.trickleT <= 0) {
       this.trickleT = (2.5 + Math.random() * 2) / (LV.trickle ?? 1);
-      if (hunting < (10 + 4 * this.players.size) * (LV.trickle ?? 1)) this.spawnZombie(Math.random() < 0.2 * (LV.trickle ?? 1) ? 'runner' : 'shambler');
+      if (hunting < (10 + 4 * this.players.size) * (LV.trickle ?? 1)) this.spawnZombie(this.mix(Math.random() < 0.2 * (LV.trickle ?? 1) ? 'runner' : 'shambler', 0.06));
     }
+  }
+
+  // sometimes one of the special dead instead (the newest kind on this map comes most often)
+  mix(type, p) {
+    const S = LV.specials;
+    if (!S?.length || Math.random() >= p) return type;
+    return Math.random() < 0.45 ? S.at(-1) : S[Math.floor(Math.random() * S.length)];
+  }
+
+  // the first time one of the special dead is close: say what it does
+  introduce(dt) {
+    this.introT = (this.introT || 0) - dt;
+    if (this.introT > 0 || !this.introduced) return;
+    this.introT = 0.5;
+    const me = this.me;
+    for (const z of this.zombies.values()) {
+      if (!z.alive || !z.def.tip || this.introduced.has(z.type)) continue;
+      if ((z.x - me.x) ** 2 + (z.z - me.z) ** 2 > 18 * 18) continue;
+      this.introduced.add(z.type);
+      this.hud.toast(z.def.tip);
+      audio.play('sting', { vol: 0.4, jitter: 0 });
+      break;
+    }
+  }
+
+  // the local survivor, pinned: every tap is a heave against it
+  struggle() {
+    const id = this.me.pinnedBy;
+    if (!id) return;
+    if (this.isHost) { const z = this.zombies.get(id); if (z) z.pinStruggle = (z.pinStruggle || 0) + 0.13; }
+    else this.net.toHost({ t: 'struggle', id });
+    this.cam.trauma(0.12);
+    buzz([10]);
   }
 
   cullBehind(lead) {
@@ -766,6 +807,9 @@ export class Game {
       if (m.p !== this.phase) this.setPhase(m.p); else this.refreshHud();
     } else if (m.t === 'end' && !this.isHost) {
       this.finish(m.win);
+    } else if (m.t === 'struggle' && this.isHost) {
+      const z = this.zombies.get(m.id);
+      if (z && z.pinPid === from) z.pinStruggle = (z.pinStruggle || 0) + 0.13;
     } else if (m.t === 'supply_take') {
       this.nades?.takeSupply(m.id);
       if (this.isHost) this.net.broadcast({ t: 'supply_take', id: m.id }, true, from);
@@ -806,6 +850,8 @@ export class Game {
     } else if ((e.k === 'shell' || e.k === 'tdie') && !this.isHost) this.objective?.onEvent(e);
     else if (e.k === 'skill') { if (e.pid !== this.me.id) this.skills?.apply(e, from); }
     else if (e.k === 'throw') { if (e.pid !== this.me.id) this.nades?.launch(e); }
+    else if (e.k === 'zev') { if (!this.isHost) this.specials?.event(e); }
+    else if (e.k === 'case') { if (e.pid !== this.me.id) this.cases?.open(e); }
     else if (e.k === 'tgt') { if (!this.isHost) this.skills?.onTarget(e); }
     else if (e.k === 'zfx') {
       const z = this.zombies.get(e.id);
@@ -820,7 +866,7 @@ export class Game {
     p.y2t = m.y || 0; p.aim2x = m.ax; p.aim2y = m.ay || 0;
     p.hp = m.hp;
     if (m.mh) p.maxHp = m.mh;
-    if (m.w !== undefined && p.order) { const id = WEAPON_IDS[m.w]; if (id && p.cur.id !== id) p.setWeapon(id, true); }
+    if (m.w !== undefined && p.order) { const id = GUN_IDS[m.w]; if (id && p.cur.id !== id) p.setWeapon(id, true); }
     if (m.lf !== undefined && m.lf !== null) p.applyLook(p.cur.id, m.lf);
     if (m.sp !== undefined) p.spec = SPEC_IDS[m.sp] || null;
     p.down = !!(m.fl & 2);
@@ -880,13 +926,13 @@ export class Game {
         this.inT = 1 / 20;
         const p = this.me;
         const fl = (p.aiming ? 1 : 0) | (p.down ? 2 : 0) | (p.dead ? 4 : 0);
-        this.net.toHost({ t: 'in', x: +p.x.toFixed(2), z: +p.z.toFixed(2), f: +p.face.toFixed(3), ax: +p.aimx.toFixed(2), az: +p.aimz.toFixed(2), hp: p.hp, fl, w: WEAPON_IDS.indexOf(p.cur.id), mh: p.maxHp, y: +(p.y2 || 0).toFixed(2), ay: +(p.aim2y || 0).toFixed(2), lf: p.cur.bits, sp: p.spec ? SPEC_IDS.indexOf(p.spec) : -1 }, false);
+        this.net.toHost({ t: 'in', x: +p.x.toFixed(2), z: +p.z.toFixed(2), f: +p.face.toFixed(3), ax: +p.aimx.toFixed(2), az: +p.aimz.toFixed(2), hp: p.hp, fl, w: GUN_IDS.indexOf(p.cur.id), mh: p.maxHp, y: +(p.y2 || 0).toFixed(2), ay: +(p.aim2y || 0).toFixed(2), lf: p.cur.bits, sp: p.spec ? SPEC_IDS.indexOf(p.spec) : -1 }, false);
       }
     } else if (this.role === 'host') {
       this.snapT -= dt;
       if (this.snapT <= 0) {
         this.snapT = 1 / 15;
-        const P = [...this.players.values()].map((p) => [p.id, +p.x.toFixed(2), +p.z.toFixed(2), +p.face.toFixed(3), +p.aimx.toFixed(2), +p.aimz.toFixed(2), p.hp, (p.aiming ? 1 : 0) | (p.down ? 2 : 0) | (p.dead ? 4 : 0), WEAPON_IDS.indexOf(p.cur.id), p.maxHp, +(p.reviveT || 0).toFixed(1), +(p.y2 || 0).toFixed(2), +(p.aim2y || 0).toFixed(2), p.cur.bits]);
+        const P = [...this.players.values()].map((p) => [p.id, +p.x.toFixed(2), +p.z.toFixed(2), +p.face.toFixed(3), +p.aimx.toFixed(2), +p.aimz.toFixed(2), p.hp, (p.aiming ? 1 : 0) | (p.down ? 2 : 0) | (p.dead ? 4 : 0), GUN_IDS.indexOf(p.cur.id), p.maxHp, +(p.reviveT || 0).toFixed(1), +(p.y2 || 0).toFixed(2), +(p.aim2y || 0).toFixed(2), p.cur.bits]);
         const Z = [];
         for (const z of this.zombies.values()) {
           if (!z.alive) continue;
@@ -948,7 +994,7 @@ export class Game {
 
   // the HUD's screen-edge markers: the objective's, and every downed teammate
   markers() {
-    const out = this.objective?.markers() || [];
+    const out = [...(this.objective?.markers() || []), ...(this.cases?.markers() || [])];
     const me = this.me;
     for (const k of this.world.keyItems) {
       if (k.taken) continue;
@@ -1035,12 +1081,15 @@ export class Game {
     const inp = this.bot ? this.botInput(dtReal) : this.input.poll(dtReal);
     if (!this.over && !this.paused) {
       me.control(dt, inp, this.camera);
-      if (inp.skill) this.skills?.use();
-      if (inp.throw) this.nades?.throw(inp);
+      if (inp.skill && !me.pinnedBy) this.skills?.use();
+      if (inp.throw && !me.pinnedBy) this.nades?.throw(inp);
       if (inp.cycle) this.nades?.cycle();
     }
     this.skills?.update(dt);
     this.nades?.update(dt);
+    this.specials?.update(dt);
+    if (!this.side?.active) this.cases?.update(dt);
+    this.introduce(dt);
     // medkits
     for (const m of this.side?.active ? [] : [...this.medkits]) {
       m.g.rotation.y += dt;
@@ -1266,6 +1315,8 @@ export class Game {
     this.bank(false);          // quitting keeps what you looted
     this.skills?.dispose();
     this.nades?.dispose();
+    this.specials?.dispose();
+    this.cases?.dispose();
     this.objective?.dispose();
     this.speech?.dispose();
     this.side?.dispose();

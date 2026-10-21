@@ -767,6 +767,9 @@ def paint(F, m, hm, d, cav, spec):
         gv = smooth(0.07, 0.0, f2g - f1g) * smooth(-0.1, 0.4, fbm(P * 4, 2, seed=171)) * (1 - cl)
         col = mix(col, hexc(gl_), np.clip(gv * 1.2, 0, 1))
         col = mix(col, hexc(sk.get('boil', gl_)), np.clip(hm.get('pust', 0) * 1.4, 0, 1))
+    elif sk.get('boil'):
+        # boils without the glow (the bloater, the spitter): sickly yellow heads on the swellings
+        col = mix(col, hexc(sk['boil']), np.clip(hm.get('pust', 0) * 1.2, 0, 0.85))
     # eyes
     eye = F.R['eye']
     if eye.any():

@@ -9,7 +9,7 @@ import { tex } from './assets.js';
 import { Q } from './quality.js';
 import { indoors } from './zones.js';
 
-import { WEAPONS, WEAPON_IDS, weaponStats, ARMOR_ABSORB, BASE_HP, BASE_SPEED, PROTO, lookBits } from './weapons.js';
+import { WEAPONS, WEAPON_IDS, GUN_IDS, weaponStats, ARMOR_ABSORB, BASE_HP, BASE_SPEED, PROTO, lookBits } from './weapons.js';
 import { gear } from './gear.js';
 const GOD = typeof location !== 'undefined' && new URLSearchParams(location.search).has('god');
 
@@ -68,7 +68,7 @@ export class Player {
     // the guns: one model per weapon in the kit, only the drawn one is visible. A friend's machine does not
     // know what he owns, so a remote survivor carries every gun.
     this.kit = {};
-    const ids = local ? WEAPON_IDS.filter((w) => lo.weapons[w]) : WEAPON_IDS;
+    const ids = local ? WEAPON_IDS.filter((w) => lo.weapons[w]) : GUN_IDS;
     for (const id of ids) this.kit[id] = this.makeGun(id, lo.weapons[id] || weaponStats(id));
     this.order = ids;
     this.anim.onEvent = (n) => this.reloadEvent(n);
@@ -209,6 +209,15 @@ export class Player {
     const g = this.game;
     if (g.side?.active || g.side?.warping) return g.side.control(this, inp, dt);     // level 5's side-scrolling boss fight
     if (this.dead) return;
+    // pinned under a leaper: no moving, no shooting. Every tap (or flick of a stick) is a heave to get free.
+    if (this.pinnedBy) {
+      this.vx = this.vz = 0;
+      const mv = Math.hypot(inp.move.x, inp.move.y) > 0.5, fire = !!(inp.firing || inp.mouseFiring);
+      if (inp.tap || (fire && !this._pf) || (mv && !this._pm) || inp.reload) g.struggle();
+      this._pf = fire; this._pm = mv;
+      g.hud.hint(g.players.size > 1 ? 'PINNED! Tap fast to break free, or call a friend to shoot it off' : 'PINNED! Tap fast to break free');
+      return;
+    }
     const sp = this.down ? 0.7 : this.speed * (this.reloadT > 0 ? 0.92 : 1) * (this.W.moveK || 1);
     // screen -> world: right is +x, down the screen is +z
     let mx = inp.move.x, mz = inp.move.y;
@@ -291,6 +300,7 @@ export class Player {
       const err = Math.acos(Math.max(-1, Math.min(1, fx * this.aimx + fz * this.aimz)));
       if (err < 0.35 || inp.tap) {
         if (this.ammo > 0) this.fire(fx, fz);
+        else if (W.power) this.dropPower();
         else { audio.play('dryfire', { x: this.x, z: this.z }); buzz([4]); this.startReload(); }
         // carry the remainder so a fast gun keeps its true rate whatever the frame time
         this.cool = interval + Math.max(this.cool, -dt);
@@ -300,7 +310,7 @@ export class Player {
   }
 
   startReload() {
-    if (this.reloadT > 0) return;
+    if (this.reloadT > 0 || this.W.power) return;
     const rt = this.W.reload;
     this.reloadT = rt;
     this.game.hud.reload(rt);
@@ -327,6 +337,8 @@ export class Player {
   fire(dirx, dirz) {
     const g = this.game;
     const W = this.W;
+    if (W.mode === 'flame') return this.flameFire();
+    if (W.mode === 'gl') return this.glFire();
     if (!this.over) this.ammo--;                // overdrive: no reloads
     if (this.local) g.stats.shots++;
     const dmgK = (this.spec === 'gunner' ? 1.08 : 1) * (this.over?.dmgK || 1);
@@ -404,11 +416,11 @@ export class Player {
     this.anim.fire(this.ammo === 0 && !W.pump, W.recoil);
     if (W.pump) { this.pumpT = W.pump; this.anim.slide = 0; }
     g.fx.muzzle(mz.x, mz.y, mz.z, dx, dz);
-    if (!W.pump) {
+    if (!W.pump && !W.noShell) {
       const sh = g.fx.shell(mz.x - dx * 0.12, mz.y + 0.05, mz.z - dz * 0.12, dx, dz);
       sh.cb = (s) => audio.play('shell', { x: s.x, z: s.z, vol: W.shellVol });
     }
-    if (W.quiet) audio.play('sup', { vol: 0.9, jitter: 0.04, rate: W.pellets ? 0.75 : W.id === 'pistol' ? 1.1 : 0.95 });
+    if (W.quiet && !W.power) audio.play('sup', { vol: 0.9, jitter: 0.04, rate: W.pellets ? 0.75 : W.id === 'pistol' ? 1.1 : 0.95 });
     else audio.play(W.shot, { vol: 1, jitter: 0.035 });
     if (!W.quiet) g.noise = { x: this.x, z: this.z, t: g.time };      // a suppressor does not wake the sleeping dead
     audio.duck(W.duck, 150);
@@ -428,7 +440,87 @@ export class Player {
       g.localHit(this, hit, h.dmg * (crit ? W.crit : 1), h.dx, h.dz, crit, W.knock || 1, opt);
       if (h.first) this.protoHit(hit, h, struck, extra, col);
     }
-    g.netEvent({ k: 'shot', pid: this.id, wp: WEAPON_IDS.indexOf(W.id), x: +mz.x.toFixed(2), z: +mz.z.toFixed(2), y: +mz.y.toFixed(2), dx: +dx.toFixed(3), dz: +dz.toFixed(3), hx: +first.hx.toFixed(2), hz: +first.hz.toFixed(2), w: first.w, nx: +first.nx.toFixed(2), nz: +first.nz.toFixed(2), lf: this.cur.bits, ...extra });
+    g.netEvent({ k: 'shot', pid: this.id, wp: GUN_IDS.indexOf(W.id), x: +mz.x.toFixed(2), z: +mz.z.toFixed(2), y: +mz.y.toFixed(2), dx: +dx.toFixed(3), dz: +dz.toFixed(3), hx: +first.hx.toFixed(2), hz: +first.hz.toFixed(2), w: first.w, nx: +first.nx.toFixed(2), nz: +first.nz.toFixed(2), lf: this.cur.bits, ...extra });
+  }
+
+  // ---- the power weapons
+  // the flamethrower: everything in the cone ahead takes fire (and catches); a river of flame is drawn
+  flameFire() {
+    const g = this.game, W = this.W, F = W.flame;
+    this.ammo--;
+    const mz = this.muzzle(), fx = Math.sin(this.face), fz = Math.cos(this.face);
+    const len = Math.min(F.len, g.world.col.ray(mz.x, mz.z, fx, fz, F.len).d + 0.6);
+    for (const z of g.zombies.values()) {
+      if (!z.alive) continue;
+      const ex = z.x - mz.x, ez = z.z - mz.z, d = Math.hypot(ex, ez);
+      if (d > len + (z.def.rad || 0.3) || d < 0.01) continue;
+      if (Math.acos(Math.max(-1, Math.min(1, (ex * fx + ez * fz) / d))) > F.cone + 0.25 / Math.max(1, d)) continue;
+      z.burnT = Math.max(z.burnT || 0, 1);
+      g.localHit(this, z, W.dmg * (this.spec === 'gunner' ? 1.08 : 1), ex / d, ez / d, false, 0.12, { burn: F.burn });
+    }
+    if (g.targets) for (const t of g.targets.values()) if (t.alive && Math.hypot(t.x - mz.x, t.z - mz.z) < len && ((t.x - mz.x) * fx + (t.z - mz.z) * fz) > 0) g.targetHit(this, t, W.dmg * 0.5, fx, fz);
+    this.flameFx = 0.12; this.flameT = 0.15;
+    this.flameSound();
+    g.noise = { x: this.x, z: this.z, t: g.time };
+    g.cam.trauma(0.03);
+    this.anim.fire(false, W.recoil);
+    g.hud.ammo(this);
+    buzz([4]);
+    if (((this._fl = (this._fl || 0) + 1) & 3) === 0) g.netEvent({ k: 'shot', pid: this.id, wp: GUN_IDS.indexOf(W.id), fl: 1, x: +mz.x.toFixed(2), z: +mz.z.toFixed(2), y: +mz.y.toFixed(2), dx: +fx.toFixed(2), dz: +fz.toFixed(2), hx: 0, hz: 0, w: 2 });
+  }
+
+  flameSound() {
+    this.flameT = 0.18;
+    if (!this.flameVoice) this.flameVoice = audio.play('flame', { x: this.local ? null : this.x, z: this.local ? null : this.z, vol: this.local ? 0.75 : 0.5, loop: true, jitter: 0.02 });
+  }
+
+  // the stream itself: fire racing out of the nozzle, spreading and slowing, smoke off its end
+  flameJet(m, fx, fz, dt, k) {
+    const g = this.game;
+    const n = Math.round(dt * 260 * k);
+    for (let i = 0; i < n; i++) {
+      const a = Math.atan2(fz, fx) + (Math.random() - 0.5) * 0.36, s = 10 + Math.random() * 6, hot = Math.random();
+      g.fx.fire.emit({ x: m.x + fx * 0.12, y: m.y - 0.05, z: m.z + fz * 0.12, vx: Math.cos(a) * s, vy: 0.2 + Math.random() * 1.0, vz: Math.sin(a) * s, life: 0.45 + Math.random() * 0.25, s0: 0.25, s1: 1.8 + Math.random() * 0.9, r: 0.95, g: 0.24 + hot * 0.36, b: 0.04 + hot * 0.06, a0: 0.42, a1: 0, drag: 1.1, spin: 2 });
+    }
+    // a white-hot tongue at the nozzle, embers thrown off the stream, black smoke off its end
+    g.fx.glow.emit({ x: m.x + fx * 0.35, y: m.y, z: m.z + fz * 0.35, life: 0.06, s0: 0.7, s1: 0.4, r: 1, g: 0.7, b: 0.3, a0: 0.6, a1: 0 });
+    if (Math.random() < dt * 30) { const a = Math.atan2(fz, fx) + (Math.random() - 0.5) * 0.6, s = 6 + Math.random() * 6; g.fx.sparkList.push({ x: m.x + fx, y: m.y, z: m.z + fz, vx: Math.cos(a) * s, vy: 1 + Math.random() * 2, vz: Math.sin(a) * s, t: 0, max: 0.4 + Math.random() * 0.3 }); }
+    if (Math.random() < dt * 14) g.fx.smoke.emit({ x: m.x + fx * 5.5, y: m.y + 0.8, z: m.z + fz * 5.5, vx: fx * 1.5, vy: 1.4, vz: fz * 1.5, life: 1.8, s0: 0.8, s1: 2.8, r: 0.1, g: 0.09, b: 0.08, a0: 0.32, a1: 0, drag: 0.8, spin: 0.3 });
+    g.fx.flash.x = m.x + fx * 2.5; g.fx.flash.y = m.y + 0.4; g.fx.flash.z = m.z + fz * 2.5; g.fx.flash.t = 0.02;
+  }
+
+  // the launcher: a 40 mm round in a flat arc that bursts on whatever it hits
+  glFire() {
+    const g = this.game, W = this.W;
+    this.ammo--;
+    const mz = this.muzzle(), fx = Math.sin(this.face), fz = Math.cos(this.face);
+    g.nades.fireRound(this, mz, fx, fz);
+    g.fx.muzzle(mz.x, mz.y, mz.z, fx, fz);
+    audio.play(W.shot, { vol: 1, jitter: 0.04 });
+    g.cam.kick(-fx * W.kick, -fz * W.kick); g.cam.trauma(W.trauma);
+    this.anim.fire(false, W.recoil);
+    g.hud.ammo(this);
+    buzz([20]);
+  }
+
+  // a power weapon out of the case: into the kit and into your hands (a second one tops it up)
+  pickPower(id) {
+    let k = this.kit[id];
+    if (!k) { k = this.kit[id] = this.makeGun(id, weaponStats(id)); }
+    if (!this.order.includes(id)) this.order.push(id);
+    k.ammo = Math.min(k.W.mag * 2, (this.cur === k ? k.ammo : 0) + k.W.mag);
+    this.setWeapon(id);
+    this.game.hud.weapon(this); this.game.hud.ammo(this);
+  }
+
+  // out of shots: it is gone, back to your own gun
+  dropPower() {
+    const id = this.cur.id, g = this.game;
+    this.order = this.order.filter((o) => o !== id);
+    const prev = this.order.find((o) => o === this.loadout.equipped) || this.order[0];
+    this.setWeapon(prev);
+    g.hud.toast(`${WEAPONS[id].name} is empty`);
+    g.hud.weapon(this);
   }
 
   // a prototype's trick, off the body a round struck first (the ricochet, the shock arc, the shrapnel burst)
@@ -498,9 +590,10 @@ export class Player {
   // a remote player's shot, drawn here
   remoteShot(e) {
     const g = this.game;
-    const id = WEAPON_IDS[e.wp] || 'pistol';
+    const id = GUN_IDS[e.wp] || 'pistol';
     if (this.cur.id !== id) this.setWeapon(id, true);
     if (e.lf !== undefined) this.applyLook(id, e.lf);
+    if (e.fl) { this.flameFx = 0.32; return; }          // a friend's flamethrower: a burst of fire drawn here
     const col = e.lf & 2 ? rgb(PROTO[id].color) : null;
     g.fx.muzzle(e.x, e.y, e.z, e.dx, e.dz);
     g.fx.tracer(e.x + e.dx * 0.4, e.y, e.z + e.dz * 0.4, e.hx, e.hz, e.hy ?? e.y, col);
@@ -571,13 +664,16 @@ export class Player {
     const vx = this.vx, vz = this.vz;
     // velocity in the character's frame (x = its left, z = its forward)
     const local = _loc.set(vx * c - vz * s, 0, vx * s + vz * c);
-    this.anim.down += ((this.down ? 1 : 0) - this.anim.down) * Math.min(1, dt * 6);
+    this.anim.down += ((this.down ? 1 : this.pinnedBy ? 0.6 : 0) - this.anim.down) * Math.min(1, dt * 6);
     this.anim.update(dt, local, this.aiming || this.down);
     // the gun is held in BOTH hands: the animation decides where it is
     this.gun.position.copy(this.anim.gunPos);
     this.gun.quaternion.copy(this.anim.gunQuat).multiply(GUN_TURN);
     this.gun.visible = !this.dead;
     this.updateGunParts(dt);
+    // the flamethrower: a looping roar while it pours, and a friend's flames drawn from his shot events
+    if (this.flameVoice && (this.flameT -= dt) <= 0) { const v = this.flameVoice; this.flameVoice = null; try { v.g.gain.setTargetAtTime(0, audio.ctx.currentTime, 0.05); v.src.stop(audio.ctx.currentTime + 0.3); } catch (e) { /* gone */ } }
+    if (this.flameFx > 0) { this.flameFx -= dt; if (this.gunTip) { const m = this.gunTip.getWorldPosition(_mz); this.flameJet(m, Math.sin(this.face), Math.cos(this.face), dt, 1); } if (!this.local) this.flameSound(); }
     // a prototype's glow breathes (and flares on every shot)
     if (this.cur.glow && this.cur.mats) {
       const e = 0.22 + 0.12 * Math.sin(this.game.time * 3.1) + this.anim.recoil.x * 0.02;

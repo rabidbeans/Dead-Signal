@@ -17,7 +17,9 @@ import { genInterior, genCanals, zoneBlocked } from './layout.js';
 export const L = {};
 export const HOLDS = [];
 export const MEDKITS = [];
-export const SUPPLIES = [];          // ordnance boxes: [x, z, kind]
+export const SUPPLIES = [];
+export const CASES = [];             // the locked hard case with a power weapon: [x, z, weapon id]
+export const SPECIALS = ['bloater', 'screamer', 'spitter', 'leaper', 'soldier'];     // the map each first appears on is its index + 1          // ordnance boxes: [x, z, kind]
 export const AMBUSH = [];
 export const MAZE = [];          // barricade rows: { z, gx (gap centre x), gw (gap width), kind, seed }
 export const LANES = [];         // walls ALONG the street: { x, z0 (south end), z1 (north end), kind, brk: [south, north] | null, seed }
@@ -247,12 +249,30 @@ export function setLevel(n) {
     sup.push([x, +zz.toFixed(1), kind]);
   });
   SUPPLIES.splice(0, SUPPLIES.length, ...sup);
+  // one locked case a level, a little off the way through the first stretch (worth the detour)
+  {
+    const id = ['crossbow', 'flamer', 'launcher', 'flamer', 'launcher'][d.id - 1] || 'crossbow';
+    const z = (d.L.start.z + d.L.cross[0]) / 2 - 6;
+    const Z = zoneAt(z);
+    let spot = null;
+    if (Z?.kind === 'interior') {
+      const r = Z.rooms.filter((q) => q.kind !== 'corridor' && !q.keyRoom && !q.medkit).sort((a, b) => Math.abs(a.cz - z) - Math.abs(b.cz - z))[0];
+      if (r) spot = [+(r.cx - 1.0).toFixed(1), +(r.cz - 0.8).toFixed(1)];
+    }
+    if (!spot) {
+      let zz = z, x = Z ? 12 : 6.2;
+      for (let k = 0; k < 60 && inMaze(x, zz, 1.0); k++) { if (k % 2) zz -= 1.5; x = -x; }
+      spot = [x, +zz.toFixed(1)];
+    }
+    CASES.splice(0, CASES.length, [...spot, id]);
+  }
   // ambushes: one a little way into each stretch, bigger every level
   const ak = d.ambK || 1, an = (b) => Math.round((b + 1.5 * d.id) * ak);
   AMBUSH.splice(0, AMBUSH.length, { z: d.L.start.z - 30, n: an(6) }, { z: d.L.cross[0] + 30, n: an(8), brutes: d.id >= 3 ? 1 : 0 },
     { z: d.L.gate[0] - 30, n: an(9), brutes: d.id >= 2 ? 1 : 0 }, { z: d.L.lz.z + 30, n: an(9), brutes: d.id >= 4 ? 1 : 0 });
   for (const k of Object.keys(LV)) delete LV[k];
-  Object.assign(LV, d, { short: d.name });
+  // the special dead: one new kind on each map, and every earlier one keeps turning up
+  Object.assign(LV, d, { short: d.name, specials: SPECIALS.slice(0, d.id) });
   return d;
 }
 setLevel(1);

@@ -134,6 +134,7 @@ export class HUD {
     this.el.wIcon.src = ICON(W.id);
     this.el.wName.textContent = (W.proto ? PROTO[W.id].name : W.name).toUpperCase();
     this.el.wIcon.classList.toggle('gold', !!W.gold);
+    this.root.querySelector('.ammo-r').textContent = W.power ? ' LEFT' : '/ ∞';
     this.el.wIcon.classList.toggle('proto', !!W.proto);
     if (W.proto) this.el.weapon.style.setProperty('--pc', '#' + PROTO[W.id].color.toString(16).padStart(6, '0')); else this.el.weapon.style.removeProperty('--pc');
     this.el.swapBtn.classList.toggle('hidden', p.order.length < 2);

@@ -6,7 +6,7 @@ import '@fontsource/ibm-plex-mono/500.css';
 import './style.css';
 import * as THREE from 'three';
 import { Engine, isTouch } from './game/engine.js';
-import { loadCharacters, loadProps, ZOMBIES, SURVIVORS, loadWeapon, BOSS_MODELS } from './game/assets.js';
+import { loadCharacters, loadProps, ZOMBIES, SURVIVORS, loadWeapon, BOSS_MODELS, SPECIAL_MODELS } from './game/assets.js';
 import { loadBossGear } from './game/bossgear.js';
 import { loadGear } from './game/gear.js';
 import { Game } from './game/game.js';
@@ -50,7 +50,7 @@ function show(screen) {
 async function boot() {
   const bar = document.querySelector('.load-bar i');
   let done = 0;
-  const steps = [loadCharacters(ZOMBIES), loadProps(), loadGear(), ...['pistol', 'smg', 'shotgun', 'rifle', 'lmg'].map(loadWeapon)];
+  const steps = [loadCharacters([...ZOMBIES, ...SPECIAL_MODELS]), loadProps(), loadGear(), ...['pistol', 'smg', 'shotgun', 'rifle', 'lmg', 'crossbow', 'flamer', 'launcher'].map(loadWeapon)];
   steps.forEach((p) => p.then(() => { done++; bar.style.width = (done / steps.length * 100) + '%'; }));
   await Promise.all(steps);
   $('name').value = store.get('name', '');

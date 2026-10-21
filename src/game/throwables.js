@@ -15,8 +15,11 @@ export const NADES = {
   frag: { name: 'FRAG', fuse: 1.7, r: 4.6, zDmg: 330, pDmg: 16, max: 4, color: '#c8d07a' },
   molotov: { name: 'MOLOTOV', r: 2.8, life: 7, dps: 30, burn: { dps: 30, t: 3.5, spread: 1.2 }, max: 3, color: '#ff8a2a' },
   pipe: { name: 'PIPE BOMB', fuse: 4.2, lure: 24, r: 5.6, zDmg: 480, pDmg: 18, max: 2, color: '#ff4a3a' },
+  // the Thumper's 40 mm round (not a throwable: fired from the power weapon, through the same flight and blast code)
+  gl: { name: '40MM', fuse: 4, r: 3.4, zDmg: 270, pDmg: 10, impact: true },
 };
-export const NADE_IDS = Object.keys(NADES);
+export const NADE_IDS = ['frag', 'molotov', 'pipe'];
+let roundGeo = null, roundMat = null;
 const MODEL = { frag: 'frag', molotov: 'molotov', pipe: 'pipebomb' };
 const G = 15;                     // gravity: a little more than real, so a throw reads as a snap, not a lob
 const TAU = Math.PI * 2;
@@ -88,9 +91,30 @@ export class Throwables {
     return true;
   }
 
+  // the local survivor's Thumper: one round, flat and fast
+  fireRound(p, m, fx, fz) {
+    const g = this.g, sp = 26;
+    const e = { k: 'throw', pid: p.id, n: 'gl', id: p.id + ':' + (this.n++), x: +m.x.toFixed(2), y: +m.y.toFixed(2), z: +m.z.toFixed(2), vx: +(fx * sp).toFixed(3), vy: 2.2, vz: +(fz * sp).toFixed(3) };
+    this.launch(e);
+    g.netEvent(e);
+  }
+
   // every machine: something is in the air
   launch(e) {
     const g = this.g;
+    if (e.n === 'gl') {
+      roundGeo ??= new THREE.CylinderGeometry(0.035, 0.035, 0.11, 10).rotateZ(Math.PI / 2);
+      roundMat ??= new THREE.MeshStandardMaterial({ color: 0x8a7a2a, metalness: 0.7, roughness: 0.35 });
+      const m = new THREE.Mesh(roundGeo, roundMat);
+      m.scale.setScalar(1.6);
+      m.position.set(e.x, e.y, e.z);
+      m.rotation.y = Math.atan2(-e.vz, e.vx);
+      g.scene.add(m);
+      this.items.push({ ...e, mesh: m, t: 0, fuse: NADES.gl.fuse, rest: false, spin: 0, beep: 0 });
+      const p = g.players.get(e.pid);
+      if (p && !p.local) { if (p.cur.id !== 'launcher') p.setWeapon('launcher', true); g.fx.muzzle(e.x, e.y, e.z, e.vx / 26, e.vz / 26); audio.play('gl', { x: e.x, z: e.z, vol: 0.8 }); }
+      return;
+    }
     const mesh = gear(MODEL[e.n]);
     mesh.scale.setScalar(e.n === 'frag' ? 1.6 : 1.4);
     mesh.position.set(e.x, e.y, e.z);
@@ -150,6 +174,7 @@ export class Throwables {
           const hit = g.world.col.ray(it.x, it.z, it.vx / sp, it.vz / sp, sp * dt + 0.12);
           if (hit.d < sp * dt + 0.12) {
             if (it.n === 'molotov') { this.shatter(it); continue; }
+            if (it.n === 'gl') { this.detonate(it); continue; }
             const dot = it.vx * hit.nx + it.vz * hit.nz;
             it.vx = (it.vx - 2 * dot * hit.nx) * 0.45; it.vz = (it.vz - 2 * dot * hit.nz) * 0.45;
             audio.play('mag_drop', { x: it.x, z: it.z, vol: 0.6, rate: 0.8 });
@@ -161,11 +186,18 @@ export class Throwables {
         if (it.y <= gy) {
           it.y = gy;
           if (it.n === 'molotov') { this.shatter(it); continue; }
+          if (it.n === 'gl') { this.detonate(it); continue; }
           if (Math.abs(it.vy) > 2) audio.play('mag_drop', { x: it.x, z: it.z, vol: 0.55, rate: 0.75 });
           it.vy = Math.abs(it.vy) * 0.3; it.vx *= 0.55; it.vz *= 0.55; it.spin *= 0.5;
           if (it.vy < 0.7) { it.vy = 0; it.vx *= 0.8; it.vz *= 0.8; if (Math.hypot(it.vx, it.vz) < 0.15) it.rest = true; }
         }
         m.rotation.x += it.spin * dt; m.rotation.z += it.spin * 0.6 * dt;
+        // the 40 mm round bursts on the first body it reaches
+        if (it.n === 'gl') {
+          for (const z of g.zombies.values()) if (z.alive && (z.x - it.x) ** 2 + (z.z - it.z) ** 2 < (0.5 + (z.def.rad || 0.3)) ** 2 && it.y < 2.4 * z.char.root.scale.x) { this.detonate(it); break; }
+          if (it.done) continue;
+          if (Math.random() < dt * 40) g.fx.smoke.emit({ x: it.x, y: it.y, z: it.z, vx: 0, vy: 0.2, vz: 0, life: 0.5, s0: 0.08, s1: 0.3, r: 0.7, g: 0.7, b: 0.7, a0: 0.3, a1: 0 });
+        }
       }
       m.position.set(it.x, it.y, it.z);
       // the pipe bomb: beeping faster, a red blink, and (host) every awake body near it turns toward it

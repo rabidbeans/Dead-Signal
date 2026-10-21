@@ -156,6 +156,17 @@ def build():
     hsn = tcyl('ho_snap', 0.008, 0.012, (-0.04, 0, 0.035), M['chrome'], rot=(0, R90, 0))
     items.append(join([hb, ht, hl, hs, hg, hsn], 'holster'))
 
+    # ---- THE SOLDIER (one of the dead, level 5): a combat helmet - olive dome, a cut-away brim, the night-vision
+    # mount on the front, the chin strap hanging loose
+    olive = mat('gear_olive', (0.1, 0.12, 0.06), rough=0.7)
+    cd = shell('ch_dome', 0.142, 0.0, 0, 0.012, (0, 0, 0), olive)
+    crim = torus('ch_rim', 0.146, 0.009, (0, 0, 0.0), material=olive, scale=(1, 1.08, 0.9))
+    mount = box('ch_mount', (0.06, 0.02, 0.05), (0, -0.142, 0.07), M['dark'], bevel=0.005)
+    rails = [box(f'ch_rail{s_}', (0.02, 0.17, 0.016), (s_ * 0.132, 0, 0.06), M['dark'], bevel=0.004) for s_ in (-1, 1)]
+    straps = [box(f'ch_strap{s_}', (0.012, 0.02, 0.13), (s_ * 0.12, -0.02, -0.06), M['black'], bevel=0.003) for s_ in (-1, 1)]
+    band = torus('ch_band', 0.143, 0.005, (0, 0, 0.055), material=M['black'])
+    items.append(join([cd, crim, mount, band] + rails + straps, 'combat_helmet'))
+
     # ---- PATIENT ZERO: an IV pole on a five-wheel base, a bag of glowing green bile, the line hanging off it
     pole = tcyl('iv_pole', 0.012, 2.05, (0, 0, 1.05), M['chrome'], rot=(0, 0, 0))
     parts = [pole]
