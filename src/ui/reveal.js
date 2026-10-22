@@ -90,7 +90,7 @@ export class Reveal {
     gun.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.material = o.material.clone(); o.material.envMapIntensity = 1; } });
     if (st.gold) gun.traverse((o) => { if (o.isMesh && !(o.material.emissive?.getHex())) { o.material.color.setHex(0xd8a640); o.material.metalness = 1; o.material.roughness = 0.3; } });
     const g = this.gunRoot = new THREE.Group();
-    const len = { pistol: 0.3, smg: 0.6, shotgun: 1.05, rifle: 0.95, lmg: 1.15 }[id] || 0.8;
+    const len = { pistol: 0.3, smg: 0.6, shotgun: 1.05, rifle: 0.95, lmg: 1.15, riot12: 1.05 }[id] || 0.8;
     const k = Math.min(1.6, 1.0 / len);         // as big as fits in the crate
     gun.scale.setScalar(k);
     const bb = new THREE.Box3().setFromObject(gun);
@@ -192,7 +192,7 @@ export class Reveal {
       audio.play(W.shot, { vol: 0.9, jitter: 0.03 });
     };
     // a burst for the automatics, one for the rest
-    const n = W.id === 'smg' || W.id === 'rifle' || W.id === 'lmg' ? 4 : 1;
+    const n = W.id === 'smg' || W.id === 'rifle' || W.id === 'lmg' || W.id === 'riot12' ? 4 : 1;
     for (let i = 0; i < n; i++) setTimeout(go, i * W.autoInterval * 1000);
     if (W.pump) setTimeout(() => audio.play('pump', { vol: 0.8 }), 450);
   }

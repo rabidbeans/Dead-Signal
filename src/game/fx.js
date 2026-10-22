@@ -278,6 +278,7 @@ export class FX {
     // its own would be paid for on every lit pixel of every frame, shots or not)
     this.flash = { x: 0, y: 0, z: 0, t: 1 };
     this.time = 0;
+    this.poolPts = [];
   }
 
   makeDecals(file, max, o = {}) {
@@ -354,7 +355,12 @@ export class FX {
     d.add(x, z, size);
   }
 
-  pool(x, z) { this.pools.add(x, z, 1.6 + Math.random() * 0.8, Math.random() * 6.28, 3.0); }
+  pool(x, z) {
+    this.pools.add(x, z, 1.6 + Math.random() * 0.8, Math.random() * 6.28, 3.0);
+    // (where the pools are: walking through one leaves bloody boot prints, juice.js)
+    this.poolPts.push({ x, z });
+    if (this.poolPts.length > 40) this.poolPts.shift();
+  }
 
   hard(x, y, z, nx, nz, dirx, dirz) {
     // sparks off the surface (reflected around the normal) + dust + a hole

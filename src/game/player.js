@@ -22,7 +22,7 @@ const GUN_TURN = new THREE.Quaternion();     // the gun's own frame already has 
 const rgb = (hex) => [((hex >> 16) & 255) / 255, ((hex >> 8) & 255) / 255, (hex & 255) / 255];
 const GOLD = new THREE.Color(0xd8a640);
 // where a red-dot sits on each gun (x along the gun, found on the model's top at that point)
-const SIGHT_X = { pistol: -0.01, smg: 0.02, shotgun: 0.05, rifle: 0.02, lmg: 0.06 };
+const SIGHT_X = { pistol: -0.01, smg: 0.02, shotgun: 0.05, rifle: 0.02, lmg: 0.06, riot12: 0.28 };
 const sm01 = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
 const _tip = new THREE.Vector3(), _loc = new THREE.Vector3(), _mz = new THREE.Vector3();
 
@@ -154,7 +154,7 @@ export class Player {
     k.glow = bits & 2 ? PROTO[k.id].color : null;
     // attachments
     const mag = k.mag;
-    if (mag) mag.scale.y = bits & 4 ? 1.3 : 1;
+    if (mag) mag.scale.y = bits & 4 && k.id !== 'riot12' ? 1.3 : 1;      // (a drum stays round)
     if (bits & 8) {
       const rd = gear('reddot', { shadow: false });
       rd.position.set(SIGHT_X[k.id] ?? 0, topAt(gun, SIGHT_X[k.id] ?? 0, k.id), 0);
@@ -435,8 +435,9 @@ export class Player {
       audio.play('flesh', { x: h.hx, z: h.hz, vol: 0.7 });
       hit.hitFx(h.dx, h.dz, crit);
       buzz([6]);
-      const opt = W.burn ? { burn: W.burn } : null;
+      let opt = W.burn ? { burn: W.burn } : null;
       if (W.burn) hit.burnT = Math.max(hit.burnT || 0, W.burn.t);       // (shown at once; the host keeps the real fire)
+      if (W.freeze) { (opt ||= {}).fr = W.freeze.t; hit.frostT = Math.max(hit.frostT || 0, W.freeze.t); }
       g.localHit(this, hit, h.dmg * (crit ? W.crit : 1), h.dx, h.dz, crit, W.knock || 1, opt);
       if (h.first) this.protoHit(hit, h, struck, extra, col);
     }
@@ -643,6 +644,7 @@ export class Player {
   }
 
   goDown() {
+    if (this.local && !this.down) this.game.stats.downs = (this.game.stats.downs || 0) + 1;
     this.down = true;
     this.downT = 0;
     this.reloadT = 0;

@@ -8,6 +8,7 @@
 // Guns are not bought: beating level N hands you the gun that opens there (WEAPONS[id].unlock).
 import { WEAPONS, WEAPON_IDS, WEAPON_UPGRADES, PERKS, OLD_SCAVENGER, upgradeCost, weaponStats, maxedOut, PROTO, BASE_HP, BASE_SPEED } from './weapons.js';
 import { SPECS, SPEC_IDS, nodeCost, XP_PER_POINT } from './skills.js';
+import { challengesFor } from './challenges.js';
 
 const KEY = 'dead-signal-save-v1';
 const MIG = 2;                                  // save format: 2 = guns free, perks on skill points, mastery, specialties
@@ -24,6 +25,7 @@ const blank = () => ({
   spec: null,                                   // the chosen specialty
   skills: Object.fromEntries(SPEC_IDS.map((id) => [id, {}])),
   best: {},
+  chal: {},                                     // challenges done: { level: [bool, bool, bool] }
   runs: 0,
 });
 
@@ -153,6 +155,21 @@ class Save {
   }
 
   equip(id) { if (this.owns(id)) { this.data.equipped = id; this.write(); } }
+
+  // ---- challenges: which are done on a level, and ticking off the ones a winning run did (a skill point each, once)
+  challenges(level) { return challengesFor(level).map((c, i) => !!this.data.chal?.[level]?.[i]); }
+  completeChallenges(level, rec) {
+    const D = this.data;
+    D.chal ||= {};
+    const done = (D.chal[level] ||= []);
+    const out = challengesFor(level).map((c, i) => {
+      const had = !!done[i], now = had || !!c.check(rec);
+      if (now && !had) { done[i] = true; D.sp++; }
+      return { name: c.name, text: c.text, done: now, fresh: now && !had };
+    });
+    this.write();
+    return out;
+  }
 
   // a gun's stats as this survivor has it: upgrades, mastery attachments, the prototype refit
   gunStats(id) { const w = this.data.weapons[id]; return weaponStats(id, w.lv, { kills: w.kills, proto: w.proto }); }

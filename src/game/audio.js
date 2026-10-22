@@ -11,6 +11,8 @@ const LIST = [
   'rain', 'wind', 'siren', 'sting', 'heart', 'click',
   'boom0', 'boom1', 'incoming', 'power', 'zap', 'engine', 'squelch0', 'squelch1', 'burst',
   'sup0', 'sup1', 'sup2', 'throw', 'glass', 'ignite', 'beep', 'crate', 'xbow', 'flame', 'gl',
+  'hitmark', 'killmark', 'headpop', 'streak', 'flare', 'chute', 'coins', 'mutant',
+  'riot0', 'riot1', 'riot2', 'riot3',
 ];
 
 class Audio {

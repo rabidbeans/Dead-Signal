@@ -32,6 +32,7 @@ export class HUD {
           <div class="team"></div>
           <div class="objective"><i></i><span></span></div>
           <div class="holdbar"><u></u></div>
+          <div class="streak"><b></b><span>STREAK</span><em></em><u><i></i></u></div>
         </div>
         <div class="wave"><span class="wave-label"></span><span class="wave-left"></span></div>
         <button class="pause" aria-label="Pause"><span></span><span></span></button>
@@ -51,6 +52,9 @@ export class HUD {
       <div class="reload-ring"><svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="17"/></svg></div>
       <div class="assist"></div>
       <div class="vignette"></div>
+      <div class="bloodfx"></div>
+      <div class="hitmarks">${'<i></i>'.repeat(10)}</div>
+      <div class="announce"><b></b><span></span></div>
       <div class="banner"><div class="banner-title"></div><div class="banner-sub"></div><div class="banner-note"></div></div>
       <div class="down-msg"><b>YOU'RE DOWN</b><span class="down-sub">Keep shooting. A teammate standing next to you picks you up.</span><div class="bleed"><i></i></div></div>
       <div class="markers">${'<div class="mk"><i></i><b></b></div>'.repeat(6)}</div>
@@ -82,7 +86,13 @@ export class HUD {
       skillBtn: $('.skill-btn', root), skIcon: $('.sk-icon', root), skN: $('.sk-n', root), skCd: $('.sk-cd', root), skName: $('.sk-name', root),
       throwBtn: $('.throw-btn', root), thIcon: $('.th-icon', root), thN: $('.th-n', root), thName: $('.th-name', root), thCycle: $('.th-cycle', root),
       marks: [...root.querySelectorAll('.mk')],
+      blood: $('.bloodfx', root), hm: [...root.querySelectorAll('.hitmarks i')],
+      streak: $('.streak', root), stN: $('.streak b', root), stMul: $('.streak em', root), stBar: $('.streak u i', root),
+      ann: $('.announce', root), annT: $('.announce b', root), annS: $('.announce span', root),
     };
+    this.bloodK = 0;
+    this.hmI = 0;
+    this.el.blood.style.backgroundImage = `url(${import.meta.env.BASE_URL}assets/tex/screenblood.webp)`;
     this.vig = 0;
     this.bannerT = 0;
     this.reloadT = 0;
@@ -173,7 +183,51 @@ export class HUD {
 
   damage(dmg, hp, max = 100) {
     this.vig = Math.min(1, this.vig + dmg / 25);
+    // a big hit throws blood across the screen (mirrored at random so it never looks the same twice)
+    if (dmg >= 6) {
+      if (this.bloodK < 0.25) this.el.blood.style.transform = `scale(${Math.random() < 0.5 ? -1 : 1}, ${Math.random() < 0.3 ? -1 : 1})`;
+      this.bloodK = Math.min(1, this.bloodK + dmg / 22);
+    }
     this.health(hp, max);
+  }
+
+  // a hit marker at a body on the screen: 'hit', 'crit' or 'kill'
+  mark(x, y, z, kind, cam) {
+    this._v.set(x, y, z).project(cam);
+    if (this._v.z > 1) return;
+    const el = this.el.hm[this.hmI = (this.hmI + 1) % this.el.hm.length];
+    el.className = '';
+    el.style.left = ((this._v.x * 0.5 + 0.5) * innerWidth).toFixed(0) + 'px';
+    el.style.top = ((-this._v.y * 0.5 + 0.5) * innerHeight).toFixed(0) + 'px';
+    cancelAnimationFrame(el._a);
+    el._a = requestAnimationFrame(() => { el.className = kind; });
+  }
+
+  // the kill streak: the count, how long until it runs out, and what it is doing to the bounty
+  streak(n, frac, mul) {
+    const on = n >= 3;
+    if (on !== this._stOn) { this._stOn = on; this.el.streak.classList.toggle('on', on); }
+    if (!on) return;
+    if (n !== this._stN) {
+      this._stN = n;
+      this.el.stN.textContent = '×' + n;
+      this.el.stMul.textContent = '$ ×' + mul.toFixed(2);
+      const s = this.el.streak;
+      s.classList.remove('pop');
+      cancelAnimationFrame(this._stA);
+      this._stA = requestAnimationFrame(() => s.classList.add('pop'));
+    }
+    this.el.stBar.style.transform = `scaleX(${frac.toFixed(3)})`;
+  }
+
+  // a big word slammed onto the screen (kill streaks)
+  announce(title, sub = '') {
+    this.el.annT.textContent = title;
+    this.el.annS.textContent = sub;
+    const a = this.el.ann;
+    a.classList.remove('on');
+    void a.offsetWidth;
+    a.classList.add('on');
   }
 
   killConfirm() {
@@ -266,10 +320,12 @@ export class HUD {
         <div><b>${s.acc}%</b><span>ACCURACY</span></div>
         <div><b>${mm}:${ss}</b><span>TIME</span></div>
         <div class="cashbox"><b>$${s.cash}</b><span>LOOTED</span></div>
+        ${s.best >= 5 ? `<div><b>×${s.best}</b><span>BEST STREAK</span></div>` : ''}
       </div>
       <p class="next">${note}</p>
       ${s.newGun ? `<div class="end-new">NEW WEAPON UNLOCKED · <b>${WEAPONS[s.newGun].name.toUpperCase()}</b> <small>waiting in the safehouse</small></div>` : ''}
       ${(s.mastered || []).map((m) => `<div class="end-new mast">MASTERY · <b>${WEAPONS[m.id].name.toUpperCase()}</b> earned the ${MASTERY.find((q) => q.key === m.att)?.name.toLowerCase()}</div>`).join('')}
+      ${s.challenges ? `<div class="end-chal">${s.challenges.map((c) => `<div class="${c.done ? 'done' : ''} ${c.fresh ? 'fresh' : ''}"><i>${c.done ? '✓' : ''}</i><b>${c.name}</b><span>${c.text}</span>${c.fresh ? '<em>+1 SKILL POINT</em>' : ''}</div>`).join('')}</div>` : ''}
       ${s.xp ? `<div class="end-xp">+${s.xp} XP${s.points ? ` · <b>+${s.points} SKILL POINT${s.points > 1 ? 'S' : ''}</b>` : ''}</div>` : ''}
       <div class="wallet">WALLET <b>$${s.wallet}</b></div>
       <div class="end-buttons">
@@ -314,6 +370,8 @@ export class HUD {
     this.el.pauseMenu.classList.add('hidden');
     this.vig = 0;
     this.el.vig.style.opacity = 0;
+    this.bloodK = 0; this._bo = -1;
+    this.el.ann.classList.remove('on');
   }
 
   // per frame: things that follow the world
@@ -347,6 +405,9 @@ export class HUD {
     const low = me.alive ? Math.max(0, (0.35 - me.hp / me.maxHp) / 0.35) * (0.55 + 0.25 * Math.sin(performance.now() / 180)) : 0.7;
     const vo = Math.round(Math.min(1, this.vig + low * 0.6) * 100) / 100;
     if (vo !== this._vo) { this._vo = vo; this.el.vig.style.opacity = vo; }
+    this.bloodK = Math.max(0, this.bloodK - dt * 0.45);
+    const bo = Math.round(Math.min(0.85, Math.max(this.bloodK, low * 0.4)) * 100) / 100;
+    if (bo !== this._bo) { this._bo = bo; this.el.blood.style.opacity = bo; }
     // reload ring around the player
     if (me.reloadT > 0) {
       const p = proj(me.x, 0.1, me.z);

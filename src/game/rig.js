@@ -698,6 +698,13 @@ export const WEAPON_RIG = {
     well: [0.145, -0.012],
     rack: [0.218, 0.04], rackY: 0.028, rackBack: 0.12,
   },
+  riot12: {
+    gripR: [-0.075, -0.01, 0.022], gripL: [0.4, -0.055, -0.036],
+    handL: { down: 0.9, yaw: 0.1 },
+    stance: { aimed: { p: [-0.1, -0.09, 0.23], pitch: 0, roll: 0 }, ready: { p: [-0.1, -0.27, 0.2], pitch: -0.48, roll: 0 } },
+    well: [0.12, -0.012],
+    rack: [0.22, 0.045], rackY: 0.055, rackBack: 0.13,
+  },
 };
 // the power weapons: shouldered like the rifle
 Object.assign(WEAPON_RIG, {

@@ -25,10 +25,14 @@ import { tickZones, takeKey, dressKeys, indoors, KEY_COLORS } from './zones.js';
 
 // a client's own events that go up to the host (and on to everyone else)
 const UP_EVENTS = new Set(['shot', 'reload', 'skill', 'throw', 'case']);
+const ELITE_TIP = 'MUTANT: glowing hot, three times as tough and quicker. It always drops loot.';
 // picking a downed teammate back up: stand this close for this long
 const REVIVE_R = 2.4, REVIVE_T = 2.5;
 import { L, LV, HOLDS, AMBUSH, MAZE, HOLD_TRIGGER, HOLD_RADIUS, MEDKITS, SUPPLIES, CASES, ZONE_HW, setLevel, zoneAt } from './level.js';
 import { Cases } from './cases.js';
+import { Juice } from './juice.js';
+import { Pickups } from './pickups.js';
+import { SupplyDrop } from './supplydrop.js';
 import { Throwables } from './throwables.js';
 import { mulberry } from './rng.js';
 import { Q } from './quality.js';
@@ -50,6 +54,9 @@ class CameraRig {
     // (Sam, 2026-10-17: 10% further out than the old 13.4 / 8.5)
     this.height = 14.74 * zoom;
     this.back = 9.35 * zoom;
+    // dynamic zoom: out a little when swarmed or in a boss fight, in close for a boss's death (Game sets zoomT / pin)
+    this.zoom = 1; this.zoomT = 1;
+    this.pin = null;            // { x, z }: hold the focus on a point (a boss falling) instead of the player
   }
   kick(x, z) { this.kickV.x += x * 22; this.kickV.z += z * 22; }
   trauma(a) { this.tr = Math.min(1, this.tr + a); }
@@ -59,9 +66,11 @@ class CameraRig {
     const lx = aiming ? aimx * 2.4 : 0, lz = aiming ? aimz * 1.8 : 0;
     this.lead.x += (lx - this.lead.x) * Math.min(1, dt * 2.5);
     this.lead.z += (lz - this.lead.z) * Math.min(1, dt * 2.5);
-    const k = Math.min(1, dt * 6);
-    this.focus.x += (target.x + this.lead.x - this.focus.x) * k;
-    this.focus.z += (target.z + this.lead.z - this.focus.z) * k;
+    const k = Math.min(1, dt * (this.pin ? 3 : 6));
+    const tx = this.pin ? this.pin.x : target.x + this.lead.x, tz = this.pin ? this.pin.z : target.z + this.lead.z;
+    this.focus.x += (tx - this.focus.x) * k;
+    this.focus.z += (tz - this.focus.z) * k;
+    this.zoom += (this.zoomT - this.zoom) * Math.min(1, dt * (this.zoomT < this.zoom ? 3.5 : 1.2));
     // kick: a critically damped spring back to rest in ~100 ms, solved
     // exactly (explicit Euler at w*dt > 1 blows up and flings the camera away)
     const w = 38, e = Math.exp(-w * dt);
@@ -75,7 +84,7 @@ class CameraRig {
     const s = this.tr * this.tr;
     const n = (o) => perlin1(this.t * 22 + o);
     const c = this.cam;
-    c.position.set(this.focus.x + this.kickX.x + n(10) * s * 0.3, this.height + n(20) * s * 0.15, this.focus.z + this.back + this.kickX.z + n(30) * s * 0.3);
+    c.position.set(this.focus.x + this.kickX.x + n(10) * s * 0.3, this.height * this.zoom + n(20) * s * 0.15, this.focus.z + this.back * this.zoom + this.kickX.z + n(30) * s * 0.3);
     c.lookAt(this.focus.x + this.kickX.x * 0.5, 0, this.focus.z + this.kickX.z * 0.5);
     c.rotateZ(n(40) * s * 0.026);
     c.rotateX(n(50) * s * 0.012);
@@ -125,7 +134,7 @@ export class Game {
     this.gateFx = [];
     this.padT = 0;
     this.noise = null;
-    this.stats = { kills: 0, shots: 0, hits: 0, crits: 0, byGun: {} };
+    this.stats = { kills: 0, shots: 0, hits: 0, crits: 0, byGun: {}, downs: 0, pops: 0, mutants: 0, caseOpened: false, dropOpened: false, bossGun: null };
     this.xp = 0;               // experience this run (skill points are banked from it)
     this.snapT = 0;
     this.inT = 0;
@@ -182,6 +191,10 @@ export class Game {
       this.specials = new SpecialFX(this);
       this.cases = new Cases(this, CASES.filter(([x, z]) => this.opened === 0 || z < L.gate[this.opened - 1] + 4));
       this.introduced = new Set();
+      this.juice = new Juice(this);
+      this.pickups = new Pickups(this);
+      this.drop = new SupplyDrop(this);
+      if (cp > 0) this.drop.done = true;
       this.nades = new Throwables(this);
       this.nades.laySupplies(SUPPLIES.filter(([x, z]) => z > L.lz.z && (this.opened === 0 || z < L.gate[this.opened - 1] + 4)));
       if (cp > 0) this.objective.skip();
@@ -465,6 +478,7 @@ export class Game {
         const k = this.opened;
         if (k < HOLDS.length && lead.z < this.holdTrigger(k)) { this.phase = 'hold'; this.startHold(k); }
         this.streamRoute(lead, hunting, dt);
+        this.drop?.director(lead);
       } else {
         // ---- holding a junction
         const H = HOLDS[this.hold];
@@ -580,10 +594,12 @@ export class Game {
     this.introT = 0.5;
     const me = this.me;
     for (const z of this.zombies.values()) {
-      if (!z.alive || !z.def.tip || this.introduced.has(z.type)) continue;
+      const key = z.elite ? 'elite' : z.type, tip = z.elite ? ELITE_TIP : z.def.tip;
+      if (!z.alive || !tip || this.introduced.has(key)) continue;
       if ((z.x - me.x) ** 2 + (z.z - me.z) ** 2 > 18 * 18) continue;
-      this.introduced.add(z.type);
-      this.hud.toast(z.def.tip);
+      this.introduced.add(key);
+      this.hud.toast(tip);
+      if (z.elite) audio.play('mutant', { x: z.x, z: z.z, vol: 0.9 });
       audio.play('sting', { vol: 0.4, jitter: 0 });
       break;
     }
@@ -657,8 +673,10 @@ export class Game {
     const id = this.nextZid++;
     const seed = o.seed ?? ((Math.random() * 1e6) | 0);
     const x = c.x + (o.x !== undefined ? 0 : (Math.random() - 0.5) * 1.2), z = c.z + (o.x !== undefined ? 0 : (Math.random() - 0.5) * 1.2);
-    const zb = this.addZombie(id, { type, seed, x, z, idle: !!o.idle, home: !!o.home });
-    this.netEvent({ k: 'zspawn', id, type, seed, x: +x.toFixed(2), z: +z.toFixed(2), model: zb.model });
+    // now and then one of the ordinary dead is a MUTANT (never in the attract loop, never the specials, brutes or bosses)
+    const elite = o.elite ?? (!this.opts.attract && !TYPES[type].special && !TYPES[type].boss && type !== 'brute' && this.time > 15 && Math.random() < 0.012 + 0.003 * this.level);
+    const zb = this.addZombie(id, { type, seed, x, z, idle: !!o.idle, home: !!o.home, elite });
+    this.netEvent({ k: 'zspawn', id, type, seed, x: +x.toFixed(2), z: +z.toFixed(2), model: zb.model, el: elite ? 1 : 0 });
     return zb;
   }
 
@@ -713,12 +731,13 @@ export class Game {
   localHit(pl, z, dmg, dx, dz, crit, kmul = 1, opt = null) {
     this.stats.hits++;
     if (crit) this.stats.crits++;
+    if (pl.local && dmg >= 1) this.juice?.hit(z, crit);
     if (this.isHost) {
       const killed = z.damage(dmg, dx, dz, crit, pl.id, kmul);
       if (killed) this.onKill(z, dx, dz, crit, pl.id === this.me.id, pl.id);
       else { this.netEvent({ k: 'zhit', id: z.id, dx, dz, crit: crit ? 1 : 0 }); this.status(z, opt, pl.id); }
     } else {
-      this.net.toHost({ t: 'hit', id: z.id, dmg, dx, dz, crit: crit ? 1 : 0, k: kmul, st: opt?.st, bn: opt?.burn });
+      this.net.toHost({ t: 'hit', id: z.id, dmg, dx, dz, crit: crit ? 1 : 0, k: kmul, st: opt?.st, bn: opt?.burn, fr: opt?.fr });
     }
   }
 
@@ -727,6 +746,7 @@ export class Game {
     if (!opt || !z.alive) return;
     if (opt.st && !z.boss) { z.staggerFor = opt.st; z.setState('stagger'); z.shockT = opt.st; this.netEvent({ k: 'zfx', id: z.id, f: 's', t: opt.st }); }
     if (opt.burn) z.ignite(opt.burn, by);
+    if (opt.fr) { z.frostT = Math.max(z.frostT || 0, opt.fr); this.netEvent({ k: 'zfx', id: z.id, f: 'f', t: opt.fr }); }
   }
 
   // a local player's bullet hit a nest or a gas tank
@@ -742,14 +762,26 @@ export class Game {
       const gid = this.me.cur.id;
       this.stats.byGun[gid] = (this.stats.byGun[gid] || 0) + 1;
       this.xp += z.boss ? 40 : z.type === 'brute' ? 4 : TYPES[z.type]?.xp || 1;
-      this.earn(Math.round((BOUNTY[z.type] || 10) * (this.me.cashMul || 1)), null, z);
+      this.juice?.kill(z, crit);
+      if (crit && !z.boss && !z.def.pop) this.stats.pops++;
+      if (z.elite) this.stats.mutants++;
+      if (z.boss) this.stats.bossGun = gid;
+      this.juice?.killMark(z, crit);
+      this.earn(Math.round((BOUNTY[z.type] || 10) * (z.elite ? 4 : 1) * (this.me.cashMul || 1) * (this.juice?.mult() || 1)), null, z);
+      if (z.elite) this.xp += 3;
       this.hitstop = crit ? 0.07 : 0.045;       // a beat of weight on kills only
       buzz([0, 25]);
       this.hud.killConfirm();
     }
     this.after(0.45, () => this.fx.pool(z.x + dx * 0.6, z.z + dz * 0.6));
+    this.pickups?.roll(z);
     if (this.isHost) this.netEvent({ k: 'zdie', id: z.id, dx, dz, crit: crit ? 1 : 0, by: byId });
-    if (z.boss) { this.hud.banner('BOSS DOWN', TYPES[z.type].name, 3); this.cam.trauma(0.6); this.hitstop = 0.18; audio.play('sting', { vol: 0.8, jitter: 0 }); }
+    if (z.boss) {
+      this.hud.banner('BOSS DOWN', TYPES[z.type].name, 3); this.cam.trauma(0.6); this.hitstop = 0.18; audio.play('sting', { vol: 0.8, jitter: 0 });
+      // the moment it falls: the world slows to a crawl and the camera leans in on the body
+      if (!this.side?.active) { this.slowmo(2.2, 0.22); this.cam.pin = { x: z.x, z: z.z }; this.cam.zoomT = 0.62; this.after(0.7, () => { this.cam.pin = null; }); }
+      else this.slowmo(1.6, 0.3);
+    }
     if (this.hold >= 0) this.refreshHud();
   }
 
@@ -793,7 +825,7 @@ export class Game {
       z.hitFx(m.dx, m.dz, !!m.crit);
       this.fx.flesh(z.x, 1.25, z.z, m.dx, m.dz, 1, !!m.crit);
       if (killed) this.onKill(z, m.dx, m.dz, !!m.crit, false, from);
-      else { this.net.broadcast({ t: 'ev', e: { k: 'zhit', id: z.id, dx: m.dx, dz: m.dz, crit: m.crit } }, true, from); this.status(z, m.st || m.bn ? { st: m.st, burn: m.bn } : null, from); }
+      else { this.net.broadcast({ t: 'ev', e: { k: 'zhit', id: z.id, dx: m.dx, dz: m.dz, crit: m.crit } }, true, from); this.status(z, m.st || m.bn || m.fr ? { st: m.st, burn: m.bn, fr: m.fr } : null, from); }
     } else if (m.t === 'hurt') {
       this.me.hurt(m.dmg, m.fx, m.fz, m.kb ?? 0.35);
     } else if (m.t === 'revive') {
@@ -813,6 +845,9 @@ export class Game {
     } else if (m.t === 'supply_take') {
       this.nades?.takeSupply(m.id);
       if (this.isHost) this.net.broadcast({ t: 'supply_take', id: m.id }, true, from);
+    } else if (m.t === 'drop_take') {
+      this.pickups?.take(m.id);
+      if (this.isHost) this.net.broadcast({ t: 'drop_take', id: m.id }, true, from);
     } else if (m.t === 'medkit_take') {
       this.takeMedkit(m.id);
       if (this.isHost) this.net.broadcast({ t: 'medkit_take', id: m.id }, true, from);
@@ -852,10 +887,12 @@ export class Game {
     else if (e.k === 'throw') { if (e.pid !== this.me.id) this.nades?.launch(e); }
     else if (e.k === 'zev') { if (!this.isHost) this.specials?.event(e); }
     else if (e.k === 'case') { if (e.pid !== this.me.id) this.cases?.open(e); }
+    else if (e.k === 'drop') { if (!this.isHost) this.pickups?.add(e); }
+    else if (e.k === 'sdrop') { if (!this.isHost) this.drop?.start(e); }
     else if (e.k === 'tgt') { if (!this.isHost) this.skills?.onTarget(e); }
     else if (e.k === 'zfx') {
       const z = this.zombies.get(e.id);
-      if (z && !this.isHost) { if (e.f === 'b') z.burnT = e.t; else if (e.f === 's') z.shockT = e.t; }
+      if (z && !this.isHost) { if (e.f === 'b') z.burnT = e.t; else if (e.f === 's') z.shockT = e.t; else if (e.f === 'f') z.frostT = e.t; }
     }
   }
 
@@ -994,7 +1031,7 @@ export class Game {
 
   // the HUD's screen-edge markers: the objective's, and every downed teammate
   markers() {
-    const out = [...(this.objective?.markers() || []), ...(this.cases?.markers() || [])];
+    const out = [...(this.objective?.markers() || []), ...(this.cases?.markers() || []), ...(this.drop?.markers() || [])];
     const me = this.me;
     for (const k of this.world.keyItems) {
       if (k.taken) continue;
@@ -1018,6 +1055,9 @@ export class Game {
     this.hud.end(win, { ...this.stats, acc, time: this.time, checkpoint: this.opened, gates: L.gate.length, level: this.level, name: LV.kicker, cash: this.cash, wallet: save.cash, last: this.level >= 5, host: this.role !== 'client', coop: this.role !== 'solo', ...bank }, why);
   }
 
+  // slow motion: `secs` of real time at `k` speed, easing back to normal over the last 0.5 s
+  slowmo(secs, k) { this.slowT = secs; this.slowK = k; }
+
   // money found this run: kills pay a bounty, each gate a bonus, getting out a big one
   earn(n, label = null, at = null) {
     if (n <= 0) return;
@@ -1033,13 +1073,16 @@ export class Game {
     save.data.runs++;
     const owned = new Set(Object.keys(save.data.weapons).filter((id) => save.owns(id)));
     if (win) { this.xp += 20 + 10 * this.level; save.unlock(this.level + 1); const b = save.data.best[this.level]; if (!b || this.time < b) save.data.best[this.level] = Math.round(this.time); }
+    // the level's challenges (a winning run ticks off what it did)
+    const acc = this.stats.shots ? Math.round(100 * this.stats.hits / this.stats.shots) : 0;
+    const challenges = win ? save.completeChallenges(this.level, { ...this.stats, time: this.time, best: this.juice?.best || 0, acc }) : null;
     const masteredBefore = Object.fromEntries(Object.keys(this.stats.byGun).map((id) => [id, save.gunStats(id).att.length]));
     save.addKills(this.stats.byGun);
     const points = save.addXp(this.xp);
     save.write();
     const newGun = Object.keys(save.data.weapons).find((id) => save.owns(id) && !owned.has(id)) || null;
     const mastered = Object.keys(masteredBefore).filter((id) => save.gunStats(id).att.length > masteredBefore[id]).map((id) => ({ id, att: save.gunStats(id).att.at(-1) }));
-    return { xp: this.xp, points, newGun, mastered };
+    return { xp: this.xp, points, newGun, mastered, challenges, best: this.juice?.best || 0 };
   }
 
   // a body that has been lying here for days: a zombie put straight into its
@@ -1073,6 +1116,7 @@ export class Game {
     // hit-stop: the world freezes for a beat, audio and UI keep going
     let dt = dtReal;
     if (this.hitstop > 0) { this.hitstop -= dtReal; dt = dtReal * 0.05; }
+    if (this.slowT > 0) { this.slowT -= dtReal; dt *= this.slowK + (1 - this.slowK) * Math.max(0, 1 - this.slowT / 0.5); }
     this.dt = dt;
     this.time += dt;
     if (this.timers.length) for (let i = this.timers.length - 1; i >= 0; i--) if (this.timers[i].at <= this.time) { const f = this.timers[i].fn; this.timers.splice(i, 1); f(); }
@@ -1088,7 +1132,19 @@ export class Game {
     this.skills?.update(dt);
     this.nades?.update(dt);
     this.specials?.update(dt);
+    this.juice?.update(dtReal);
+    this.pickups?.update(dt);
+    this.drop?.update(dt);
     if (!this.side?.active) this.cases?.update(dt);
+    // the camera pulls back a little when the dead crowd in, or a boss is close (and leans in on a boss's death)
+    if (!this.cam.pin && !this.opts.attract) {
+      let near = 0;
+      for (const z of this.zombies.values()) if (z.alive && !z.idle && (z.x - me.x) ** 2 + (z.z - me.z) ** 2 < 81) near++;
+      const bz = this.bossZ?.();
+      let zt = 1 + Math.max(0, Math.min(1, (near - 5) / 12)) * 0.12;
+      if (bz && Math.hypot(bz.x - me.x, bz.z - me.z) < 26) zt = Math.max(zt, 1.14);
+      this.cam.zoomT = zt;
+    }
     this.introduce(dt);
     // medkits
     for (const m of this.side?.active ? [] : [...this.medkits]) {
@@ -1317,6 +1373,8 @@ export class Game {
     this.nades?.dispose();
     this.specials?.dispose();
     this.cases?.dispose();
+    this.drop?.dispose();
+    this.pickups?.dispose();
     this.objective?.dispose();
     this.speech?.dispose();
     this.side?.dispose();

@@ -58,7 +58,7 @@ const ATTACK_RANGE = 1.15;
 const WINDUP = 0.5;
 
 export class Zombie {
-  constructor(game, id, { type = 'shambler', model = null, seed = 1, x = 0, z = 0, idle = false, home = false } = {}) {
+  constructor(game, id, { type = 'shambler', model = null, seed = 1, x = 0, z = 0, idle = false, home = false, elite = false, el = 0 } = {}) {
     this.game = game;
     this.id = id;
     this.type = type;
@@ -67,7 +67,10 @@ export class Zombie {
     this.r = r;
     this.model = model || (this.def.models || ZOMBIES)[Math.floor(r() * (this.def.models || ZOMBIES).length)];
     this.char = makeCharacter(this.model);
-    const scale = (0.92 + r() * 0.16) * (this.def.scale || 1);
+    // a MUTANT (2026-10-22): one of the ordinary dead, swollen and burning inside: three times the health, faster,
+    // harder hitting, and it always drops loot (pickups.js)
+    this.elite = !!(elite || el) && !this.def.boss;
+    const scale = (0.92 + r() * 0.16) * (this.def.scale || 1) * (this.elite ? 1.13 : 1);
     this.char.root.scale.setScalar(scale);
     this.baseScale = scale;
     this.rig = new Rig(this.char);
@@ -87,6 +90,16 @@ export class Zombie {
     // later levels: the ordinary dead are tougher and faster (LV.zHp / zSpd)
     this.maxHp = this.hp = this.def.hp * (this.def.boss ? 1 + 0.6 * (game.players.size - 1) : (LV.zHp || 1));
     this.speed = (this.def.speed[0] + r() * (this.def.speed[1] - this.def.speed[0])) * SPEED_K * (this.def.boss ? 1 : (LV.zSpd || 1));
+    this.dmgK = 1;
+    if (this.elite) {
+      this.maxHp = this.hp = this.maxHp * 3;
+      this.speed *= 1.22;
+      this.dmgK = 1.5;
+      const U = this.char.material.userData.uniforms;
+      U.uRimColor.value.set(0xff6a1a);
+      U.uRim.value = 1.2;
+      U.uTint.value.multiply(new THREE.Color(1.05, 0.82, 0.78));
+    }
     this.state = 'walk';      // walk | windup | recover | stagger | dead
     this.stateT = 0;
     this.burstT = 2 + r() * 4;
@@ -220,6 +233,8 @@ export class Zombie {
     if (this.bursting > 0) { this.bursting -= dt; want = this.def.burst * SPEED_K; }
     // states
     if (this.state === 'stagger') { want *= 0.15; if (this.stateT > this.staggerFor) this.setState('walk'); }
+    // frozen (the WHITEOUT's cryo shells): a crawl, and a slow wind-up
+    if (this.frostT > 0) want *= this.boss ? 0.75 : 0.4;
     const reach = this.def.reach || ATTACK_RANGE, windup = (this.def.windup || WINDUP) * (this.overtime ? 0.68 : 1);
     if (this.state === 'walk' && best && !best.isLure && dist < reach) {
       this.setState('windup');
@@ -230,7 +245,7 @@ export class Zombie {
       if (this.stateT > windup) {
         // (in the 2D fight the dead cannot climb: a survivor up on a platform is out of reach)
         if (best && dist < reach + 0.35 && (best.y2 || 0) < (this.boss ? 2.7 : 1.3)) {
-          this.game.hurtPlayer(best, this.def.dmg * (this.enraged ? 1.25 : 1), this, this.type === 'butcher' ? 1.6 : undefined);
+          this.game.hurtPlayer(best, this.def.dmg * this.dmgK * (this.enraged ? 1.25 : 1), this, this.type === 'butcher' ? 1.6 : undefined);
           this.game.speech?.hostLine(this, 'bite', this.boss ? 0.45 : 0.1);
         }
         this.setState('recover');
@@ -481,6 +496,46 @@ export class Zombie {
     this.fallDir = { x: dirx, z: dirz };
     this.fall = 0;
     audio.play('death', { x: this.x, z: this.z, vol: 0.9 });
+    // a critical kill takes the head clean off (every machine: the kill event carries the crit)
+    if (crit && !this.boss && !this.def.pop) this.popHead(dirx, dirz);
+    // frozen solid when it died: it shatters
+    if (this.frostT > 0 && !this.boss) this.shatter();
+  }
+
+  // ice: a burst of pale shards and a crunch, and the body is left frosted
+  shatter() {
+    const g = this.game, gy = g.world.groundY(this.x, this.z), s = this.char.root.scale.x;
+    for (let i = 0; i < 30; i++) {
+      const a = Math.random() * 6.28, sp = 1.5 + Math.random() * 4;
+      g.fx.drops.emit({ x: this.x, y: gy + (0.4 + Math.random() * 1.2) * s, z: this.z, vx: Math.cos(a) * sp, vy: 1 + Math.random() * 3.5, vz: Math.sin(a) * sp, life: 1.1, s0: 0.05 + Math.random() * 0.06, s1: 0.03, r: 0.75, g: 0.9, b: 1, a0: 0.95, a1: 0.7, grav: 12, floor: gy + 0.03 });
+    }
+    for (let i = 0; i < 6; i++) g.fx.mist.emit({ x: this.x, y: gy + 1 * s, z: this.z, vx: (Math.random() - 0.5) * 3, vy: 0.4, vz: (Math.random() - 0.5) * 3, life: 1.2, s0: 0.4, s1: 1.6, r: 0.85, g: 0.95, b: 1, a0: 0.45, a1: 0, drag: 2 });
+    audio.play('glass', { x: this.x, z: this.z, vol: 0.6, rate: 1.25 });
+  }
+
+  // the head goes: bone scaled to nothing (the skin collapses to a ragged stump), a burst of gore along the shot,
+  // and the neck pumps for a moment
+  popHead(dirx, dirz) {
+    const hb = this.rig.b.head, g = this.game;
+    if (!hb || this.headless) return;
+    this.headless = true;
+    hb.getWorldPosition(_sv);
+    hb.scale.setScalar(0.001);
+    const fx = g.fx, gy = g.world.groundY(this.x, this.z), s = this.char.root.scale.x;
+    const a0 = Math.atan2(dirz, dirx);
+    for (let i = 0; i < 34; i++) {
+      const a = a0 + (Math.random() - 0.5) * 1.8, sp = 1.5 + Math.random() * 5.5;
+      const bone = i < 7, dk = 0.1 + Math.random() * 0.15;
+      fx.drops.emit({ x: _sv.x, y: _sv.y, z: _sv.z, vx: Math.cos(a) * sp, vy: 1.5 + Math.random() * 4.5, vz: Math.sin(a) * sp,
+        life: 1.4, s0: (bone ? 0.05 : 0.06 + Math.random() * 0.09) * s, s1: 0.04 * s,
+        r: bone ? 0.62 : dk * 1.9, g: bone ? 0.52 : dk * 0.14, b: bone ? 0.42 : dk * 0.1, a0: 1, a1: 0.95, grav: 13, floor: gy + 0.03,
+        onLand: Math.random() < 0.3 ? (p) => fx.splat(p.x, p.z, 0.25 + Math.random() * 0.3) : null });
+    }
+    fx.mist.emit({ x: _sv.x, y: _sv.y, z: _sv.z, vx: dirx * 1.4, vy: 0.5, vz: dirz * 1.4, life: 0.7, s0: 0.35, s1: 1.6, r: 0.24, g: 0.02, b: 0.02, a0: 0.65, a1: 0, drag: 3 });
+    fx.mist.emit({ x: _sv.x, y: _sv.y + 0.1, z: _sv.z, vx: dirx * 0.6, vy: 0.9, vz: dirz * 0.6, life: 0.9, s0: 0.25, s1: 1.2, r: 0.18, g: 0.015, b: 0.015, a0: 0.5, a1: 0, drag: 2 });
+    for (let i = 0; i < 3; i++) fx.splat(this.x + dirx * (1 + i * 0.9) + (Math.random() - 0.5) * 0.6, this.z + dirz * (1 + i * 0.9) + (Math.random() - 0.5) * 0.6, 0.7 + Math.random() * 0.5);
+    audio.play('headpop', { x: this.x, z: this.z, vol: 0.85 });
+    this.neckT = 1.3;
   }
 
   update(dt, cam) {
@@ -535,6 +590,14 @@ export class Zombie {
     }
     this.flash = Math.max(0, this.flash - dt / 0.08);
     this.char.material.userData.uniforms.uFlash.value = this.flash;
+    if (this.elite && this.alive) {
+      // a mutant's heat breathes through its skin, and it sheds embers
+      this.char.material.userData.uniforms.uRim.value = 1.0 + 0.55 * Math.sin(this.game.time * 5 + this.id);
+      if (Math.random() < dt * 9) {
+        const sc = this.char.root.scale.x, gy = this.game.world.groundY(this.x, this.z);
+        this.game.fx.glow.emit({ x: this.x + (Math.random() - 0.5) * 0.5 * sc, y: gy + (0.4 + Math.random() * 1.2) * sc, z: this.z + (Math.random() - 0.5) * 0.5 * sc, vx: (Math.random() - 0.5) * 0.3, vy: 0.6 + Math.random() * 0.8, vz: (Math.random() - 0.5) * 0.3, life: 0.7, s0: 0.12, s1: 0.03, r: 1, g: 0.45, b: 0.1, a0: 0.9, a1: 0 });
+      }
+    }
     // burning: flames licking up the body, a char tint; shocked: blue crackle
     const g = this.game;
     if (this.burnT > 0) {
@@ -549,6 +612,18 @@ export class Zombie {
       t.multiplyScalar(1 - Math.min(0.5, dt * 0.25));
       if (t.r < 0.45) t.setRGB(0.45, 0.42, 0.4);
     }
+    if (this.frostT > 0) {
+      this.frostT -= dt;
+      const U = this.char.material.userData.uniforms;
+      if (!this.frosted) { this.frosted = U.uTint.value.clone(); this.frostRim = [U.uRim.value, U.uRimColor.value.getHex()]; }
+      U.uTint.value.setRGB(0.62, 0.82, 1.0);
+      U.uRimColor.value.set(0xbff0ff); U.uRim.value = 0.9;
+      if (Math.random() < dt * 6) {
+        const sc = this.char.root.scale.x, gy = g.world.groundY(this.x, this.z);
+        g.fx.mist.emit({ x: this.x + (Math.random() - 0.5) * 0.4, y: gy + (0.3 + Math.random()) * sc, z: this.z + (Math.random() - 0.5) * 0.4, vx: 0, vy: -0.2, vz: 0, life: 1.0, s0: 0.15, s1: 0.5, r: 0.8, g: 0.92, b: 1, a0: 0.3, a1: 0, drag: 1 });
+      }
+      if (this.frostT <= 0 && this.frosted && this.alive) { U.uTint.value.copy(this.frosted); U.uRim.value = this.frostRim[0]; U.uRimColor.value.setHex(this.frostRim[1]); this.frosted = null; }
+    }
     if (this.shockT > 0) {
       this.shockT -= dt;
       if (Math.random() < dt * 14) {
@@ -556,6 +631,16 @@ export class Zombie {
         g.fx.bolt(this.x + (Math.random() - 0.5) * 0.5, y0, this.z + (Math.random() - 0.5) * 0.5, this.x + (Math.random() - 0.5) * 0.7, y0 + (Math.random() - 0.3) * 0.6, this.z + (Math.random() - 0.5) * 0.7, undefined, 0.08);
       }
       this.anim.hit(_sv.set((Math.random() - 0.5) * 0.3, 0, (Math.random() - 0.5) * 0.3), 0.15);
+    }
+    // a popped head: the neck pumps blood for a moment
+    if (this.neckT > 0) {
+      this.neckT -= dt;
+      const nb = this.rig.b.neck || this.rig.b.head;
+      if (nb && Math.random() < dt * 40 * this.neckT) {
+        nb.getWorldPosition(_sv);
+        const k = this.neckT, a = Math.random() * 6.28, sp = 0.4 + Math.random() * 0.8;
+        g.fx.drops.emit({ x: _sv.x, y: _sv.y, z: _sv.z, vx: Math.cos(a) * sp, vy: 1.2 + 2.6 * k, vz: Math.sin(a) * sp, life: 1, s0: 0.05, s1: 0.03, r: 0.3, g: 0.02, b: 0.02, a0: 1, a1: 0.9, grav: 12, floor: g.world.groundY(this.x, this.z) + 0.03, onLand: Math.random() < 0.08 ? (p) => g.fx.splat(p.x, p.z, 0.2) : null });
+      }
     }
     // the fall: pivot at the feet, onto the ground over ~0.6 s
     const root = this.char.root;

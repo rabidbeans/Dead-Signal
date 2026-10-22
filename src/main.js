@@ -17,6 +17,7 @@ import { Net } from './net/net.js';
 import { Shop } from './ui/shop.js';
 import { save } from './game/save.js';
 import { LEVEL_IDS, levelInfo } from './game/level.js';
+import { challengesFor } from './game/challenges.js';
 import * as LEVELDATA from './game/level.js';
 
 const $ = (id) => document.getElementById(id);
@@ -50,7 +51,7 @@ function show(screen) {
 async function boot() {
   const bar = document.querySelector('.load-bar i');
   let done = 0;
-  const steps = [loadCharacters([...ZOMBIES, ...SPECIAL_MODELS]), loadProps(), loadGear(), ...['pistol', 'smg', 'shotgun', 'rifle', 'lmg', 'crossbow', 'flamer', 'launcher'].map(loadWeapon)];
+  const steps = [loadCharacters([...ZOMBIES, ...SPECIAL_MODELS]), loadProps(), loadGear(), ...['pistol', 'smg', 'shotgun', 'rifle', 'lmg', 'riot12', 'crossbow', 'flamer', 'launcher'].map(loadWeapon)];
   steps.forEach((p) => p.then(() => { done++; bar.style.width = (done / steps.length * 100) + '%'; }));
   await Promise.all(steps);
   $('name').value = store.get('name', '');
@@ -140,6 +141,9 @@ function refreshMenu() {
   const info = levelInfo(picked);
   $('lc-name').textContent = `LEVEL ${picked} — ${info.name}`;
   $('lc-text').textContent = info.blurb;
+  // the level's three challenges, ticked when done
+  const done = save.challenges(picked);
+  $('lc-chal').innerHTML = challengesFor(picked).map((c, i) => `<span class="${done[i] ? 'done' : ''}" title="${c.text}"><i>${done[i] ? '✓' : '○'}</i>${c.name}<small>${c.text}</small></span>`).join('');
   $('menu-cash').textContent = '$' + save.cash.toLocaleString('en-US');
   $('start').textContent = `START LEVEL ${picked}`;
 }

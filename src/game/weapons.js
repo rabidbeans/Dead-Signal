@@ -49,6 +49,16 @@ export const WEAPONS = {
     magStep: 20, tip: [0.7425, 0.05, 0], spare: [-0.145, 0.09, 0], unlock: 4, costK: 1.6, moveK: 0.86,
     snd: { release: 'mag_release', magout: 'belt', magin: 'mag_in', rack: 'slide' },
   },
+  // (2026-10-22) the gun for beating level 5: a drum-fed full-auto 12-gauge. A wall of pellets, five blasts a second.
+  riot12: {
+    id: 'riot12', name: 'RIOT-12', model: 'riot12', icon: 'riot12_icon.webp', blurb: 'A full-auto drum shotgun. Five blasts a second, twenty in the drum.',
+    dmg: 22, crit: 1.5, pellets: 8, falloff: 0.5, pierce: 0, knock: 1.5, mag: 20, tapInterval: 0.2, autoInterval: 0.21, reload: 3.0,
+    spreadBase: deg(12), spreadAdd: 0, spreadMax: deg(12), spreadRecover: deg(20), spreadMove: deg(2.5),
+    range: 15, assistAcquire: deg(14), assistHold: deg(20), assistRange: 10, assistBend: 0.4, magnet: 0.3,
+    kick: 0.3, trauma: 0.15, recoil: 30, shot: 'riot', shellVol: 0.3, duck: 0.4, price: 8000,
+    magStep: 4, tip: [0.668, 0.035, 0], spare: [-0.12, 0.1, 0], unlock: 5, costK: 1.75,
+    snd: { release: 'mag_release', magout: 'mag_out', magin: 'mag_in', rack: 'slide' },
+  },
 };
 // the hidden POWER weapons: found in a locked case in a level, a handful of shots, gone when empty (never bought,
 // never upgraded, never carried to the next level)
@@ -118,6 +128,11 @@ export const PROTO = {
     desc: 'A double belt that spins up faster the longer you hold the trigger, and rounds that go through two bodies.',
     dmgK: 1.15, magK: 2, spin: { k: 0.75, t: 1.6 }, pierce: 2, pierceK: 0.7,
   },
+  riot12: {
+    name: 'WHITEOUT', color: 0x8fe8ff, cost: 4600,
+    desc: 'Cryo shells: everything it hits freezes to a crawl, and whatever dies frozen shatters into ice.',
+    dmgK: 1.15, freeze: { t: 3, k: 0.4 },
+  },
 };
 
 // MASTERY: kills with a gun earn it attachments, for free (the guns you actually use get better on their own).
@@ -165,7 +180,7 @@ export function weaponStats(id, lv = {}, x = {}) {
     if (P.rateK) { st.autoInterval /= P.rateK; st.tapInterval /= P.rateK; }
     if (P.crit) st.critChance = P.crit;
     if (P.pierce) { st.pierce = P.pierce; st.pierceK = P.pierceK; }
-    for (const k of ['ricochet', 'shock', 'burn', 'blast', 'spin']) if (P[k]) st[k] = P[k];
+    for (const k of ['ricochet', 'shock', 'burn', 'blast', 'spin', 'freeze']) if (P[k]) st[k] = P[k];
   }
   return st;
 }
@@ -184,4 +199,4 @@ export function upgradeCost(weaponId, key, level) {
 }
 
 // what a zombie is worth
-export const BOUNTY = { shambler: 10, lurcher: 16, runner: 14, brute: 60, bloater: 25, screamer: 30, spitter: 25, leaper: 30, soldier: 35, warden: 400, patientzero: 600, butcher: 800, foreman: 1000, omega: 1500 };
+export const BOUNTY = { shambler: 10, lurcher: 16, runner: 14, brute: 60, bloater: 25, screamer: 30, spitter: 25, leaper: 30, soldier: 35, warden: 400, patientzero: 600, butcher: 800, foreman: 1000, omega: 1500, drowned: 20, ferryman: 1800 };

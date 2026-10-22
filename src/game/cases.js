@@ -14,29 +14,41 @@ const OPEN_T = 1.5, R = 1.5;
 export class Cases {
   constructor(g, spots) {
     this.g = g;
-    this.list = spots.map(([x, z, id], i) => {
+    this.list = spots.map(([x, z, id], i) => this.make(x, z, id, i, (i * 2.1) % (Math.PI * 2), 0x55c8ff));
+  }
+
+  // the supply drop's case (supplydrop.js), once it is on the ground: red, and the same index on every machine
+  addDrop(x, z, id, ry) {
+    const c = this.make(x, z, id, this.list.length, ry, 0xff5a3a);
+    c.drop = true;
+    this.list.push(c);
+  }
+
+  make(x, z, id, i, ry, col) {
+    const g = this.g;
+    {
       const root = new THREE.Group();
       const base = gear('case_base'), lid = gear('case_lid');
       lid.position.set(0, 0.2, -0.21);
       root.add(base, lid);
       root.scale.setScalar(1.3);
       root.position.set(x, g.world.groundY(x, z), z);
-      root.rotation.y = (i * 2.1) % (Math.PI * 2);
+      root.rotation.y = ry;
       g.scene.add(root);
-      const rg = ring(0x55c8ff, R * 1.5);
+      const rg = ring(col, R * 1.5);
       rg.position.set(x, g.world.groundY(x, z) + 0.06, z);
       g.scene.add(rg);
-      const bm = beam(0x55c8ff);
+      const bm = beam(col);
       bm.position.set(x, 0, z); bm.scale.set(0.6, 0.35, 0.6);
       g.scene.add(bm);
       return { i, x, z, id, root, lid, rg, bm, prog: 0, open: false, openT: 0 };
-    });
+    }
   }
 
   // nearest closed case, for the HUD's screen-edge marker
   markers() {
     const out = [];
-    for (const c of this.list) if (!c.open && Math.hypot(c.x - this.g.me.x, c.z - this.g.me.z) < 30) out.push({ x: c.x, z: c.z, c: '#55c8ff', label: WEAPONS[c.id].name.toUpperCase() });
+    for (const c of this.list) if (!c.open && Math.hypot(c.x - this.g.me.x, c.z - this.g.me.z) < (c.drop ? 60 : 30)) out.push({ x: c.x, z: c.z, c: c.drop ? '#ff5a3a' : '#55c8ff', label: WEAPONS[c.id].name.toUpperCase() });
     return out;
   }
 
@@ -79,6 +91,9 @@ export class Cases {
     const p = g.players.get(e.pid);
     if (p?.local) {
       p.pickPower(c.id);
+      if (c.drop) g.stats.dropOpened = true; else g.stats.caseOpened = true;
+      // the supply drop's case also holds a pair of frags
+      if (c.drop && g.nades) { g.nades.have.frag = Math.min(4, (g.nades.have.frag || 0) + 2); g.after(2.8, () => g.hud.toast('+2 FRAGS from the drop')); }
       g.hud.banner(WEAPONS[c.id].name.toUpperCase(), `${WEAPONS[c.id].mag} shots. Make them count.`, 2.6);
       audio.play('sting', { vol: 0.6, jitter: 0 });
       buzz([30, 30, 60]);
