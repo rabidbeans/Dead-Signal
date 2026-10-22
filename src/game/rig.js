@@ -156,6 +156,8 @@ export class ZombieAnim {
       this.p.lean = 0.55 + r() * 0.1; this.p.headFwd = 0.5; this.p.reach = 'none'; this.p.jaw = 0.35; this.p.stride = 0.32;
     } else if (kind === 'leaper') {     // low and long, knuckles near the floor, like something that hunts
       this.p.lean = 0.85; this.p.stride = 0.46; this.p.reach = 'none'; this.p.limp = null; this.p.timeScale = 1.2; this.p.sway = 0.05; this.p.headFwd = -0.1;
+    } else if (kind === 'drowned') {    // waterlogged and heavy: a slow sway, the head lolling, the arms out to grab
+      this.p.lean = 0.3 + r() * 0.1; this.p.stride = 0.34; this.p.reach = 'none'; this.p.timeScale = 0.85; this.p.sway = 0.16; this.p.headTilt *= 1.3; this.p.jaw = 0.3; this.p.limp = null;
     } else if (kind === 'soldier') {    // still almost upright, arms up as if the rifle were still there
       this.p.lean = 0.15; this.p.stride = 0.34; this.p.reach = 'none'; this.p.limp = r() < 0.3 ? 'R' : null; this.p.sway = 0.05; this.p.headTilt *= 0.5;
     }
@@ -581,6 +583,40 @@ export const BOSS_STYLE = {
       arm(rig, 'R', { down: 0.6 - 0.2 * two, fwd: -0.55 * (1 - two) + chop({ attack: A, strike: K, over: a.over }), twist: 0.15 * (1 - two), elbow: 2.05 * (1 - two) + 0.25 * two, wrist: -0.1, fist: 1.3 });
       const sw = Math.sin(g.phR * Math.PI * 2) * 0.5 * g.walk;
       arm(rig, 'L', { down: 0.72 - 0.15 * two, fwd: sw * (1 - two) + chop({ attack: A, strike: K, over: a.over }), twist: -0.35 * two, elbow: 0.45 + 0.2 * two, fist: 1.1 });
+    },
+  },
+
+  // THE FERRYMAN: the river's old boatman, stooped under his own height. He drags his anchor from the right fist (the arm
+  // hangs straight under its weight), a limp in the left leg. The hook: the anchor swung back over the shoulder and slung
+  // forward on its chain; the sweep: arms out, the body wound round, the anchor whirling about him.
+  ferryman: {
+    legs: { knee: 0.95, bend: 0.12 },
+    swingT: 0.16, recT: 0.95, load: 1.35,
+    init(p) { p.lean = 0.24; p.headFwd = 0.34; p.headTilt *= 0.3; p.stride = 0.44; p.timeScale = 0.66; p.limp = 'L'; p.sway = 0.1; p.jaw = 0.2; p.shoulderDrop = 0.14; p.bob = 1.1; p.shift = 0.028; },
+    pose(a, g) {
+      const rig = a.rig, A = a.attack, K = a.strike, S = a.sweep || 0, T = a.throwT;
+      rig.rot('spine03', X, -0.08 - 0.3 * A + 0.45 * K);
+      if (a.move === 'hook' || T > 0.02) {
+        // cocked back over the right shoulder, then slung forward and the arm follows through
+        const back = a.move === 'hook' ? A : 0;
+        arm(rig, 'R', { down: 0.3 + 0.35 * T, fwd: 1.4 * back * (1 - T) - 1.5 * T, twist: 0.25, elbow: 1.3 * back * (1 - T) + 0.15, fist: 1.3 });
+        arm(rig, 'L', { down: 0.5, fwd: -0.7 * back - 0.4 * T - 0.2, twist: -0.2, elbow: 0.5, fist: 0.9 });
+        rig.rot('spine03', Y, -0.35 * back + 0.45 * T);
+        return;
+      }
+      if (S > 0.02 || a.move === 'sweep') {
+        // the wind-up for the sweep: the body twists away, then both arms go out to the right with the chain
+        const w = a.move === 'sweep' ? A : 0;
+        arm(rig, 'R', { down: 0.25 - 0.1 * S, fwd: -0.55 - 0.2 * w, twist: 0.4, elbow: 0.25, fist: 1.3 });
+        arm(rig, 'L', { down: 0.3, fwd: -0.9, twist: -0.3, elbow: 0.6, fist: 1.2 });
+        rig.rot('spine03', Y, 0.55 * w - 0.4 * S);
+        a.hipY -= 0.1 * Math.max(w, S);
+        return;
+      }
+      // walking: the anchor drags from the right fist, the arm straight down under its weight
+      arm(rig, 'R', { down: 0.86, fwd: 0.08 + chop(a) * 1.0, twist: 0.05, elbow: 0.08 + 0.6 * A, fist: 1.45 });
+      arm(rig, 'L', { down: 0.74, fwd: Math.sin(g.phL * Math.PI * 2) * 0.4 * g.walk + chop(a) * 0.6, elbow: 0.4, fist: 1.0 });
+      rig.rot('spine03', Z, -0.08);
     },
   },
 
@@ -1013,6 +1049,24 @@ const SPECIAL_POSE = {
       else arm(rig, sd, { down: 0.72, fwd: lean * 0.45 - 0.1 - 0.3 * crouch + Math.sin((ph + (sg > 0 ? 0 : 0.5)) * TAU) * 0.35 * walk, elbow: 0.25, fist: 1.0 });
     }
     if (pin) { rig.rot('jaw', X, -0.5 - Math.max(0, Math.sin(a.t * 9)) * 0.4); rig.rot('head', X, 0.2 + Math.sin(a.t * 9) * 0.15); }
+  },
+  drowned(a, { ph, walk, lean }) {
+    const rig = a.rig, c = a.climb || 0;
+    if (c > 0.02) {
+      // hauling itself up over the rail: both arms reaching up and over, a knee hooked up, the body pitched forward
+      for (const sd of ['L', 'R']) arm(rig, sd, { down: 0.45, fwd: -2.1 * c - 0.4 * (1 - c), elbow: 0.5 + 0.5 * c, fist: 1.2 });
+      rig.rot('spine03', X, 0.45 * c); rig.rot('neck', X, -0.3 * c);
+      rig.rot('thigh_R', X, -1.25 * c); rig.rot('shin_R', X, 1.5 * c);
+      rig.rot('thigh_L', X, 0.2 * c);
+      return;
+    }
+    // both arms out low and forward to grab, swaying with the walk, the head lolling
+    for (const sd of ['L', 'R']) {
+      const sg = sd === 'L' ? 1 : -1;
+      arm(rig, sd, { down: 0.62, fwd: lean * 0.5 - 0.8 - a.attack * 0.9 + Math.sin((ph + (sg > 0 ? 0 : 0.5)) * TAU) * 0.12 * walk, elbow: 0.35, twist: 0.12 * sg, fist: 0.9 });
+    }
+    rig.rot('head', Z, Math.sin(a.t * 0.9) * 0.22);
+    rig.rot('jaw', X, -0.25 - Math.max(0, Math.sin(a.t * 2.1)) * 0.2);
   },
   soldier(a, { lean }) {
     const rig = a.rig;

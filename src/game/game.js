@@ -31,6 +31,7 @@ const REVIVE_R = 2.4, REVIVE_T = 2.5;
 import { L, LV, HOLDS, AMBUSH, MAZE, HOLD_TRIGGER, HOLD_RADIUS, MEDKITS, SUPPLIES, CASES, ZONE_HW, setLevel, zoneAt } from './level.js';
 import { Cases } from './cases.js';
 import { Juice } from './juice.js';
+import { tickSpan, onBridge, railSpot } from './bridge.js';
 import { Pickups } from './pickups.js';
 import { SupplyDrop } from './supplydrop.js';
 import { Throwables } from './throwables.js';
@@ -398,7 +399,7 @@ export class Game {
     const dist = this.phase === 'extract' ? Math.max(0, Math.round(Math.hypot(me.x - G.x, me.z - G.z) - G.r + 1)) : Math.max(0, Math.round(me.z - G.z));
     const secs = this.hold >= 0 ? HOLDS[this.hold].secs : 0;
     const ob = this.hold >= 0 && !HOLDS[this.hold].final && this.objective?.custom ? this.objective.hud() : null;
-    this.hud.route({ ob, phase: this.phase, hold: this.hold, title: this.hold >= 0 ? HOLDS[this.hold].title : null, left: Math.max(0, secs - this.holdT), secs, dist, opened: this.opened, away: this.holdAway, final: this.hold === HOLDS.length - 1, gates: L.gate.length, name: LV.short, finale: LV.finale, boss: this.hold >= 0 && HOLDS[this.hold].boss ? TYPES[HOLDS[this.hold].boss].name : null });
+    this.hud.route({ ob, phase: this.phase, hold: this.hold, title: this.hold >= 0 ? HOLDS[this.hold].title : null, left: Math.max(0, secs - this.holdT), secs, dist, opened: this.opened, away: this.holdAway, final: this.hold === HOLDS.length - 1, gates: L.gate.length, name: LV.short, finale: LV.finale, holdText: LV.holdText, boss: this.hold >= 0 && HOLDS[this.hold].boss ? TYPES[HOLDS[this.hold].boss].name : null });
   }
 
   startHold(k) {
@@ -419,7 +420,7 @@ export class Game {
       if (this.side) { bz.x = L.lz.x + 9; this.netEvent({ k: 'warp' }); this.side.start(); }
     }
     const ob = !H.boss && this.objective?.custom ? this.objective.blurb() : null;
-    this.hud.banner(H.boss ? TYPES[H.boss].name : H.title, H.boss ? (LV.finale === 'heli' ? 'Kill it to call in the bird' : 'Kill it to open the safe room') : ob || 'Hold the junction while the gate is cut open', 2.8);
+    this.hud.banner(H.boss ? TYPES[H.boss].name : H.title, H.boss ? (LV.finale === 'heli' ? 'Kill it to call in the bird' : 'Kill it to open the safe room') : ob || (L.bridge ? 'Hold the deck while the span comes down' : 'Hold the junction while the gate is cut open'), 2.8);
     // what makes this boss different, a moment after the banner
     if (H.boss && TYPES[H.boss].trait) this.after(4.6, () => this.hud?.toast(TYPES[H.boss].trait));
     audio.play('sting', { vol: 0.7, jitter: 0 });
@@ -479,10 +480,12 @@ export class Game {
         if (k < HOLDS.length && lead.z < this.holdTrigger(k)) { this.phase = 'hold'; this.startHold(k); }
         this.streamRoute(lead, hunting, dt);
         this.drop?.director(lead);
+        this.climbers(dt, lead, 1);
       } else {
         // ---- holding a junction
         const H = HOLDS[this.hold];
         const c = this.holdCentre(this.hold);
+        if (!H.final) this.climbers(dt, lead, 1.8);
         const obj = !H.final && this.objective?.custom ? this.objective : null;     // breakers / nests / the dozer instead of a timer
         const near = obj || [...this.players.values()].some((p) => p.alive && Math.abs(p.z - c) < HOLD_RADIUS && Math.abs(p.x) < 40);
         const away = !near;
@@ -577,6 +580,23 @@ export class Game {
     if (this.trickleT <= 0) {
       this.trickleT = (2.5 + Math.random() * 2) / (LV.trickle ?? 1);
       if (hunting < (10 + 4 * this.players.size) * (LV.trickle ?? 1)) this.spawnZombie(this.mix(Math.random() < 0.2 * (LV.trickle ?? 1) ? 'runner' : 'shambler', 0.06));
+    }
+  }
+
+  // host, the bridge: the drowned haul themselves up over the railings beside you (in sight: that is the scare)
+  climbers(dt, lead, rate) {
+    if (!L.bridge || !onBridge(lead.z, -2)) return;
+    this.climbT = (this.climbT ?? 6) - dt * rate;
+    if (this.climbT > 0) return;
+    this.climbT = 7 + Math.random() * 4;
+    const pls = [...this.players.values()].filter((p) => p.alive);
+    const p = pls[(Math.random() * pls.length) | 0] || lead;
+    const n = 1 + (Math.random() < 0.3 ? 1 : 0) + (this.players.size > 1 && Math.random() < 0.5 ? 1 : 0);
+    for (let i = 0; i < n; i++) {
+      const side = Math.random() < 0.5 ? -1 : 1, z = p.z - 3 - Math.random() * 9;
+      if (!onBridge(z, -1)) continue;
+      const s = railSpot(z, side);
+      this.after(i * 0.4, () => { if (!this.over) this.spawnZombie(Math.random() < 0.75 ? 'drowned' : 'shambler', { ...s, climb: true }); });
     }
   }
 
@@ -675,8 +695,8 @@ export class Game {
     const x = c.x + (o.x !== undefined ? 0 : (Math.random() - 0.5) * 1.2), z = c.z + (o.x !== undefined ? 0 : (Math.random() - 0.5) * 1.2);
     // now and then one of the ordinary dead is a MUTANT (never in the attract loop, never the specials, brutes or bosses)
     const elite = o.elite ?? (!this.opts.attract && !TYPES[type].special && !TYPES[type].boss && type !== 'brute' && this.time > 15 && Math.random() < 0.012 + 0.003 * this.level);
-    const zb = this.addZombie(id, { type, seed, x, z, idle: !!o.idle, home: !!o.home, elite });
-    this.netEvent({ k: 'zspawn', id, type, seed, x: +x.toFixed(2), z: +z.toFixed(2), model: zb.model, el: elite ? 1 : 0 });
+    const zb = this.addZombie(id, { type, seed, x, z, idle: !!o.idle, home: !!o.home, elite, climb: !!o.climb });
+    this.netEvent({ k: 'zspawn', id, type, seed, x: +x.toFixed(2), z: +z.toFixed(2), model: zb.model, el: elite ? 1 : 0, cl: o.climb ? 1 : 0 });
     return zb;
   }
 
@@ -786,10 +806,11 @@ export class Game {
   }
 
   // host: a zombie's bite connects
-  hurtPlayer(p, dmg, z, kb = 0.35) {
+  // grab: seconds the survivor is slowed (a drowned one's grip)
+  hurtPlayer(p, dmg, z, kb = 0.35, grab = 0) {
     dmg = Math.round(dmg);
-    if (p.local) p.hurt(dmg, z.x, z.z, kb);
-    else this.net.send(p.id, { t: 'hurt', dmg, fx: +z.x.toFixed(2), fz: +z.z.toFixed(2), kb });
+    if (p.local) { p.hurt(dmg, z.x, z.z, kb); if (grab) p.slowT = Math.max(p.slowT || 0, grab); }
+    else this.net.send(p.id, { t: 'hurt', dmg, fx: +z.x.toFixed(2), fz: +z.z.toFixed(2), kb, sl: grab || undefined });
     if (z.def) audio.play('scream', { x: z.x, z: z.z, vol: 0.55 });
   }
 
@@ -828,6 +849,7 @@ export class Game {
       else { this.net.broadcast({ t: 'ev', e: { k: 'zhit', id: z.id, dx: m.dx, dz: m.dz, crit: m.crit } }, true, from); this.status(z, m.st || m.bn || m.fr ? { st: m.st, burn: m.bn, fr: m.fr } : null, from); }
     } else if (m.t === 'hurt') {
       this.me.hurt(m.dmg, m.fx, m.fz, m.kb ?? 0.35);
+      if (m.sl) this.me.slowT = Math.max(this.me.slowT || 0, m.sl);
     } else if (m.t === 'revive') {
       if (m.x !== undefined) { this.me.x = m.x; this.me.z = m.z; }
       this.me.revive();
@@ -1052,7 +1074,7 @@ export class Game {
     const acc = this.stats.shots ? Math.round(100 * this.stats.hits / this.stats.shots) : 0;
     if (win) this.earn(150 + 100 * this.level, LV.finale === 'heli' ? 'EVACUATED' : 'SAFE ROOM');
     const bank = this.bank(win);
-    this.hud.end(win, { ...this.stats, acc, time: this.time, checkpoint: this.opened, gates: L.gate.length, level: this.level, name: LV.kicker, cash: this.cash, wallet: save.cash, last: this.level >= 5, host: this.role !== 'client', coop: this.role !== 'solo', ...bank }, why);
+    this.hud.end(win, { ...this.stats, acc, time: this.time, checkpoint: this.opened, gates: L.gate.length, level: this.level, name: LV.kicker, cash: this.cash, wallet: save.cash, last: this.level >= 6, host: this.role !== 'client', coop: this.role !== 'solo', ...bank }, why);
   }
 
   // slow motion: `secs` of real time at `k` speed, easing back to normal over the last 0.5 s
@@ -1076,7 +1098,8 @@ export class Game {
     // the level's challenges (a winning run ticks off what it did)
     const acc = this.stats.shots ? Math.round(100 * this.stats.hits / this.stats.shots) : 0;
     const challenges = win ? save.completeChallenges(this.level, { ...this.stats, time: this.time, best: this.juice?.best || 0, acc }) : null;
-    const masteredBefore = Object.fromEntries(Object.keys(this.stats.byGun).map((id) => [id, save.gunStats(id).att.length]));
+    // (the power weapons are not the survivor's guns: no mastery for them - counting them crashed the end of a run)
+    const masteredBefore = Object.fromEntries(Object.keys(this.stats.byGun).filter((id) => save.data.weapons[id]).map((id) => [id, save.gunStats(id).att.length]));
     save.addKills(this.stats.byGun);
     const points = save.addXp(this.xp);
     save.write();
@@ -1223,6 +1246,7 @@ export class Game {
     tickZones(this, dt);
     if (this.groundFog) this.groundFog.pts.visible = Q.fogSheets > 0 && !indoors(me.x, me.z);
     this.gateTick(dt);
+    if (L.bridge) tickSpan(this, dt);
     this.updateCutaway();
     // low health: heartbeat and a draining picture
     const low = me.alive ? Math.max(0, (0.4 - me.hp / me.maxHp) / 0.4) : 0.8;
@@ -1290,7 +1314,10 @@ export class Game {
     const holding = this.hold >= 0;
     const god = this._god ??= new URLSearchParams(location.search).has('god');     // QA: walk the objectives, ignore the crowd
     if (best && bd < 3.2 && !god) { mx = Math.cos(t * 0.9) * 0.6 + (me.x - best.x) * 0.3; my = Math.sin(t * 0.9) * 0.6 + (me.z - best.z) * 0.3; }
-    else if (this.phase === 'extract') { const G = this.goal(); mx = (G.x - me.x) * 0.5; my = Math.max(-1, Math.min(1, (G.z - me.z) * 0.3)); }
+    else if (this.phase === 'extract') {
+      const G = this.goal(), v = this.botField({ x: G.x, z: G.z }, 'x').dir(me.x, me.z);
+      if (v && Math.hypot(G.x - me.x, G.z - me.z) > 2) { mx = v.x; my = v.z; } else { mx = (G.x - me.x) * 0.5; my = Math.max(-1, Math.min(1, (G.z - me.z) * 0.3)); }
+    }
     else if (holding && obGoal) {
       // the level's objective: walk to the breaker / the nest / the dozer's side
       const d = Math.hypot(obGoal.x - me.x, obGoal.z - me.z);

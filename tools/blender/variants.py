@@ -368,4 +368,44 @@ VARIANTS.update({
         wounds=[dict(at='neck_L', r=0.05, depth=0.012), dict(at='cheek_L', r=0.03), dict(at='forearm_R', r=0.04)],
         gore=0.9, tears=0.3, grime=0.75,
     ),
+    # L6  THE DROWNED (2026-10-22): a deckhand who went into the river and came back up. Swollen, blue-grey and wet
+    # through, a sodden navy sweater, rubber boots, weed in the hair. They climb up over the bridge's railings.
+    'z_drowned': dict(
+        seed=306,
+        macro=dict(gender=1.0, age=0.45, muscle=0.4, weight=0.75, height=0.95, proportions=0.5),
+        bulk=[dict(kind='belly', amt=0.06, lumpy=0.4), dict(kind='neck', amt=0.05), dict(kind='arm', amt=0.03, lumpy=0.4), dict(kind='legs', amt=0.03)],
+        skin=dict(ZOMBIE_SKIN, base='#7f9196', livid='#34465a', vein='#22323e', veins=1.0, socket='#0e161c', sunken=1.4, bruise=0.7, pool=0.5),
+        outfit=dict(
+            shirt=dict(color='#232c3c', sleeve=2.05, collar=0.0, hem=0.1, thick=0.012),
+            pants=dict(color='#3a3b2e', length=1.97, thick=0.007),
+            shoes=dict(color='#1f2420', top=1.25, thick=0.02, boot=True, sole='#141614'),
+            hair=dict(color='#1e2416', line=0.28, volume=0.006),
+        ),
+        mouthgore=0.4,
+        wounds=[dict(at='cheek_L', r=0.04, depth=0.012), dict(at='forearm_L', r=0.05), dict(at='neck_R', r=0.04), dict(at='flank_R', r=0.05)],
+        gore=0.55, tears=0.12, grime=1.0,
+    ),
+})
+
+# ---- level 6's boss (2026-10-22)
+VARIANTS.update({
+    # THE FERRYMAN: the river's old boatman, eight feet of waterlogged bone and gristle in yellow oilskin bib-overalls and
+    # waders, a ship's anchor on a chain over his shoulder. He calls the drowned up out of the water.
+    'b_ferryman': dict(
+        seed=206,
+        macro=dict(gender=1.0, age=0.85, muscle=0.85, weight=0.25, height=1.0, proportions=0.3),
+        bulk=[dict(kind='arm', amt=0.05, lumpy=0.5), dict(kind='shoulders', amt=0.07), dict(kind='neck', amt=0.035), dict(kind='hump', amt=0.07, lumpy=0.5),
+              dict(kind='chest', amt=0.04), dict(kind='legs', amt=0.035)],
+        skin=dict(ZOMBIE_SKIN, base='#7a8a7e', livid='#3a4a4a', vein='#22322e', veins=1.0, socket='#0c1210', sunken=1.5, bruise=0.5),
+        outfit=dict(
+            shirt=dict(color='#3a3e34', sleeve=2.05, collar=0.01, hem=0.12, thick=0.008),
+            pants=dict(color='#b88e1c', length=1.97, thick=0.009),
+            apron=dict(color='#c8a020', top=0.18, drop=0.06, bib=0.14, width=0.3, blood=0.3),
+            shoes=dict(color='#202420', top=1.05, thick=0.026, boot=True, sole='#141614'),
+            gloves=dict(color='#3a3428'),
+            hair=dict(color='#9a9a90', line=0.36, volume=0.004),
+        ),
+        wounds=[dict(at='cheek_L', r=0.045, depth=0.014), dict(at='chest_L', r=0.05), dict(at='forearm_R', r=0.05)],
+        gore=0.6, tears=0.35, grime=1.0,
+    ),
 })

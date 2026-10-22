@@ -7,10 +7,13 @@
 //   THE BUTCHER    (level 3)  CLEAVERS    a fan of three spinning cleavers thrown at you
 //   THE FOREMAN    (level 4)  GROUND SLAM he leaps to where you stood; get out of the red circle
 //   SUBJECT OMEGA  (level 5)  SUMMON + BERSERK  screams the horde in; under half health he goes red and starts charging
+//   THE FERRYMAN   (level 6)  HOOK + SWEEP  slings his anchor down a red lane and drags whoever it catches in to him;
+//                             swings it round in a ring when you stand close; calls the drowned up every quarter
 import * as THREE from 'three';
 import { tex } from './assets.js';
 import { audio, buzz } from './audio.js';
 
+import { bossGearMesh } from './bossgear.js';
 const _v = new THREE.Vector3();
 
 function canvasTex(w, h, draw) {
@@ -57,6 +60,7 @@ export class BossFX {
     this.puddles = [];      // bile on the ground
     this.cleavers = [];     // cleavers in flight
     this.waves = [];        // expanding shock rings (slam, scream)
+    this.hooks = [];        // the Ferryman's anchor on its chain, out and back
     const mk = (geo, map, color) => {
       const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map, color, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false, opacity: 0 }));
       m.renderOrder = 3; m.visible = false; m.frustumCulled = false; s.add(m); return m;
@@ -174,6 +178,37 @@ export class BossFX {
       audio.zombie('scream', e.x, e.z, 1.5);
       g.cam.trauma(0.35);
       g.hud.toast('It is calling the horde!');
+    } else if (e.a === 'hook') {
+      // the anchor flies down the lane on its chain, and comes back
+      if (z) { z.anim.throwT = 1; z.anim.strike = 1; z.anchorOut = true; audio.play('throw', { x: z.x, z: z.z, vol: 1, rate: 0.6 }); }
+      const m = bossGearMesh('anchor');
+      if (m) { m.scale.setScalar(1.7); this.scene.add(m); }
+      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), new THREE.LineBasicMaterial({ color: 0x2a2a2a }));
+      line.frustumCulled = false;
+      this.scene.add(line);
+      this.hooks.push({ id: e.id, m, line, x: e.x, z: e.z, dx: e.dx, dz: e.dz, len: e.len, v: e.v, d: 0, back: false });
+    } else if (e.a === 'hooked') {
+      const h = this.hooks.find((q) => q.id === e.id && !q.back);
+      if (h) h.back = true;
+      const p = g.players.get(e.pid);
+      audio.play('hard', { x: e.x, z: e.z, vol: 0.9, rate: 0.5 });
+      if (p?.local) { g.hud.banner('', 'HOOKED!', 1.1); g.cam.trauma(0.6); buzz([40, 30, 60]); }
+    } else if (e.a === 'sweep') {
+      if (z) { z.spinT = 0.75; z.anim.sweep = 1; z.anim.strike = 1; }
+      this.wave(e.x, e.z, e.r, 0xffb040, 0.6);
+      for (let i = 0; i < 30; i++) {
+        const a = Math.random() * 6.283, r = 1 + Math.random() * (e.r - 1);
+        g.fx.smoke.emit({ x: e.x + Math.cos(a) * r, y: 0.2, z: e.z + Math.sin(a) * r, vx: Math.cos(a) * 3, vy: 0.4, vz: Math.sin(a) * 3, life: 1.1, s0: 0.4, s1: 1.8, r: 0.55, g: 0.5, b: 0.46, a0: 0.35, a1: 0, drag: 1.5 });
+      }
+      audio.play('throw', { x: e.x, z: e.z, vol: 1, rate: 0.45 });
+      audio.play('hard', { x: e.x, z: e.z, vol: 0.6, rate: 0.6 });
+      g.cam.trauma(Math.max(0.15, 0.5 - Math.hypot(g.me.x - e.x, g.me.z - e.z) * 0.03));
+    } else if (e.a === 'call') {
+      if (z) { z.anim.roar = 1.4; z.flash = 1; }
+      this.wave(e.x, e.z, 9, 0x4ad8ff, 1.1);
+      audio.zombie('scream', e.x, e.z, 1.5);
+      g.hud.toast('The Ferryman calls the drowned up out of the water!');
+      g.cam.trauma(0.3);
     } else if (e.a === 'enrage') {
       if (z) { z.enraged = true; z.anim.roar = 1.5; z.char.material.userData.uniforms.uTint.value.setRGB(1.5, 0.55, 0.5); }
       g.hud.banner('BERSERK', 'Subject Omega is enraged', 2.2);
@@ -271,12 +306,44 @@ export class BossFX {
       }
     }
     this.cleavers = this.cleavers.filter((c) => !c.done);
+    // the Ferryman's anchor: out down its lane, then reeled back in; the chain hangs from his fist
+    for (const h of this.hooks) {
+      const z = g.zombies.get(h.id);
+      h.d += (h.back ? -h.v * 0.75 : h.v) * dt;
+      if (!h.back && h.d >= h.len) h.back = true;
+      const px = h.x + h.dx * Math.max(0, h.d), pz = h.z + h.dz * Math.max(0, h.d);
+      const y = 1.1 + Math.sin(Math.min(1, Math.max(0, h.d) / h.len) * Math.PI) * 0.6;
+      if (h.m) {
+        h.m.position.set(px, y, pz);
+        basisTo(h.m, h.dx, h.dz, h.back);
+      }
+      const hand = z?.rig.b.hand_R ? z.rig.b.hand_R.getWorldPosition(_v) : _v.set(h.x, 2.6, h.z);
+      const pos = h.line.geometry.attributes.position;
+      pos.setXYZ(0, hand.x, hand.y, hand.z); pos.setXYZ(1, px, y + 0.2, pz); pos.needsUpdate = true;
+      if (!h.back && Math.random() < 0.5) g.fx.smoke.emit({ x: px, y: 0.3, z: pz, vx: 0, vy: 0.3, vz: 0, life: 0.5, s0: 0.2, s1: 0.6, r: 0.5, g: 0.48, b: 0.44, a0: 0.25, a1: 0, drag: 2 });
+      if (h.back && h.d <= 0) {
+        h.done = true;
+        if (h.m) this.scene.remove(h.m);
+        this.scene.remove(h.line);
+        if (z) z.anchorOut = false;
+      }
+    }
+    this.hooks = this.hooks.filter((h) => !h.done);
   }
+}
+
+// the flying anchor points along its throw (crown first going out, ring first coming back)
+const _q2 = new THREE.Quaternion(), _y = new THREE.Vector3(0, 1, 0), _d2 = new THREE.Vector3();
+function basisTo(o, dx, dz, back) {
+  _d2.set(dx, -0.15, dz).normalize();
+  if (back) _d2.negate();
+  _q2.setFromUnitVectors(_y, _d2);
+  o.quaternion.copy(_q2);
 }
 
 // ---------------------------------------------------------------- the host's decisions --
 const MOVES = {
-  warden: ['charge'], patientzero: ['bile'], butcher: ['cleaver'], foreman: ['leap'], omega: ['scream'],
+  warden: ['charge'], patientzero: ['bile'], butcher: ['cleaver'], foreman: ['leap'], omega: ['scream'], ferryman: ['hook'],
 };
 
 export class BossBrain {
@@ -303,6 +370,12 @@ export class BossBrain {
     this.cd -= dt; this.cd2 -= dt;
     if (!best || z.state !== 'walk') return false;
     if (g.side?.active) return this.think2D(best, dist);      // level 5's side-scrolling fight has its own moves
+    if (z.type === 'ferryman') {
+      // close: the sweep (it has its own clock); further: the hook
+      if (dist < 5.2 && this.cd2 <= 0) { this.cd2 = 5 + Math.random() * 1.5; this.cd = Math.max(this.cd, 1.4); return this.startSweep(); }
+      if (this.cd <= 0 && dist > 4.2 && dist < 16) { this.cd = 4.4 + Math.random() * 1.6; return this.startHook(best, dist); }
+      return false;
+    }
     const move = MOVES[z.type][0];
     if (z.enraged && this.cd2 <= 0 && dist > 4 && dist < 15) { this.cd2 = 5.5; return this.startCharge(best, dist); }
     if (this.cd > 0) return false;
@@ -341,7 +414,7 @@ export class BossBrain {
   begin(name, o) { this.act = { name, t: 0, ...o }; this.z.setState('windup'); this.face(o.tx, o.tz); this.wind(name); return true; }
   // every machine poses the wind-up of the move that is coming; the boss says something about it
   wind(name) {
-    const m = { bileWind: 'bile', cleaverWind: 'cleaver', scream: 'scream', chargeWind: 'charge', leapWind: 'leap', quakeWind: 'quake', spitWind: 'spit' }[name] || name;
+    const m = { bileWind: 'bile', cleaverWind: 'cleaver', scream: 'scream', chargeWind: 'charge', leapWind: 'leap', quakeWind: 'quake', spitWind: 'spit', hookWind: 'hook', sweepWind: 'sweep' }[name] || name;
     this.emit({ a: 'wind', m });
     this.z.game.speech?.hostLine(this.z, m, 0.7);
   }
@@ -389,6 +462,65 @@ export class BossBrain {
       return this.end(moved < step * 0.3 ? 1.4 : 0.8);
     }
     return true;
+  }
+
+  // ---- HOOK: a red lane, then the anchor slung down it on its chain; whoever it catches is dragged in to him
+  startHook(best, dist) {
+    const z = this.z;
+    const dx = (best.x - z.x) / dist, dz = (best.z - z.z) / dist;
+    const len = Math.min(16, dist + 2.5);
+    this.act = { name: 'hookWind', t: 0, dx, dz, len };
+    z.setState('windup');
+    this.wind('hookWind');
+    z.face = Math.atan2(dx, dz);
+    this.emit({ a: 'lane', x: +z.x.toFixed(2), z: +z.z.toFixed(2), dx: +dx.toFixed(3), dz: +dz.toFixed(3), len: +len.toFixed(1), dur: 0.8 });
+    return true;
+  }
+  hookWind(dt, a) {
+    if (a.t < 0.8) return true;
+    const z = this.z;
+    const x0 = z.x + a.dx * 0.8, z0 = z.z + a.dz * 0.8;
+    this.emit({ a: 'hook', x: +x0.toFixed(2), z: +z0.toFixed(2), dx: +a.dx.toFixed(3), dz: +a.dz.toFixed(3), len: +a.len.toFixed(1), v: 26 });
+    this.act = { name: 'hooking', t: 0, x0, z0, dx: a.dx, dz: a.dz, len: a.len, d: 0 };
+    this.z.setState('walk');
+    return true;
+  }
+  hooking(dt, a) {
+    const z = this.z, g = z.game;
+    a.d += 26 * dt;
+    const px = a.x0 + a.dx * a.d, pz = a.z0 + a.dz * a.d;
+    for (const p of g.players.values()) {
+      if (!p.alive || Math.hypot(p.x - px, p.z - pz) > 1.2) continue;
+      // dragged in: pushed TOWARD him (the blow comes from behind the survivor, along the throw)
+      const dd = Math.hypot(p.x - z.x, p.z - z.z);
+      g.hurtPlayer(p, 22, { x: p.x + a.dx, z: p.z + a.dz }, Math.max(0, Math.min(10, dd - 2.8)));
+      this.emit({ a: 'hooked', pid: p.id, x: +p.x.toFixed(2), z: +p.z.toFixed(2) });
+      g.speech?.hostLine(z, 'bite', 0.6);
+      return this.end(0.9);
+    }
+    if (a.d >= a.len) return this.end(0.6);
+    return true;
+  }
+
+  // ---- SWEEP: a ring round him, then the anchor whirls once round at the end of its chain
+  startSweep() {
+    const z = this.z;
+    this.act = { name: 'sweepWind', t: 0 };
+    z.setState('windup');
+    this.wind('sweepWind');
+    this.emit({ a: 'ring', x: +z.x.toFixed(2), z: +z.z.toFixed(2), r: 5.6, dur: 1.0 });
+    return true;
+  }
+  sweepWind(dt, a) {
+    if (a.t < 1.0) return true;
+    const z = this.z, g = z.game;
+    this.emit({ a: 'sweep', x: +z.x.toFixed(2), z: +z.z.toFixed(2), r: 5.6 });
+    for (const p of g.players.values()) {
+      if (!p.alive) continue;
+      const d = Math.hypot(p.x - z.x, p.z - z.z);
+      if (d < 5.6) g.hurtPlayer(p, 28, { x: z.x, z: z.z }, 3.2);
+    }
+    return this.end(1.0);
   }
 
   // ---- BILE: three globs lobbed at you and around you

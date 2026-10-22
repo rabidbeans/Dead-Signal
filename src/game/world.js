@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { prop, surface, tex, propMaterial, instanced, awningMaterial, dirtify } from './assets.js';
 import { populate } from './dress.js';
+import { buildBridge, onBridge, spanHole, DECK_HW } from './bridge.js';
 import { L, LV, MAZE, ZONES, ZONE_HW, zoneAt, blockRanges, buildLots, lampSites } from './level.js';
 import { mulberry } from './rng.js';
 import { Q } from './quality.js';
@@ -418,6 +419,7 @@ export class World {
   build() {
     this.ground();
     this.buildings();
+    buildBridge(this);
     this.streetFurniture();
     this.edges();
     populate(this);
@@ -434,15 +436,26 @@ export class World {
     const asphalt = surface('asphalt');          // (never between the camera and a survivor: no cut-away, no discard)
     asphalt.name = 'asphalt';
     this.wetMaterial(asphalt, 0.75);
-    const len = L.zMax - L.zMin + 60;
-    const g = new THREE.PlaneGeometry(90, len);
-    tiled(g, 90 / 4, len / 4);
-    const road = new THREE.Mesh(g, asphalt);
-    road.rotation.x = -Math.PI / 2;
-    road.position.z = (L.zMax + L.zMin) / 2;
-    road.receiveShadow = true;
-    road.userData.noMerge = true;
-    this.add(road);
+    // the street's asphalt: one sheet, or (level 6) the two shores and the bridge deck between them, with a hole where
+    // the lift span is raised
+    const sheet = (x0, x1, z0, z1) => {
+      const w = x1 - x0, d = z1 - z0;
+      const g = new THREE.PlaneGeometry(w, d);
+      tiled(g, w / 4, d / 4);
+      const road = new THREE.Mesh(g, asphalt);
+      road.rotation.x = -Math.PI / 2;
+      road.position.set((x0 + x1) / 2, 0, (z0 + z1) / 2);
+      road.receiveShadow = true;
+      road.userData.noMerge = true;
+      this.add(road);
+    };
+    if (L.bridge) {
+      const B = L.bridge, [hN, hS] = spanHole();
+      sheet(-45, 45, B.zS, L.zMax + 30);
+      sheet(-45, 45, L.zMin - 30, B.zN);
+      sheet(-DECK_HW - 0.3, DECK_HW + 0.3, hS, B.zS);
+      sheet(-DECK_HW - 0.3, DECK_HW + 0.3, B.zN, hN);
+    } else sheet(-45, 45, L.zMin - 30, L.zMax + 30);
 
     // sidewalks: raised slabs with concrete curbs, along each side of each block
     const walk = surface('sidewalk');
@@ -451,6 +464,18 @@ export class World {
     const curbMat = surface('concrete');
     const blocks = this.blocks = [];
     for (const [zN, zS] of clipZones(blockRanges())) for (const side of [-1, 1]) blocks.push(side < 0 ? [-80, -7, zN, zS] : [7, 80, zN, zS]);
+    // on the bridge the sidewalks are a strip along each railing (and none over the span's hole)
+    if (L.bridge) {
+      const B = L.bridge, [hN, hS] = spanHole(), out = [];
+      for (const [x0, x1, z0, z1] of blocks) {
+        const narrow = (a, b) => { if (b - a > 0.3) out.push(x0 < 0 ? [-DECK_HW, -7, a, b] : [7, DECK_HW, a, b]); };
+        if (z0 < B.zN) out.push([x0, x1, z0, Math.min(z1, B.zN)]);
+        if (z1 > B.zS) out.push([x0, x1, Math.max(z0, B.zS), z1]);
+        const a = Math.max(z0, B.zN), b = Math.min(z1, B.zS);
+        if (b > a) { narrow(a, Math.min(b, hN)); narrow(Math.max(a, hS), b); }
+      }
+      blocks.length = 0; blocks.push(...out);
+    }
     for (const [x0, x1, z0, z1] of blocks) {
       const w = x1 - x0, d = z1 - z0;
       const slab = new THREE.Mesh(worldBox(w, 0.15, d, 3), [walk, walk, walk, walk, walk, walk]);
@@ -459,7 +484,7 @@ export class World {
       this.add(slab);
       const edges = [];
       edges.push(x0 > -79 ? [x0 + 0.12, (z0 + z1) / 2, 0.24, d] : [x1 - 0.12, (z0 + z1) / 2, 0.24, d]);
-      if (z0 > L.zMin + 0.5) edges.push([(x0 + x1) / 2, z0 + 0.12, w, 0.24]);
+      if (z0 > L.zMin + 0.5 && !(L.bridge && Math.abs(z0 - spanHole()[0]) < 0.1)) edges.push([(x0 + x1) / 2, z0 + 0.12, w, 0.24]);
       if (z1 < L.zMax - 0.5) edges.push([(x0 + x1) / 2, z1 - 0.12, w, 0.24]);
       for (const [cx, cz, ew, ed] of edges) {
         const c = new THREE.Mesh(worldBox(ew, 0.17, ed, 1.5), curbMat);
@@ -483,7 +508,8 @@ export class World {
       p.receiveShadow = true;
       this.add(p);
     };
-    const nearCross = (z, pad) => L.cross.some((c) => Math.abs(z - c) < pad) || !!zoneAt(z, 2);
+    const hole = L.bridge ? spanHole() : null;
+    const nearCross = (z, pad) => L.cross.some((c) => Math.abs(z - c) < pad) || !!zoneAt(z, 2) || (hole && z > hole[0] - 2 && z < hole[1] + 2);
     for (let z = L.zMax - 3; z > L.zMin; z -= 6) {
       if (nearCross(z, 8.5)) continue;
       strip(-0.12, z, 0.12, 3, yellow); strip(0.12, z, 0.12, 3, yellow);
@@ -495,7 +521,7 @@ export class World {
     for (const zc of L.cross) {
       for (let k = -4; k <= 4; k++) { strip(k * 1.2, zc - 7.2, 0.55, 2.6, paint); strip(k * 1.2, zc + 7.2, 0.55, 2.6, paint); }
       for (let k = -4; k <= 4; k++) { strip(-8.6, zc + k * 1.0, 2.6, 0.5, paint); strip(8.6, zc + k * 1.0, 2.6, 0.5, paint); }
-      for (let x = -L.xWall + 2; x < L.xWall; x += 6) if (Math.abs(x) > 12 && !zoneAt(zc, 2)) strip(x, zc, 3, 0.14, yellow);
+      for (let x = -L.xWall + 2; x < L.xWall; x += 6) if (Math.abs(x) > 12 && !zoneAt(zc, 2) && !onBridge(zc, 4)) strip(x, zc, 3, 0.14, yellow);
     }
     this.asphalt = asphalt;
   }
@@ -810,7 +836,7 @@ float wetG = smoothstep(0.25, 0.7, wetMask(vRoughnessMapUv)) * ${amount.toFixed(
     const nearLamp = (z) => lamps.some((l) => Math.abs(l.z - z) < 2.5);
     for (const [zN, zS] of blockRanges()) {
       for (let z = zS - 3; z > zN + 2; z -= 5 + rng() * 5) {
-        if (nearLamp(z) || L.gate.some((g) => Math.abs(g - z) < 6) || MAZE.some((r) => Math.abs(r.z - z) < 3.5) || z < L.zMin + 9 || z > 31 || zoneAt(z, 3)) continue;
+        if (nearLamp(z) || L.gate.some((g) => Math.abs(g - z) < 6) || MAZE.some((r) => Math.abs(r.z - z) < 3.5) || z < L.zMin + 9 || z > 31 || zoneAt(z, 3) || onBridge(z, 2)) continue;
         for (const side of [-1, 1]) {
           const r = rng();
           if (r > 0.55) continue;
@@ -839,7 +865,7 @@ float wetG = smoothstep(0.25, 0.7, wetMask(vRoughnessMapUv)) * ${amount.toFixed(
     for (const Z of ZONES) for (const sd of [-1, 1]) this.col.box(sd * (ZONE_HW + 3.25), (Z.zTop + Z.zBot) / 2, 3, (Z.zTop - Z.zBot) / 2 + 2, 0, 6);
     this.spawns = [{ x: -3, z: b.maxZ - 2 }, { x: 3, z: b.maxZ - 2 }];
     // (the cross streets are sealed at x ±13.2 by dress.js: the dead come out of the stub in front of the barricade)
-    for (const zc of L.cross) this.spawns.push({ x: -11.4, z: zc - 1.5 }, { x: -11.4, z: zc + 1.5 }, { x: 11.4, z: zc - 1.5 }, { x: 11.4, z: zc + 1.5 });
+    for (const zc of L.cross) { const sx = onBridge(zc) ? 8.6 : 11.4; this.spawns.push({ x: -sx, z: zc - 1.5 }, { x: -sx, z: zc + 1.5 }, { x: sx, z: zc - 1.5 }, { x: sx, z: zc + 1.5 }); }
   }
 
   // ------------------------------------------------------------ gates --
@@ -850,6 +876,8 @@ float wetG = smoothstep(0.25, 0.7, wetMask(vRoughnessMapUv)) * ${amount.toFixed(
     for (const c of g.cols) { this.col.remove(c); this.nav?.rebuildAround(c); }
     g.t = instant ? 1 : 0;
     g.instant = instant;
+    // (a checkpoint restart: the gate is simply open - the leaves used to be left standing shut)
+    if (instant) { if (g.anim) g.anim(1); else g.leaves.forEach((lf, i) => { lf.position.x = lf.userData.x0 + (i ? 1 : -1) * 9.4; }); }
     this.onGate?.(k, instant);
   }
 
@@ -987,7 +1015,8 @@ float wetG = smoothstep(0.25, 0.7, wetMask(vRoughnessMapUv)) * ${amount.toFixed(
       if (g.open && g.t < 1) {
         g.t = Math.min(1, g.t + dt / 2.2);
         const k = g.t * g.t * (3 - 2 * g.t);
-        g.leaves.forEach((lf, i) => { lf.position.x = lf.userData.x0 + (i ? 1 : -1) * 9.4 * k; });
+        if (g.anim) g.anim(k);                // (the bridge's lift span comes down instead)
+        else g.leaves.forEach((lf, i) => { lf.position.x = lf.userData.x0 + (i ? 1 : -1) * 9.4 * k; });
         if (g.t >= 1) g.onDone?.();
       }
       g.beacon?.material.color.set(g.open ? 0x20ff60 : 0xff2a1a);

@@ -38,6 +38,16 @@ export const LINES = {
     die: ['Clocking... out...', 'Under... construction...'],
     idle: ["I'm the boss of this site!", "Let's lay some foundations. With your BONES!", 'Union says I get a lunch break. YOU.', "Building a better tomorrow... out of YOU!", 'Sledge-ing you is part of the job!'],
   },
+  ferryman: {
+    spawn: ['Fare, please. Your LIFE will do.', 'Last crossing of the night!', "Nobody crosses MY river."],
+    hook: ['GET OVER HERE!', "You're my catch of the day!", 'Hooked, line and SINKER!', 'Reel it IN!'],
+    sweep: ['ALL ABOARD!', 'Man OVERBOARD!', 'Batten down the hatches!'],
+    call: ['RISE, my crew!', 'All hands on DECK!', 'The river gives back its DEAD!'],
+    bite: ['Anchors AWEIGH!', 'Down to Davy Jones with you!', 'Sunk!'],
+    hurt: ['Rough waters!', "I've weathered WORSE storms!", 'A leak! A LEAK!'],
+    die: ['The tide... turns...', 'Going... under...'],
+    idle: ['The river always gets its due.', "Pay the toll or swim. You can't swim.", 'Row, row, row your BOAT... into my MOUTH!', 'I ferry souls. Yours is next.', "Water under the bridge? You're ABOUT to be."],
+  },
   omega: {
     spawn: ['I AM THE ALPHA AND THE OMEGA!', 'TESTING, TESTING... ONE, TWO, CHEW!'],
     scream: ['COME, MY LAB RATS!', 'DINNER BELL! RING RING!', 'EVERYBODY... GROUP HUG!'],
@@ -52,7 +62,7 @@ export const LINES = {
 };
 
 const _v = new THREE.Vector3();
-const BOSS_COL = { warden: '#5a8cff', patientzero: '#9cff4a', butcher: '#ff5040', foreman: '#ffc81a', omega: '#c07aff' };
+const BOSS_COL = { warden: '#5a8cff', patientzero: '#9cff4a', butcher: '#ff5040', foreman: '#ffc81a', omega: '#c07aff', ferryman: '#4ad8ff' };
 
 export class Speech {
   constructor(game) {

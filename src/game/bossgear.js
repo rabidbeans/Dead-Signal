@@ -14,7 +14,7 @@ import { mulberry } from './rig.js';
 const T = {};
 export async function loadBossGear() {
   const g = await loadGLB('props/boss_gear.glb');
-  for (const name of ['riot_helmet', 'riot_shield', 'baton', 'iv_pole', 'cleaver', 'hardhat', 'sledgehammer', 'shackle', 'chain_link', 'canister', 'holster', 'combat_helmet']) {
+  for (const name of ['riot_helmet', 'riot_shield', 'baton', 'iv_pole', 'cleaver', 'hardhat', 'sledgehammer', 'shackle', 'chain_link', 'canister', 'holster', 'combat_helmet', 'anchor', 'souwester']) {
     const o = g.scene.getObjectByName(name);
     if (!o) continue;
     o.traverse((m) => {
@@ -36,6 +36,9 @@ const make = (name) => {
   o.traverse((m) => { if (m.isMesh) m.frustumCulled = false; });
   return o;
 };
+
+// a free copy of one piece (the Ferryman's thrown anchor, boss.js)
+export const bossGearMesh = (name) => make(name);
 
 // one of everything, for Game.warmUp (so no shader is compiled when the boss walks in)
 export const gearPieces = () => [...Object.keys(T).map(make).filter(Boolean), hairPiece()];
@@ -128,6 +131,9 @@ export class BossKit {
     } else if (kind === 'foreman') {
       wear(b.head, 'hardhat', { off: [0, 0.11, 0.005], k: 0.95 });
       this.hammer = free('sledgehammer', 1.15, () => this.hammerPose());
+    } else if (kind === 'ferryman') {
+      wear(b.head, 'souwester', { off: [0, 0.1, -0.005], k: 1.05 });
+      this.anchor = free('anchor', 1.0, () => this.anchorPose());
     } else if (kind === 'omega') {
       for (const side of ['L', 'R']) {
         const el = wp(b[`forearm_${side}`], new THREE.Vector3()), wr = wp(b[`hand_${side}`], new THREE.Vector3());
@@ -249,6 +255,36 @@ export class BossKit {
     const o = this.hammer;
     o.position.copy(grip);
     basis(d, this.lf, o.quaternion);
+  }
+
+  // the Ferryman's anchor: dragged from his right fist, the crown scraping the road behind him; cocked over his shoulder for
+  // the hook (and gone while it flies); straight out from him at the end of his arm while he whirls it round
+  anchorPose() {
+    const z = this.z, b = z.rig.b, an = z.anim, g = z.game;
+    const o = this.anchor;
+    o.visible = !z.anchorOut;
+    const h = wp(b.hand_R, new THREE.Vector3()), f = wp(b.fingers_R, new THREE.Vector3());
+    const grip = h.clone().lerp(f, 0.55);
+    const sh = wp(b.upperarm_R, new THREE.Vector3());
+    let d;
+    if (an.sweep > 0.02) d = new THREE.Vector3().addScaledVector(this.lf, -1).addScaledVector(this.fw, 0.25).addScaledVector(UP, 0.15);
+    else if (an.move === 'hook') d = grip.clone().sub(sh).normalize().addScaledVector(UP, 0.4);
+    else {
+      // hanging, trailing back a little as he walks; the crown on the road
+      d = new THREE.Vector3(0, -1, 0).addScaledVector(this.fw, -0.35 - 0.15 * an.attack).addScaledVector(this.lf, -0.1);
+    }
+    d.normalize();
+    o.position.copy(grip);
+    basis(d, this.fw, o.quaternion);
+    // never through the road: tip it up when the crown would go under
+    const L = 0.95 * this.s;
+    const tipY = grip.y + d.y * L, gy = g.world.groundY(grip.x, grip.z) + 0.05;
+    if (tipY < gy && d.y < 0) {
+      const want = (gy - grip.y) / L;
+      d.y = Math.max(-0.999, want); d.normalize();
+      basis(d, this.fw, o.quaternion);
+      if (Math.random() < 0.08 && z.state === 'walk') g.fx.sparkList.push({ x: grip.x + d.x * L, y: gy, z: grip.z + d.z * L, vx: (Math.random() - 0.5), vy: 0.6, vz: (Math.random() - 0.5), t: 0, max: 0.15 });
+    }
   }
 
   update(dt) {

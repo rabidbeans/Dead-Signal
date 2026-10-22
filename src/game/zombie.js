@@ -30,11 +30,14 @@ export const TYPES = {
     tip: 'LEAPER: it pounces and pins you down. A friend can shoot it off; alone, tap the screen to struggle free.', pounce: { cd: 5, min: 3.2, max: 9, wind: 0.55, dur: 0.5, dps: 12, hold: 4, breakDmg: 55 } },
   soldier: { hp: 270, speed: [1.0, 1.25], turn: 2.6, dmg: 20, models: ['z_soldier'], anim: 'soldier', xp: 4, special: true, kit: true, armor: 0.3, stagger: 0.4, knock: 0.6,
     tip: 'SOLDIER: body armour turns bullets from the front. Flank it, burn it, blow it up, or go for the head.' },
+  drowned: { hp: 150, speed: [1.1, 1.4], turn: 3.0, dmg: 14, models: ['z_drowned'], anim: 'drowned', xp: 3, special: true, stagger: 0.6,
+    tip: 'DROWNED: they climb up out of the river over the railings. Their grip drags you down: you slow while they hold on.', grab: 1.2 },
   // the bosses: one guarding the end of each level, each with its own special move (boss.js). Huge, and they barely flinch.
   warden: { boss: true, name: 'THE WARDEN', trait: 'Riot shield: bullets from the front glance off. Flank her, or shoot her while she is dazed after a charge.', hp: 1150, speed: [0.9, 1.0], turn: 2.2, dmg: 24, scale: 1.7, rad: 0.85, reach: 2.1, windup: 0.85, recover: 1.3, stagger: 0.03, knock: 0.06, models: ['b_warden'], shield: 0.3 },
   patientzero: { boss: true, name: 'PATIENT ZERO', trait: 'Hooked to his drip: he heals if you stop shooting. Keep the pressure on.', hp: 3000, speed: [1.0, 1.1], turn: 2.4, dmg: 32, scale: 1.7, rad: 0.9, reach: 2.2, windup: 0.8, recover: 1.2, stagger: 0.02, knock: 0.05, models: ['b_patientzero'], regen: 0.006 },
   butcher: { boss: true, name: 'THE BUTCHER', trait: 'He smells blood: when you are hurt, he comes faster.', hp: 3800, speed: [1.0, 1.12], turn: 2.6, dmg: 34, scale: 1.8, rad: 0.9, reach: 2.2, windup: 0.75, recover: 1.1, stagger: 0.02, knock: 0.05, models: ['b_butcher'], tint: [1.04, 0.98, 0.98] },
   foreman: { boss: true, name: 'THE FOREMAN', trait: 'Overtime: under half health he swings and leaps faster.', hp: 4600, speed: [0.95, 1.05], turn: 2.3, dmg: 38, scale: 1.85, rad: 0.95, reach: 2.3, windup: 0.85, recover: 1.2, stagger: 0.02, knock: 0.04, models: ['b_foreman'] },
+  ferryman: { boss: true, name: 'THE FERRYMAN', trait: 'He hooks you with his anchor and drags you in. Get out of the ring when he swings it round, and watch for the drowned he calls up.', hp: 5200, speed: [0.95, 1.05], turn: 2.3, dmg: 36, scale: 1.9, rad: 0.95, reach: 2.4, windup: 0.85, recover: 1.2, stagger: 0.02, knock: 0.04, models: ['b_ferryman'] },
   omega: { boss: true, name: 'SUBJECT OMEGA', trait: 'It mutates as it is hurt: bigger and faster every quarter of its health.', hp: 3600, speed: [1.05, 1.15], turn: 2.6, dmg: 40, scale: 1.95, rad: 1.0, reach: 2.4, windup: 0.75, recover: 1.0, stagger: 0.01, knock: 0.03, models: ['b_omega'] },
 };
 
@@ -56,9 +59,10 @@ const _sv = new THREE.Vector3();
 export const SPEED_K = 1.1;      // everything walks 10% faster than the numbers below
 const ATTACK_RANGE = 1.15;
 const WINDUP = 0.5;
+const CLIMB = 1.4;          // seconds to haul itself up over a railing
 
 export class Zombie {
-  constructor(game, id, { type = 'shambler', model = null, seed = 1, x = 0, z = 0, idle = false, home = false, elite = false, el = 0 } = {}) {
+  constructor(game, id, { type = 'shambler', model = null, seed = 1, x = 0, z = 0, idle = false, home = false, elite = false, el = 0, climb = false, cl = 0 } = {}) {
     this.game = game;
     this.id = id;
     this.type = type;
@@ -123,6 +127,8 @@ export class Zombie {
     this.prevState = this.state;
     this.hitT = 99;          // seconds since it was last shot (Patient Zero's drip)
     this.mut = 0;            // Omega's mutations so far
+    // climbing up out of the river over the railing (level 6's drowned), or up out of the water the Ferryman calls
+    if (climb || cl) { this.climbT = CLIMB; this.climbSide = Math.sign(x) || 1; this.face = Math.atan2(-this.climbSide, 0.0001); this.idle = false; this.splash = true; }
   }
 
   place() {
@@ -135,6 +141,7 @@ export class Zombie {
   // ----------------------------------------------------------- host sim --
   think(dt, players) {
     if (this.state === 'dead') { this.deadT += dt; return; }
+    if (this.climbT > 0) return;           // still coming up over the rail
     this.stateT += dt;
     this.hitT += dt;
     // on fire (Dragon's Breath): it burns down, and sets the dead it brushes against alight
@@ -245,7 +252,7 @@ export class Zombie {
       if (this.stateT > windup) {
         // (in the 2D fight the dead cannot climb: a survivor up on a platform is out of reach)
         if (best && dist < reach + 0.35 && (best.y2 || 0) < (this.boss ? 2.7 : 1.3)) {
-          this.game.hurtPlayer(best, this.def.dmg * this.dmgK * (this.enraged ? 1.25 : 1), this, this.type === 'butcher' ? 1.6 : undefined);
+          this.game.hurtPlayer(best, this.def.dmg * this.dmgK * (this.enraged ? 1.25 : 1), this, this.type === 'butcher' ? 1.6 : undefined, this.def.grab);
           this.game.speech?.hostLine(this, 'bite', this.boss ? 0.45 : 0.1);
         }
         this.setState('recover');
@@ -453,6 +460,20 @@ export class Zombie {
       const e = { k: 'boss', a: 'overtime', id: this.id }; g.emit(e); g.bossFx.event(e);
       g.speech?.hostLine(this, 'overtime', 1);
     }
+    // the Ferryman calls the drowned up out of the water every quarter of his health
+    if (this.type === 'ferryman') {
+      const n = now < 0.25 ? 3 : now < 0.5 ? 2 : now < 0.75 ? 1 : 0;
+      if (n > this.mut) {
+        this.mut = n;
+        const e = { k: 'boss', a: 'call', id: this.id, x: +this.x.toFixed(2), z: +this.z.toFixed(2) }; g.emit(e); g.bossFx.event(e);
+        g.speech?.hostLine(this, 'call', 1);
+        for (let i = 0; i < 3 + g.players.size; i++) {
+          const a = Math.random() * 6.283, r = 5 + Math.random() * 3.5;
+          const p = g.world.col.resolve(this.x + Math.cos(a) * r, this.z + Math.sin(a) * r, 0.5);
+          g.after(0.3 + i * 0.25, () => { if (!g.over) g.spawnZombie('drowned', { x: p.x, z: p.z, climb: true }); });
+        }
+      }
+    }
     // Omega mutates every quarter: bigger, faster
     if (this.type === 'omega') {
       const n = now < 0.25 ? 3 : now < 0.5 ? 2 : now < 0.75 ? 1 : 0;
@@ -642,6 +663,24 @@ export class Zombie {
         g.fx.drops.emit({ x: _sv.x, y: _sv.y, z: _sv.z, vx: Math.cos(a) * sp, vy: 1.2 + 2.6 * k, vz: Math.sin(a) * sp, life: 1, s0: 0.05, s1: 0.03, r: 0.3, g: 0.02, b: 0.02, a0: 1, a1: 0.9, grav: 12, floor: g.world.groundY(this.x, this.z) + 0.03, onLand: Math.random() < 0.08 ? (p) => g.fx.splat(p.x, p.z, 0.2) : null });
       }
     }
+    // climbing: it hauls itself up from below the deck's edge, dripping
+    if (this.climbT > 0 && this.alive) {
+      if (this.splash) {
+        // where it comes up: a spray of river water (and a pool of it on dry ground)
+        this.splash = false;
+        const ox = this.x + this.climbSide * 0.6;
+        for (let i = 0; i < 14; i++) g.fx.drops.emit({ x: ox, y: 0.3, z: this.z, vx: (Math.random() - 0.5) * 2.5, vy: 1.5 + Math.random() * 2.5, vz: (Math.random() - 0.5) * 2.5, life: 0.9, s0: 0.05, s1: 0.03, r: 0.5, g: 0.65, b: 0.75, a0: 0.8, a1: 0.4, grav: 11, floor: g.world.groundY(this.x, this.z) + 0.03 });
+        g.fx.mist.emit({ x: ox, y: 0.4, z: this.z, vx: 0, vy: 0.4, vz: 0, life: 1.0, s0: 0.4, s1: 1.4, r: 0.55, g: 0.65, b: 0.72, a0: 0.35, a1: 0, drag: 2 });
+        audio.play('squelch', { x: this.x, z: this.z, vol: 0.7, rate: 0.55 });
+      }
+      this.climbT -= dt;
+      const k = Math.max(0, this.climbT / CLIMB);
+      this.anim.climb = k;
+      this.climbY = -1.9 * k * k;
+      this.climbX = this.climbSide * 0.75 * k;
+      if (Math.random() < dt * 14) g.fx.drops.emit({ x: this.x + this.climbX, y: 0.6 + this.climbY + Math.random() * 0.8, z: this.z, vx: (Math.random() - 0.5) * 0.3, vy: -0.5, vz: (Math.random() - 0.5) * 0.3, life: 0.8, s0: 0.035, s1: 0.02, r: 0.45, g: 0.6, b: 0.7, a0: 0.8, a1: 0.5, grav: 9, floor: -8 });
+      if (this.climbT <= 0) { this.anim.climb = 0; this.climbY = 0; this.climbX = 0; audio.play('squelch', { x: this.x, z: this.z, vol: 0.6, rate: 0.7 }); }
+    }
     // the fall: pivot at the feet, onto the ground over ~0.6 s
     const root = this.char.root;
     if (this.state === 'dead') {
@@ -676,8 +715,12 @@ export class Zombie {
       y += 4 * (lp.h ?? 2.6) * u * (1 - u);
       if (u >= 1) this.leap = null;
     }
-    root.position.set(this.x, y, this.z);
-    root.rotation.set(0, this.boss ? this.vface : this.face, 0);
+    // the Ferryman's sweep: the whole body whirls round once with the anchor
+    let spin = 0;
+    if (this.spinT > 0) { this.spinT -= dt; const u = 1 - Math.max(0, this.spinT) / 0.75; spin = (u * u * (3 - 2 * u)) * Math.PI * 2; }
+    if (this.anim.sweep > 0 && !(this.spinT > 0)) this.anim.sweep = Math.max(0, this.anim.sweep - dt * 3);
+    root.position.set(this.x + (this.climbX || 0), y + (this.climbY || 0), this.z);
+    root.rotation.set(0, (this.boss ? this.vface : this.face) - spin, 0);
     this.kit?.update(dt);
   }
 

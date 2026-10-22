@@ -15,9 +15,9 @@ const cache = new Map();
 export const ZOMBIES = ['z_office', 'z_patient', 'z_worker', 'z_hoodie', 'z_elder', 'z_cop', 'z_nurse', 'z_jogger', 'z_burned', 'z_trucker'];
 export const SURVIVORS = ['survivor_a', 'survivor_b'];
 // the special dead (one per map): their own bodies, never picked for an ordinary zombie
-export const SPECIAL_MODELS = ['z_bloater', 'z_screamer', 'z_spitter', 'z_leaper', 'z_soldier'];
+export const SPECIAL_MODELS = ['z_bloater', 'z_screamer', 'z_spitter', 'z_leaper', 'z_soldier', 'z_drowned'];
 // the five bosses: their own Blender bodies (tools/blender/variants.py b_*), loaded with the level that has them
-export const BOSS_MODELS = { warden: 'b_warden', patientzero: 'b_patientzero', butcher: 'b_butcher', foreman: 'b_foreman', omega: 'b_omega' };
+export const BOSS_MODELS = { warden: 'b_warden', patientzero: 'b_patientzero', butcher: 'b_butcher', foreman: 'b_foreman', omega: 'b_omega', ferryman: 'b_ferryman' };
 
 let maxAniso = 4;
 export function setAnisotropy(renderer) {

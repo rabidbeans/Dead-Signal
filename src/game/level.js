@@ -19,7 +19,7 @@ export const HOLDS = [];
 export const MEDKITS = [];
 export const SUPPLIES = [];
 export const CASES = [];             // the locked hard case with a power weapon: [x, z, weapon id]
-export const SPECIALS = ['bloater', 'screamer', 'spitter', 'leaper', 'soldier'];     // the map each first appears on is its index + 1          // ordnance boxes: [x, z, kind]
+export const SPECIALS = ['bloater', 'screamer', 'spitter', 'leaper', 'soldier', 'drowned'];     // the map each first appears on is its index + 1          // ordnance boxes: [x, z, kind]
 export const AMBUSH = [];
 export const MAZE = [];          // barricade rows: { z, gx (gap centre x), gw (gap width), kind, seed }
 export const LANES = [];         // walls ALONG the street: { x, z0 (south end), z1 (north end), kind, brk: [south, north] | null, seed }
@@ -117,6 +117,24 @@ const LEVELS = {
     theme: { bg: 0x0f140c, fog: 0x1c2616, fogD: 0.017, hemiSky: 0x9ac080, hemiGround: 0x1c2016, hemiI: 1.85, moon: 0xe8ffc8, moonI: 1.55, fogSheet: 0xa8c094, sat: 0.28, lamp: 0xfff0c0, lamp2: 0xff5040, walls: [0xd0d8a0, 0xa0c090, 0xe0c890], accent: [0xffd020, 0x202020], rim: 0xb0ff80 },
     arenas: [{ k: 4 }, { k: 'plaza' }],
   },
+  // (2026-10-22) the helicopter out of Fort Hope went down on the river. The way off is the old suspension bridge.
+  6: {
+    id: 6, name: 'THE CROSSING', kicker: 'LEVEL 6 · THE CROSSING', finale: 'saferoom',
+    objective: 'gate', bridge: true, holdText: 'HOLD THE DECK WHILE THE SPAN LOWERS',
+    banner: 'The bird went down on the river. Cross the bridge, hold the deck while the lift span comes down, and watch the railings.',
+    blurb: 'The helicopter went down on the river. The only way off is the old suspension bridge: lanes of dead cars, the drowned climbing up over the railings, a lift span to bring down, and the Ferryman on the far shore.',
+    L: geo(-94, -224),
+    holds: [
+      { secs: 55, n: 100, lurch: 0.25, runner: 0.25, cap: 28, title: 'THE LIFT SPAN', brutes: 2 },
+      { secs: 40, n: 60, lurch: 0.25, runner: 0.26, cap: 22, title: 'THE FERRYMAN', final: true, boss: 'ferryman', brutes: 2 },
+    ],
+    zHp: 1.34, zSpd: 1.1, brutePop: 0.07, sleepGap: [4.2, 4.2],
+    style: 'bridge', rowGap: [10.5, 2.5], rowKinds: ['cars', 'cars', 'pileup', 'jersey'],
+    heights: [7, 3, 8, 8],
+    signs: [['BAIT & TACKLE', '#4affb0', 7], ['FERRY', '#4ad8ff', 4], ['HARBOR BAR', '#ff5f8a', 6], ['MOTEL', '#ff8a3a', 4.5], ['TOLL', '#ffd34a', 3.5]],
+    theme: { bg: 0x08121a, fog: 0x12222e, fogD: 0.015, hemiSky: 0x7aa8d0, hemiGround: 0x162028, hemiI: 1.9, moon: 0xd8eaff, moonI: 1.65, fogSheet: 0x9ab8cc, sat: 0.3, lamp: 0xffb060, lamp2: 0x7ad0ff, walls: [0xc8b8a0, 0x8fa8c0, 0xd8c8b0], accent: [0xd8402a, 0xf2f2f2], rim: 0x8ad0ff, bridge: 0xb03a26 },
+    arenas: [{ k: 'span' }, { k: 'plaza' }],
+  },
 };
 export const LEVEL_IDS = Object.keys(LEVELS).map(Number);
 export const levelInfo = (n) => LEVELS[n];
@@ -178,7 +196,7 @@ function genMaze(d) {
 }
 
 // the two maze stretches of a level: start -> junction, gate -> boss plaza
-const mazeZones = (d) => [[d.L.start.z - 11, d.L.cross[0] + 13], [d.L.gate[0] - 11, d.L.lz.z + 17]];
+const mazeZones = (d) => [[d.L.start.z - 11, d.L.cross[0] + 13], [d.L.gate[0] - (d.style === 'bridge' ? 17 : 11), d.L.lz.z + 17]];
 const WIDE = { wards: 1, warehouse: 1, canals: 1 };
 function genZones(d) {
   if (!WIDE[d.style]) return [];
@@ -215,6 +233,8 @@ export function setLevel(n) {
   const d = LEVELS[n] || LEVELS[1];
   for (const k of Object.keys(L)) delete L[k];
   Object.assign(L, JSON.parse(JSON.stringify(d.L)));
+  // the bridge's two shores: z 10 in the south, a little before the boss plaza in the north
+  L.bridge = d.bridge ? { zS: 10, zN: d.L.lz.z + 24 } : null;
   HOLDS.splice(0, HOLDS.length, ...d.holds);
   const mz = genMaze(d);
   MAZE.splice(0, MAZE.length, ...mz.rows);
@@ -251,7 +271,7 @@ export function setLevel(n) {
   SUPPLIES.splice(0, SUPPLIES.length, ...sup);
   // one locked case a level, a little off the way through the first stretch (worth the detour)
   {
-    const id = ['crossbow', 'flamer', 'launcher', 'flamer', 'launcher'][d.id - 1] || 'crossbow';
+    const id = ['crossbow', 'flamer', 'launcher', 'flamer', 'launcher', 'crossbow'][d.id - 1] || 'crossbow';
     const z = (d.L.start.z + d.L.cross[0]) / 2 - 6;
     const Z = zoneAt(z);
     let spot = null;
@@ -315,6 +335,16 @@ export function buildLots() {
   });
   // a wide zone pushes the buildings back to its walls: the part of a lot inside the zone's z range starts at ZONE_HW
   let out = lots;
+  // the bridge (level 6): nothing stands over the river
+  if (L.bridge) {
+    const { zS, zN } = L.bridge, keep = [];
+    for (const lot of out) {
+      if (lot.z1 <= zN || lot.z0 >= zS) { keep.push(lot); continue; }
+      if (lot.z0 < zN - 2) keep.push({ ...lot, z1: zN, northCross: false, southCross: false });
+      if (lot.z1 > zS + 2) keep.push({ ...lot, z0: zS, northCross: false });
+    }
+    out = keep;
+  }
   for (const Z of ZONES) {
     const next = [];
     const inner = ZONE_HW + 0.25;

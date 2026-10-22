@@ -218,7 +218,8 @@ export class Player {
       g.hud.hint(g.players.size > 1 ? 'PINNED! Tap fast to break free, or call a friend to shoot it off' : 'PINNED! Tap fast to break free');
       return;
     }
-    const sp = this.down ? 0.7 : this.speed * (this.reloadT > 0 ? 0.92 : 1) * (this.W.moveK || 1);
+    if (this.slowT > 0) this.slowT -= dt;          // a drowned one's grip: you wade
+    const sp = this.down ? 0.7 : this.speed * (this.reloadT > 0 ? 0.92 : 1) * (this.W.moveK || 1) * (this.slowT > 0 ? 0.68 : 1);
     // screen -> world: right is +x, down the screen is +z
     let mx = inp.move.x, mz = inp.move.y;
     const ax = mx * sp, az = mz * sp;

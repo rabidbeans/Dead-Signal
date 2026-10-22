@@ -635,3 +635,52 @@ a way to still encourage old guns ... packa punched ... add all the other stuff 
   contact). No reloads: empty = dropped (`dropPower`), never carried to the next level. Models
   `tools/blender/power_guns.py`, grips in `WEAPON_RIG`, sounds xbow/flame/gl in `tools/sfx_gear.py`.
   QA: `power_test.mjs <lvl>` (opens the case, fires into a crowd, empties it), `flame_dbg.mjs`.
+
+## Round 10 (2026-10-22): juice, twists, challenges, the RIOT-12, level 6 THE CROSSING
+Sam: "come up with more ideas to spruce the game up... graphics, details, visuals, gameplay, guns, fun, twists... even add
+a new level if you want to." (Overnight, unattended.)
+- **Juice** (`src/game/juice.js`, `Juice` on every Game): kill STREAKS (kills within `STREAK_WINDOW` 3.2 s chain; bounty
+  ×(1 + 1%/kill, max +50%); call-outs at `STREAKS` 10/20/35/50/75/100/150 with a cash and XP bonus, `hud.announce`);
+  HIT MARKERS (`hud.mark`, throttled; tick/crit/red kill X, sounds hitmark/killmark); EYE SHINE (one Points draw for the
+  horde, only really lit in your flashlight's cone; per-head positions from the head bone); BLOODY FOOTPRINTS (walk through
+  a pool - `fx.poolPts` - and leave prints, `tex/footprint.webp`). HEAD POPS: a crit kill scales the head bone to ~0
+  (`Zombie.popHead`: gore, bone bits, a neck fountain, `headpop`), never bosses or bloaters. BLOOD ON THE SCREEN
+  (`.bloodfx`, `tex/screenblood.webp`, hits >= 6). BOSS DEATH: `Game.slowmo(2.2, 0.22)` + the camera pins on the body and
+  zooms in (`CameraRig.pin/zoomT`). The camera pulls back up to 12% when 5+ awake dead are within 9 m, 14% near a boss.
+- **Twists**: MUTANTS (`elite` on any ordinary zombie, ~1.5-3% of spawns after 15 s; ×3 hp, ×1.22 speed, ×1.5 damage, glowing
+  orange rim and embers, ×4 bounty; `el` rides `zspawn`); LOOT (`src/game/pickups.js`: the host rolls on every kill, a
+  mutant always drops cash or a throwable, the ordinary dead now and then; `drop` event, `drop_take` message, 35 s life);
+  the SUPPLY DROP (`src/game/supplydrop.js`: once a level, when the lead passes start-42 m, a flare, a helicopter you only
+  hear, a case on a parachute 16-24 m ahead; lands as a red `Cases.addDrop` case (a power weapon + 2 frags) and brings a
+  pack of the dead; `sdrop` event).
+- **Challenges** (`src/game/challenges.js`): three a level, checked on a WIN against `Game.stats` (downs, pops, mutants,
+  caseOpened, dropOpened, bossGun) + time, best streak, accuracy; `save.completeChallenges` gives 1 skill point each, once
+  (`save.data.chal`). Shown on the end card and the menu's level card (`#lc-chal`).
+- **RIOT-12** (`riot12` in weapons.js, opens after beating level 5): drum-fed full-auto 12-gauge, 8 × 22, 4.8/s, 20 rounds.
+  Model `tools/blender/riot12.py`, sounds `tools/sfx_riot.py` (riot0-3), grip in `WEAPON_RIG.riot12`. Prototype WHITEOUT:
+  cryo pellets (`freeze`) - `frostT` slows a body to 40% (bosses 75%), blue tint, and a body that dies frozen SHATTERS.
+  `fr` rides the client's hit message; `zfx` f:'f'.
+- **Level 6 THE CROSSING** (`LEVELS[6]`, `style: 'bridge'`, `L.bridge = { zS: 10, zN: lz.z + 24 }`): the helicopter from
+  level 5 went down on the river. `src/game/bridge.js` builds the suspension bridge between the shores (no lots there,
+  `buildLots` trims them): the river plane (`WATER_Y` -9), the deck slab, red fascia and truss, railings (a 'low' collider
+  the whole length; the river beyond is blocked out to the walls), two towers, main cables + hangers, and the LIFT SPAN
+  (`buildSpan`: the level's gate. Hinged on its NEAR edge so the raised road climbs away from the camera; `tickSpan` lowers
+  it with the hold's progress, `sp.anim` drops it the rest of the way when the hold ends). world.js: the asphalt is split
+  (shores + deck, a hole at `spanHole()`), sidewalks become a strip along each railing, no furniture/cross-street
+  seals/traffic lights/manholes on the bridge (`onBridge(z)`).
+  ⚠️ A checkpoint restart used to leave EVERY gate's leaves standing shut (colliders gone, picture closed): `openGate(...,
+  instant)` now poses the open gate.
+- **THE DROWNED** (special #6, `z_drowned`): `Game.climbers` hauls 1-2 of them up over the railings near a survivor every
+  7-11 s on the bridge (faster in the hold). `climb` (`cl` on `zspawn`): 1.4 s rising from under the deck edge
+  (`climbT/climbX/climbY`, `anim.climb`, SPECIAL_POSE.drowned). Their bite grabs (`def.grab`): `hurtPlayer(..., grab)` sets
+  `p.slowT` (`sl` in the hurt message), the survivor moves at 68%.
+- **THE FERRYMAN** (level 6 boss, `b_ferryman`, gear `anchor` + `souwester` in boss_gear.py): drags his anchor (BossKit
+  `anchorPose`, never through the road), HOOK (a red lane, the anchor slung down it on a chain - BossFX `hooks` - whoever it
+  catches is pulled in to him: the push comes from behind the survivor), SWEEP when you are within 5.2 m (a ring, then he
+  whirls once: `spinT`, `anim.sweep`), and every quarter of his health he CALLS 3+players drowned up out of the ground.
+  BOSS_STYLE.ferryman. 5200 hp.
+- ⚠️ Fixed: kills with a POWER weapon crashed `Game.bank` at the end of a run (no end card) - mastery only counts owned guns.
+- QA (in /home/user/tools/pw): `juice_shots.mjs pop|popclose|eyes|prints|blood|bossdeath|elite`, `twist_test.mjs`,
+  `endcard.mjs`, `shop_riot.mjs`, `span_shots.mjs`, `lvl_shots4.mjs <out> 6`, `obj_bot_imm.mjs` (the bot kept at full health:
+  checks a level's whole flow), `coop_l6.mjs`, `boss_strip.mjs ... 6 special`. Measured: level 6 walked start to win by the
+  immortal bot in 4:45. Not verified: phones, sounds by ear, how hard level 6 is for a person (the weak bot dies at the hold).

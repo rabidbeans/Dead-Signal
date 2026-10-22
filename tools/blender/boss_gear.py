@@ -231,6 +231,42 @@ def build():
     hazard = box('c_label', (0.1, 0.01, 0.08), (0, 0.272, 0.05), M['yellow'], bevel=0.003)
     items.append(join([tank, fluid, hazard] + caps + strap + tubes, 'canister'))
 
+    # ---- THE FERRYMAN (level 6): a ship's anchor (held at its ring, the shank along +Z, the crown and flukes at the far
+    # end) and a yellow sou'wester with the long brim at the back
+    ash = tcyl('an_shank', 0.045, 0.9, (0, 0, 0.47), M['dark'], rot=(0, 0, 0), verts=12)
+    ast = tcyl('an_stock', 0.035, 0.64, (0, 0, 0.12), M['dark'], rot=(R90, 0, 0), verts=10)
+    knobs = [sphere(f'an_knob{s}', 0.05, (0, s * 0.32, 0.12), M['dark'], seg=10, rings=6) for s in (-1, 1)]
+    aring = torus('an_ring', 0.075, 0.018, (0, 0, -0.04), (0, R90, 0), M['steel'], maj=16, mnr=6)
+    crown = sphere('an_crown', 0.075, (0, 0, 0.93), M['dark'], seg=12, rings=8)
+    arms = []
+    for i in range(7):
+        a0 = math.radians(-160 + i * 20)
+        a1 = math.radians(-160 + (i + 1) * 20)
+        p0 = (math.cos(a0) * 0.36, 0.6 - math.sin(a0) * 0.36)
+        p1 = (math.cos(a1) * 0.36, 0.6 - math.sin(a1) * 0.36)
+        cx, cz = (p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2
+        ln = math.hypot(p1[0] - p0[0], p1[1] - p0[1])
+        ang = math.atan2(p1[0] - p0[0], p1[1] - p0[1])
+        arms.append(tcyl(f'an_arm{i}', 0.042, ln * 1.12, (cx, 0, cz), M['dark'], rot=(0, ang, 0), verts=10))
+    flukes = []
+    for s in (-1, 1):
+        fx = s * math.cos(math.radians(20)) * 0.36
+        fz = 0.6 - math.sin(math.radians(-20)) * 0.36 - 0.1
+        bpy.ops.mesh.primitive_cone_add(radius1=0.14, radius2=0.0, depth=0.26, vertices=3, location=(fx, 0, fz), rotation=(0, math.radians(180 - s * 25), 0))
+        f = bpy.context.active_object
+        f.name = f'an_fluke{s}'
+        f.scale = (1, 0.28, 1)
+        f.data.materials.append(M['dark'])
+        flukes.append(f)
+    rustbits = [box(f'an_rust{k}', (0.05, 0.095, 0.04), (0, 0, 0.3 + k * 0.22), M['rust'], bevel=0.006) for k in range(3)]
+    items.append(join([ash, ast, aring, crown] + knobs + arms + flukes + rustbits, 'anchor'))
+
+    sw = shell('sw_dome', 0.15, 0.0, 0, 0.01, (0, 0, 0), M['yellow'])
+    swb = tcyl('sw_brim', 0.21, 0.01, (0, 0.05, -0.005), M['yellow'], rot=(0, 0, 0), verts=32)
+    swb.scale = (1.0, 1.35, 1.0)
+    swt = torus('sw_band', 0.148, 0.007, (0, 0, 0.015), material=M['dark'])
+    items.append(join([sw, swb, swt], 'souwester'))
+
     for ob in items:
         apply_all(ob)
         origin_at(ob)

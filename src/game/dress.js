@@ -16,6 +16,7 @@ import { Q } from './quality.js';
 import { placeObjective } from './objective.js';
 import { buildZones } from './zones.js';
 import { zoneAt } from './level.js';
+import { buildSpan, onBridge } from './bridge.js';
 import { signTexture } from './world.js';
 
 const _q = new THREE.Quaternion();
@@ -84,7 +85,7 @@ export function populate(world) {
   };
 
   // ---- the gates
-  L.gate.forEach((gz, k) => buildGate(world, k, gz, put, floodlight, sandbags, fire));
+  L.gate.forEach((gz, k) => (L.bridge ? buildSpan(world, k, gz, { put, floodlight, sandbags, fire }) : buildGate(world, k, gz, put, floodlight, sandbags, fire)));
 
   // ---- the start: the safe room you came out of, its door open behind you
   world.startRoom = safeRoom(world, 35, 1, true);
@@ -185,6 +186,17 @@ export function populate(world) {
       A.wreck('car_wreck', -16, zc + 1.5, 0.15, 3, true);
       A.wreck('car_sedan', 17, zc - 1.2, -0.2, 5, false);
     },
+    // on the bridge, in front of the lift span: a work crew's trucks left where they stopped, cones, a generator
+    span: (zc, A) => {
+      A.veh('van', -5.0, zc + 4.5, 0.12, 2.95, 1.05, 0xe8e2d0, false, 2.5);
+      A.veh('pickup', 4.6, zc - 3.8, -0.2, 2.7, 1.0, 0xd8a020, true, 1.8);
+      A.sandbags(0.4, zc + 1.2, 0.05);
+      A.put('barrel', -6.6, zc - 2.6, 0, { circle: 0.32, h: 0.9 }); A.fire(-6.6, zc - 2.6);
+      A.put('crate_mil', 6.4, zc + 3.6, 0.2, { box: [0.5, 0.25], h: 0.42, tag: 'low' });
+      A.put('crate_mil', 6.9, zc + 3.0, -0.1, { box: [0.5, 0.25], h: 0.42, tag: 'low' });
+      A.floodlight(-8.5, zc - 0.5, 0.2);
+      A.floodlight(8.5, zc + 1.8, 3.0);
+    },
     // a stalled ambulance convoy: two ambulances nose to tail either side, a burning wreck between
     5: (zc, A) => {
       A.veh('ambulance', -3.9, zc - 4.8, 0.3, 2.95, 1.05, 0xffffff, false, 2.6);
@@ -221,6 +233,7 @@ export function populate(world) {
   // ---- the cross streets are sealed a few metres in (Sam's levels are a linear push: before this a back alley behind
   // the buildings let you walk round the second half of the maze)
   for (const c of zc) for (const side of [-1, 1]) {
+    if (onBridge(c)) continue;             // (no cross street half way over a river)
     const x = side * 13.2;
     if (LV.style === 'yard' || LV.style === 'warehouse') {
       for (const dz of [-2.6, 2.6]) { const m = container(dz > 0 ? 2 : 5); m.position.set(x, 0, c + dz); m.rotation.y = Math.PI / 2; m.scale.x = 0.86; world.add(m); }
@@ -236,6 +249,7 @@ export function populate(world) {
 
   // ---- junction furniture: signals and stop signs at the four corners
   for (const c of zc) {
+    if (onBridge(c)) continue;
     put('traffic_light', 7.7, c + 7.1, Math.PI, { circle: 0.14, h: 6 });
     put('traffic_light', -7.7, c - 7.1, 0, { circle: 0.14, h: 6 });
     put('stop_sign', 7.9, c - 6.9, 0, { circle: 0.06, h: 2.3 });
@@ -584,10 +598,10 @@ export function dressGround(game) {
   const tag = mk('tag', 12, { rough: 0.8 });
   const free = (x, z, r = 0.3) => { const p = world.col.resolve(x, z, r); return Math.abs(p.x - x) + Math.abs(p.z - z) < 1e-3; };
   world.steam = [];
-  for (const c of L.cross) { manhole.add(-1.6, c + 1.4, 1.05, rng() * 6, 0, 0.004); manhole.add(2.2, c - 2.2, 1.05, rng() * 6, 0, 0.004); world.steam.push({ x: -1.6, z: c + 1.4 }); }
-  for (let z = 10; z > L.zMin + 8; z -= 40 + rng() * 20) if (!zoneAt(z, 2)) manhole.add((rng() - 0.5) * 6, z, 1.05, rng() * 6, 0, 0.004);
+  for (const c of L.cross) { if (onBridge(c)) continue; manhole.add(-1.6, c + 1.4, 1.05, rng() * 6, 0, 0.004); manhole.add(2.2, c - 2.2, 1.05, rng() * 6, 0, 0.004); world.steam.push({ x: -1.6, z: c + 1.4 }); }
+  for (let z = 10; z > L.zMin + 8; z -= 40 + rng() * 20) if (!zoneAt(z, 2) && !onBridge(z, 1)) manhole.add((rng() - 0.5) * 6, z, 1.05, rng() * 6, 0, 0.004);
   // storm drains sit in the gutters beside each curb
-  for (let z = 20; z > L.zMin + 6; z -= 18 + rng() * 14) if (!zoneAt(z, 2)) drain.add(rng() < 0.5 ? -5.55 : 5.55, z, 0.85, Math.PI / 2, 0, 0.006);
+  for (let z = 20; z > L.zMin + 6; z -= 18 + rng() * 14) if (!zoneAt(z, 2) && !onBridge(z, 1)) drain.add(rng() < 0.5 ? -5.55 : 5.55, z, 0.85, Math.PI / 2, 0, 0.006);
   // brake marks that end at the wrecks
   const wrecks = world.col.boxes.filter((b) => b.tag === 'solid' && b.hw > 2.3 && b.hw < 3.1 && Math.abs(b.cx) < 6);
   wrecks.slice(0, 12).forEach((b, i) => { if (i % 2 === 0) skid.add(b.cx, b.cz + 4.5, 6.5, 1.57 + (rng() - 0.5) * 0.2, 0, 0.007, 0, 0, 0.55); });
@@ -598,7 +612,7 @@ export function dressGround(game) {
   // spray paint on a few walls
   for (let z = 6; z > L.zMin + 10; z -= 38 + rng() * 22) {
     const side = rng() < 0.5 ? -1 : 1;
-    if (L.cross.some((c) => Math.abs(z - c) < 7) || zoneAt(z, 3)) continue;
+    if (L.cross.some((c) => Math.abs(z - c) < 7) || zoneAt(z, 3) || onBridge(z, 3)) continue;
     tag.add(side * 9.02 - side * 0.01, z, 1.8, 0.0, 0, 1.6 + rng() * 0.9, -side, 0);
   }
 

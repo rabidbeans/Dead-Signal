@@ -244,7 +244,7 @@ export class HUD {
   }
 
   // the top plate and the objective line: the route, or a held junction
-  route({ ob = null, phase, hold, title, left, secs, dist, opened, away, final, gates = 1, name = '', boss = null, finale = 'saferoom' }) {
+  route({ ob = null, phase, hold, title, left, secs, dist, opened, away, final, gates = 1, name = '', boss = null, finale = 'saferoom', holdText = null }) {
     const box = this.el.objBox;
     box.classList.toggle('on', phase === 'run' || phase === 'hold' || phase === 'extract');
     this.el.holdbar.classList.toggle('on', hold >= 0);
@@ -263,7 +263,7 @@ export class HUD {
       this.el.waveLeft.textContent = ob.right;
     } else if (hold >= 0) {
       const t = Math.ceil(left);
-      this.el.obj.textContent = away ? 'GET BACK TO THE GATE' : final ? `HOLD THE LANDING ZONE  ·  ${t} s` : `HOLD THE JUNCTION  ·  ${t} s`;
+      this.el.obj.textContent = away ? 'GET BACK TO THE GATE' : final ? `HOLD THE LANDING ZONE  ·  ${t} s` : `${holdText || 'HOLD THE JUNCTION'}  ·  ${t} s`;
       this.el.holdfill.style.width = Math.min(100, (1 - left / Math.max(1, secs)) * 100) + '%';
       this.el.waveLabel.textContent = title;
       this.el.waveLeft.textContent = away ? 'PAUSED' : `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
@@ -310,7 +310,7 @@ export class HUD {
     const cp = s.checkpoint || 0;
     const next = win && !s.last;
     const note = win
-      ? (s.last ? 'You made it out of the city. Fort Hope is behind you, and so is the dead city.' : 'The safehouse is open: upgrade your guns with the cash and your survivor with skill points, then on to the next level.')
+      ? (s.last ? 'You made it across the river. The city burns behind you; the dead are on the wrong side of the water.' : 'The safehouse is open: upgrade your guns with the cash and your survivor with skill points, then on to the next level.')
       : (cp > 0 ? `You made it past checkpoint ${cp} of ${s.gates}.` : 'You never got past the first gate.');
     $('.panel', e).innerHTML = `
       <div class="end-kicker">${win ? s.name : (why || 'THE ROUTE CLAIMED ANOTHER')}</div>
